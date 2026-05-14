@@ -427,7 +427,9 @@ async function sendChat() {
   try {
     const reply = await claude(sessionMeta.chatHistory, sysBlocks('Beantworte Fragen zu den Unterlagen. Erkläre präzise, Schritt für Schritt.'));
     sessionMeta.chatHistory.push({ role: 'assistant', content: reply });
-    if (sessionMeta.chatHistory.length > 40) sessionMeta.chatHistory = sessionMeta.chatHistory.slice(-40);
+    if (sessionMeta.chatHistory.length > 20) {
+      sessionMeta.chatHistory = await compressHistory(sessionMeta.chatHistory);
+    }
     await DB.setMeta(sessionId, sessionMeta);
     typ.remove(); addMsg(chatMessages, 'assistant', reply);
   } catch (e) {
@@ -685,6 +687,33 @@ Format:
     document.getElementById('analysis-loading').classList.add('hidden');
     document.getElementById('analysis-idle').classList.remove('hidden');
     alert('Fehler: ' + e.message);
+  }
+}
+
+// ══ CHAT COMPRESSION ══════════════════════════════════════════════════
+
+async function compressHistory(history) {
+  const keep = 8;
+  const old  = history.slice(0, history.length - keep);
+  const recent = history.slice(history.length - keep);
+
+  const convText = old.map(m =>
+    `${m.role === 'user' ? 'Schüler' : 'Lehrer'}: ${m.content}`
+  ).join('\n\n');
+
+  try {
+    const summary = await claude(
+      [{ role: 'user', content: `Fasse dieses Gespräch in max. 150 Wörtern zusammen. Wichtige Fakten, Erklärungen und offene Fragen beibehalten:\n\n${convText}` }],
+      [{ type: 'text', text: 'Du fasst Lernunterhaltungen prägnant zusammen.' }],
+      400,
+    );
+    return [
+      { role: 'user',      content: `[Zusammenfassung früherer Unterhaltung: ${summary}]` },
+      { role: 'assistant', content: 'Alles klar, ich habe den bisherigen Kontext erfasst.' },
+      ...recent,
+    ];
+  } catch {
+    return history.slice(-20);
   }
 }
 
