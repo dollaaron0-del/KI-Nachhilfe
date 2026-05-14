@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>KI-Nachhilfelehrer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Upload Screen -->
+  <div id="upload-screen" class="screen active">
+    <div class="upload-container">
+      <div class="logo">🎓</div>
+      <h1>KI-Nachhilfelehrer</h1>
+      <p class="subtitle">Lade deine Vorlesungsfolien als PDF hoch und stelle Fragen dazu</p>
+
+      <div class="upload-card" id="drop-zone">
+        <div class="upload-icon">📄</div>
+        <p class="upload-hint">PDF-Folien auswählen</p>
+        <p class="upload-sub">Bis zu 20 MB</p>
+        <input type="file" id="file-input" accept=".pdf" />
+        <button class="btn-primary" onclick="document.getElementById('file-input').click()">
+          PDF auswählen
+        </button>
+      </div>
+
+      <div id="upload-status" class="upload-status hidden"></div>
+    </div>
+  </div>
+
+  <!-- Chat Screen -->
+  <div id="chat-screen" class="screen">
+    <header class="chat-header">
+      <button class="btn-icon" id="back-btn" title="Andere Folien laden">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+      </button>
+      <div class="header-info">
+        <span class="header-title">Nachhilfelehrer</span>
+        <span class="header-sub" id="header-filename"></span>
+      </div>
+      <button class="btn-icon" id="reset-btn" title="Chat zurücksetzen">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+          <path d="M3 3v5h5"/>
+        </svg>
+      </button>
+    </header>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="welcome-msg">
+        <span class="welcome-icon">👋</span>
+        <p id="welcome-text"></p>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="input-row">
+        <textarea
+          id="user-input"
+          placeholder="Stell mir eine Frage zu deinen Folien..."
+          rows="1"
+          maxlength="2000"
+        ></textarea>
+        <button class="btn-send" id="send-btn">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
