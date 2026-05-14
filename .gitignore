@@ -2,3 +2,5 @@ node_modules/
 uploads/
 .env
 *.pdf
+data/*.json
+data/*.txt

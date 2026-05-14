@@ -10,44 +10,56 @@
 </head>
 <body>
 
-<!-- ══ UPLOAD SCREEN ══════════════════════════════════════════════════════ -->
-<div id="upload-screen" class="screen active">
-  <div class="upload-wrap">
-    <div class="logo">🎓</div>
-    <h1>KI-Nachhilfelehrer</h1>
-    <p class="subtitle">Lade deine Vorlesungsfolien und Probeklausuren hoch</p>
-
-    <div class="upload-card" id="drop-zone">
-      <div class="upload-icon">📄</div>
-      <p class="upload-hint">PDFs hier ablegen oder auswählen</p>
-      <p class="upload-sub">Mehrere Dateien möglich · max. 30 MB pro Datei</p>
-      <input type="file" id="file-input" accept=".pdf" multiple />
-      <button class="btn-primary" onclick="document.getElementById('file-input').click()">PDFs auswählen</button>
+<!-- ══ SUBJECTS SCREEN ════════════════════════════════════════════════════ -->
+<div id="subjects-screen" class="screen active">
+  <header class="subj-header">
+    <div class="subj-header-text">
+      <h1>🎓 Meine Fächer</h1>
+      <p>Wähle ein Fach oder erstelle ein neues</p>
     </div>
+    <button class="btn-new" id="btn-new-subject">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      Neues Fach
+    </button>
+  </header>
 
-    <div id="file-list" class="file-list hidden"></div>
-    <div id="upload-status" class="status-bar hidden"></div>
+  <div class="subj-body">
+    <div class="subj-grid" id="subj-grid"></div>
+    <div class="subj-empty hidden" id="subj-empty">
+      <div class="big-icon">📚</div>
+      <h2>Noch keine Fächer</h2>
+      <p>Erstelle dein erstes Fach und lade deine Unterlagen und Klausuren hoch.</p>
+      <button class="btn-primary" id="btn-first-subject">Erstes Fach erstellen</button>
+    </div>
   </div>
 </div>
 
 <!-- ══ MAIN SCREEN ════════════════════════════════════════════════════════ -->
 <div id="main-screen" class="screen">
 
-  <!-- Header -->
   <header class="app-header">
     <button class="btn-icon" id="back-btn">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
     </button>
     <div class="header-center">
-      <span class="header-title" id="header-label">Nachhilfelehrer</span>
+      <span class="header-title" id="header-label"></span>
       <span class="header-sub" id="header-pages"></span>
     </div>
-    <div class="header-right" id="header-score" style="display:none">
-      <span class="score-chip" id="score-chip">0%</span>
+    <div class="header-right">
+      <span class="score-chip hidden" id="score-chip"></span>
+      <button class="btn-icon" id="btn-add-docs" title="Dokumente hinzufügen">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+      </button>
     </div>
   </header>
 
-  <!-- Mode Tabs -->
   <nav class="mode-tabs">
     <button class="tab active" data-mode="chat">💬 Chat</button>
     <button class="tab" data-mode="quiz">❓ Quiz</button>
@@ -55,123 +67,179 @@
     <button class="tab" data-mode="analysis">📊 Analyse</button>
   </nav>
 
-  <!-- ── CHAT PANEL ── -->
+  <div class="no-docs-banner hidden" id="no-docs-banner">
+    📂 Noch keine Dokumente –
+    <button class="link-btn" id="no-docs-btn">Jetzt hochladen</button>
+  </div>
+
+  <!-- ── CHAT ── -->
   <div id="panel-chat" class="panel active">
     <div class="messages" id="chat-messages">
       <div class="welcome">
         <div class="welcome-icon">💬</div>
-        <p>Stelle mir beliebige Fragen zu deinen Unterlagen. Ich erkläre alles geduldig!</p>
+        <p>Stelle mir beliebige Fragen zu deinen Unterlagen.</p>
       </div>
     </div>
     <div class="input-area">
       <div class="input-row">
-        <textarea id="chat-input" placeholder="Frag mich etwas zu deinen Folien…" rows="1" maxlength="2000"></textarea>
+        <textarea id="chat-input" placeholder="Frag mich etwas…" rows="1" maxlength="2000"></textarea>
         <button class="btn-send" id="chat-send">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+          </svg>
         </button>
       </div>
       <button class="btn-secondary btn-sm" id="chat-reset">Chat löschen</button>
     </div>
   </div>
 
-  <!-- ── QUIZ PANEL ── -->
+  <!-- ── QUIZ ── -->
   <div id="panel-quiz" class="panel">
-    <div class="quiz-content" id="quiz-content">
-      <!-- Idle state -->
-      <div id="quiz-idle" class="quiz-state">
+    <div class="quiz-content">
+      <div id="quiz-idle" class="cx-state">
         <div class="big-icon">🧠</div>
         <h2>Abfrage starten</h2>
-        <p>Ich stelle dir Fragen aus deinen Unterlagen und bewertet deine Antworten (0–3 Punkte).</p>
-        <div id="quiz-progress-summary" class="progress-summary hidden"></div>
-        <button class="btn-primary" id="quiz-start-btn">Frage stellen</button>
+        <p>Ich stelle dir Prüfungsfragen nach strengen Maßstäben und bewerte deine Antworten (0–3 Punkte).</p>
+        <div id="quiz-summary" class="progress-summary hidden"></div>
+        <button class="btn-primary" id="quiz-start-btn">Erste Frage</button>
+        <button class="btn-secondary btn-sm" id="quiz-reset-btn">Quiz zurücksetzen</button>
       </div>
 
-      <!-- Question state -->
-      <div id="quiz-question-state" class="quiz-state hidden">
-        <div class="question-header">
-          <span class="q-number" id="q-number">Frage 1</span>
-          <span class="q-score-running" id="q-score-running"></span>
+      <div id="quiz-q" class="cx-state hidden">
+        <div class="q-header">
+          <span class="q-num" id="q-num">Frage 1</span>
+          <span class="q-score" id="q-score"></span>
         </div>
-        <div class="question-box" id="question-box"></div>
-        <div class="answer-area">
-          <textarea id="quiz-answer" placeholder="Deine Antwort hier…" rows="4" maxlength="3000"></textarea>
-          <button class="btn-primary" id="quiz-submit-btn">Antwort abgeben</button>
+        <div class="q-box" id="q-box">
+          <div class="typing-dots"><span></span><span></span><span></span></div>
+        </div>
+        <div class="a-area">
+          <textarea id="quiz-answer" placeholder="Deine Antwort…" rows="4" maxlength="3000"></textarea>
+          <button class="btn-primary" id="quiz-submit" disabled>Antwort abgeben</button>
         </div>
       </div>
 
-      <!-- Feedback state -->
-      <div id="quiz-feedback-state" class="quiz-state hidden">
-        <div class="feedback-card" id="feedback-card">
-          <div class="feedback-score" id="feedback-score"></div>
-          <div class="feedback-text" id="feedback-text"></div>
-          <div class="correct-answer" id="correct-answer"></div>
+      <div id="quiz-fb" class="cx-state hidden">
+        <div class="fb-card">
+          <div class="fb-score" id="fb-score"></div>
+          <div class="fb-text"  id="fb-text"></div>
+          <div class="fb-correct" id="fb-correct"></div>
         </div>
-        <div class="quiz-actions">
-          <button class="btn-primary" id="quiz-next-btn">Nächste Frage →</button>
-          <button class="btn-secondary" id="quiz-stop-btn">Abbrechen & Auswertung</button>
+        <div class="quiz-btns">
+          <button class="btn-primary" id="quiz-next">Nächste Frage →</button>
+          <button class="btn-secondary" id="quiz-stop">Stopp &amp; Analyse</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ── EXAM PANEL ── -->
+  <!-- ── EXAM ── -->
   <div id="panel-exam" class="panel">
     <div class="exam-content">
-      <div id="exam-idle" class="exam-state">
+      <div id="exam-idle" class="cx-state">
         <div class="big-icon">📝</div>
-        <h2>Probeklausur erstellen</h2>
-        <p>Ich generiere eine realistische Klausur mit Multiple-Choice, Kurzantworten und ausführlichen Fragen – inklusive Lösungsschlüssel.</p>
-        <div class="difficulty-picker">
+        <h2>Probeklausur</h2>
+        <p>Ich erstelle eine anspruchsvolle Klausur mit Multiple-Choice, Kurzantworten und Aufsatzfragen.</p>
+        <div class="diff-row">
           <span>Schwierigkeit:</span>
-          <div class="btn-group">
+          <div class="diff-group">
             <button class="diff-btn active" data-diff="leicht">Leicht</button>
             <button class="diff-btn" data-diff="mittel">Mittel</button>
             <button class="diff-btn" data-diff="schwer">Schwer</button>
           </div>
         </div>
-        <button class="btn-primary" id="exam-generate-btn">Klausur generieren</button>
+        <button class="btn-primary" id="exam-gen-btn">Klausur generieren</button>
       </div>
 
-      <div id="exam-loading" class="exam-state hidden">
+      <div id="exam-loading" class="cx-state hidden">
         <div class="big-icon spin">⚙️</div>
         <p>Klausur wird erstellt…</p>
       </div>
 
-      <div id="exam-result" class="exam-state hidden">
+      <div id="exam-result" class="cx-state hidden">
         <div class="exam-toolbar">
           <button class="btn-secondary btn-sm" id="exam-new-btn">Neue Klausur</button>
-          <button class="btn-secondary btn-sm" id="exam-toggle-answers">Lösungen anzeigen</button>
-          <button class="btn-secondary btn-sm" id="exam-print-btn">🖨 Drucken</button>
+          <button class="btn-secondary btn-sm" id="exam-ans-btn">Lösungen anzeigen</button>
+          <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
         </div>
         <div class="exam-body" id="exam-body"></div>
       </div>
     </div>
   </div>
 
-  <!-- ── ANALYSIS PANEL ── -->
+  <!-- ── ANALYSIS ── -->
   <div id="panel-analysis" class="panel">
     <div class="analysis-content">
-      <div id="analysis-idle" class="analysis-state">
+      <div id="analysis-idle" class="cx-state">
         <div class="big-icon">📊</div>
         <h2>Lernstandsanalyse</h2>
-        <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen, damit ich deine Vorbereitung analysieren kann.</p>
-        <button class="btn-primary" id="analysis-run-btn" disabled>Analyse erstellen</button>
+        <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen für eine Analyse.</p>
+        <div class="pessimism-note">⚠️ Bewusst pessimistische Einschätzung – um falsche Sicherheit zu vermeiden.</div>
+        <button class="btn-primary" id="analysis-btn" disabled>Analyse erstellen</button>
       </div>
 
-      <div id="analysis-loading" class="analysis-state hidden">
+      <div id="analysis-loading" class="cx-state hidden">
         <div class="big-icon spin">🔍</div>
-        <p>Analyse wird erstellt…</p>
+        <p>Analysiere deinen Lernstand…</p>
       </div>
 
-      <div id="analysis-result" class="analysis-state hidden">
-        <div class="readiness-gauge" id="readiness-gauge"></div>
+      <div id="analysis-result" class="cx-state hidden">
+        <div class="gauge" id="gauge"></div>
+        <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
         <div class="analysis-body" id="analysis-body"></div>
-        <button class="btn-secondary btn-sm" id="analysis-refresh-btn" style="margin-top:16px">Neu analysieren</button>
+        <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
       </div>
     </div>
   </div>
 
 </div><!-- /main-screen -->
+
+<!-- ══ SUBJECT CREATION MODAL ═════════════════════════════════════════════ -->
+<div id="subj-modal" class="sheet-overlay hidden">
+  <div class="sheet-bg" id="subj-modal-bg"></div>
+  <div class="sheet" id="subj-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">Neues Fach</h2>
+
+    <div class="field">
+      <label class="field-lbl">Fachname</label>
+      <input class="field-inp" id="subj-name" type="text"
+             placeholder="z.B. Statistik, Org. Chemie, BWL…" maxlength="50" autocomplete="off" />
+    </div>
+
+    <div class="field">
+      <label class="field-lbl">Symbol</label>
+      <div class="icon-grid" id="icon-grid"></div>
+    </div>
+
+    <div class="field">
+      <label class="field-lbl">Farbe</label>
+      <div class="color-row" id="color-row"></div>
+    </div>
+
+    <button class="btn-primary" id="subj-create-btn">Fach erstellen</button>
+  </div>
+</div>
+
+<!-- ══ UPLOAD SHEET ═══════════════════════════════════════════════════════ -->
+<div id="upload-sheet" class="sheet-overlay hidden">
+  <div class="sheet-bg" id="upload-bg"></div>
+  <div class="sheet" id="upload-inner">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title" id="upload-title">Dokumente hochladen</h2>
+
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-icon">📄</div>
+      <p class="drop-hint">PDFs ablegen oder auswählen</p>
+      <p class="drop-sub">Mehrere Dateien möglich · max. 30 MB pro Datei</p>
+      <input type="file" id="upload-input" accept=".pdf" multiple />
+      <button class="btn-secondary"
+              onclick="document.getElementById('upload-input').click()">PDFs auswählen</button>
+    </div>
+
+    <div id="upload-status" class="sheet-status hidden"></div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>
