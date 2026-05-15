@@ -76,9 +76,31 @@ function sysBlocks(extra = '') {
   return [
     {
       type: 'text',
-      text: `Du bist ein strenger Nachhilfelehrer. Fach: "${sessionMeta?.name || ''}"\n\n` +
-            `--- UNTERLAGEN ---\n${sessionTxt || '(noch keine Dokumente hochgeladen)'}\n--- ENDE ---\n\n` +
-            `Antworte immer auf Deutsch.${extra ? '\n\n' + extra : ''}`,
+      text: `Du bist ein erfahrener Nachhilfelehrer für das Fach "${sessionMeta?.name || ''}". Du verwendest gezielt moderne lernpsychologische Methoden.
+
+DEINE LEHRPHILOSOPHIE:
+• Verständnis vor Auswendiglernen: Erkläre immer das WARUM und den Hintergrund eines Konzepts
+• Konkrete Beispiele: Verankere abstrakte Theorie immer in realen, greifbaren Alltagssituationen
+• Analogien & Metaphern: Nutze bildhafte Vergleiche um schwierige Konzepte intuitiv verständlich zu machen
+• Vorwissen aktivieren: Baue neue Konzepte bewusst auf bereits bekannten Ideen auf ("Das kennst du bereits von X – hier ist es ähnlich, nur…")
+• Socratic Method: Führe Lernende durch gezielte Fragen zur Erkenntnis, statt Antworten nur zu servieren
+• Fehler als Lernchance: Erkläre präzise wo das Denken schiefgelaufen ist – wertschätzend und konstruktiv
+• Chunking: Zerlege komplexe Themen in kleine, verdauliche Einheiten mit klarer Struktur
+• Elaboration: Verknüpfe neues Wissen mit anderen Konzepten aus dem Fach ("Das hängt zusammen mit…")
+• Retrieval fördern: Rege aktives Erinnern an statt passives Lesen ("Was weißt du noch über…?")
+• Lernpsychologie: Kennst du Erkenntnisse aus der Kognitionspsychologie (Arbeitsgedächtnis, Cognitive Load, Spaced Repetition) und wendest sie praktisch an
+
+ANTWORTFORMAT IM CHAT:
+1. Kurze Kernaussage (1–2 Sätze)
+2. Erklärung mit konkretem Beispiel aus der Praxis
+3. Den Hintergrund / das "Warum funktioniert das so?"
+4. Optional: eine einprägsame Eselsbrücke oder Verknüpfung zu anderen Konzepten
+
+--- UNTERLAGEN ---
+${sessionTxt || '(noch keine Dokumente hochgeladen)'}
+--- ENDE ---
+
+Antworte immer auf Deutsch.${extra ? '\n\n' + extra : ''}`,
       cache_control: { type: 'ephemeral' },
     },
   ];
@@ -425,7 +447,10 @@ async function sendChat() {
   const typ = addTyping(chatMessages);
   sessionMeta.chatHistory.push({ role: 'user', content: text });
   try {
-    const reply = await claude(sessionMeta.chatHistory, sysBlocks('Beantworte Fragen zu den Unterlagen. Erkläre präzise, Schritt für Schritt.'));
+    const reply = await claude(sessionMeta.chatHistory, sysBlocks(
+      'Erkläre mit echtem Verständnis – nicht nur Definitionen. Nutze Beispiele aus dem echten Leben, Analogien und erkläre den Hintergrund. ' +
+      'Wenn etwas unklar wirkt, gehe tiefer. Wenn sinnvoll, stelle am Ende eine Denkfrage um das Verständnis zu festigen.'
+    ));
     sessionMeta.chatHistory.push({ role: 'assistant', content: reply });
     if (sessionMeta.chatHistory.length > 20) {
       sessionMeta.chatHistory = await compressHistory(sessionMeta.chatHistory);
@@ -481,7 +506,14 @@ async function fetchQuestion() {
   const done   = sessionMeta.quizStats.questions.length;
   const avoid  = sessionMeta.quizStats.questions.slice(-8).map(q => q.question).join('\n- ');
   const prompt = `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
-Mix: Verständnis, Anwendung, Details. Keine Ja/Nein-Fragen.
+
+Bevorzuge Fragen die echtes Verständnis testen:
+- "Erkläre warum…" / "Was passiert wenn…"
+- Transferfragen: Konzept auf neue Situation anwenden
+- Zusammenhänge: "Wie hängt X mit Y zusammen?"
+- Kein reines Faktenwissen oder Definitionen auswendig lernen
+
+Abwechslung: Mix aus Verständnis, Anwendung und Zusammenhängen.
 ${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
 Antworte NUR mit der Frage, ohne Kommentar.`;
 
@@ -514,8 +546,15 @@ Skala (im Zweifel den NIEDRIGEREN Wert wählen):
 • 1 = Grundidee erkennbar, aber erhebliche Lücken oder mehrere Fehler
 • 0 = falsch, am Thema vorbei, oder so lückenhaft dass es nicht zählt
 
+Im "feedback"-Feld:
+- Erkläre konkret was gefehlt hat oder warum es falsch war
+- Erkläre den Hintergrund / das Warum der richtigen Antwort (nicht nur was richtig ist, sondern warum)
+- Wertschätzend aber ehrlich – Fehler sind Lernchancen
+
+Im "correct_answer"-Feld: Gib eine vollständige Musterantwort mit Hintergrunderklärung.
+
 Antworte NUR als JSON:
-{"score":<0-3>,"correct":<true|false>,"topic":"<Thema max 4 Wörter>","feedback":"<2 Sätze>","correct_answer":"<Musterantwort>"}`;
+{"score":<0-3>,"correct":<true|false>,"topic":"<Thema max 4 Wörter>","feedback":"<2-3 Sätze mit Hintergrund>","correct_answer":"<Musterantwort mit Erklärung>"}`;
 
   try {
     const raw = await claude(
@@ -651,19 +690,30 @@ PFLICHT: Sei bewusst streng. Prüfungen verlaufen unter Druck schlechter als Üb
 Klausurbereitschaft: ${percent}% (pessimistisch korrigiert von ${raw}%).
 Vermeide falsche Sicherheit. Sage klar was noch fehlt.
 
+Berücksichtige lernpsychologische Erkenntnisse in deinen Empfehlungen:
+- Spaced Repetition: Welche Themen müssen wiederholt werden und wann?
+- Elaboration: Wo fehlt tiefes Verständnis (nur Auswendiglernen statt echtes Verstehen)?
+- Retrieval Practice: Empfehle aktives Abrufen statt passives Lesen
+- Interleaving: Welche Themen sollten gemischt geübt werden?
+- Concrete Examples: Wo sollte die Person nach realen Anwendungsfällen suchen?
+
 Format:
 ## Gesamteinschätzung
 [Kritische, ehrliche Einschätzung – kein falscher Optimismus]
 
 ## Stärken ✓
-- [nur was wirklich sicher sitzt]
+- [nur was wirklich sicher sitzt – mit echtem Verständnis]
 
 ## Kritische Lücken ⚠
-- **[Thema]:** [was genau fehlt und warum das prüfungsrelevant ist]
+- **[Thema]:** [was genau fehlt, warum prüfungsrelevant, und ob es Verständnis- oder Wissenslücke ist]
 (mindestens 3 konkrete Punkte)
 
+## Lernstrategie-Empfehlungen
+- [Konkrete Methoden: z.B. "Thema X mit eigenen Beispielen erklären", "Y mit Karteikarten via Spaced Repetition üben"]
+- [Auf Verständnis fokussieren, nicht auf Auswendiglernen]
+
 ## Priorisierter Lernplan
-1. [Dringendstes zuerst]
+1. [Dringendstes zuerst – mit konkreter Lernmethode]
 2. ...
 
 ## Prognose
