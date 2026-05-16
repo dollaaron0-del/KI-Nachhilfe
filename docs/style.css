@@ -522,3 +522,174 @@ html, body {
   .exam-body { box-shadow: none; padding: 0; }
   .answers-hidden .ans-section { display: block !important; }
 }
+
+/* ── Dark Mode ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:      #1c1c1e;
+  --surface: #2c2c2e;
+  --text:    #f2f2f7;
+  --text2:   #aeaeb2;
+  --border:  #3a3a3c;
+  --shadow:  0 2px 14px rgba(0,0,0,.45);
+}
+[data-theme="dark"] #subjects-screen {
+  background: linear-gradient(160deg, #1c1c2e 0%, #1c1c1e 55%);
+}
+[data-theme="dark"] #setup-screen {
+  background: linear-gradient(160deg, #1c1c2e, #1c1c1e 60%);
+}
+[data-theme="dark"] .subj-header { background: rgba(44,44,46,.88); }
+[data-theme="dark"] .bubble code  { background: #3a3a3c; }
+[data-theme="dark"] .fb-correct   { background: #1a2e1a; color: #4cd964; border-color: #2d6a3f; }
+[data-theme="dark"] .no-docs-banner { background: #2a2000; color: #ffd60a; border-color: #3d3000; }
+[data-theme="dark"] .pessimism-note { background: #2a2000; color: #ffd60a; border-color: #604000; }
+[data-theme="dark"] .field-inp  { background: var(--bg); }
+[data-theme="dark"] .drop-zone  { background: var(--bg); }
+[data-theme="dark"] .input-row  { background: var(--bg); }
+[data-theme="dark"] #quiz-answer { background: var(--surface); }
+[data-theme="dark"] .icon-btn.selected { background: #2c2c4e; }
+[data-theme="dark"] .drop-zone.drag-over { background: #1e1e3e; border-color: var(--accent); }
+
+/* ── Subject footer ──────────────────────────────────────────────────────── */
+.subj-foot {
+  position: absolute; bottom: 24px; right: 20px;
+  display: flex; gap: 6px; align-items: center;
+}
+.foot-btn {
+  background: none; border: none; font-size: 24px;
+  cursor: pointer; opacity: .5; transition: opacity .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.foot-btn:active { opacity: 1; }
+
+/* ── "Anders erklären" rephrase button ───────────────────────────────────── */
+.btn-rephrase {
+  margin-top: 4px; align-self: flex-start;
+  background: none; border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px 10px; font-size: 13px;
+  color: var(--text2); cursor: pointer;
+  transition: background .15s; -webkit-tap-highlight-color: transparent;
+}
+.btn-rephrase:active { background: var(--border); }
+
+/* ── Schwächen note ──────────────────────────────────────────────────────── */
+.bubble.weak-note {
+  background: #fff8e1; color: #7a5800;
+  border-left: 3px solid var(--yellow);
+  box-shadow: none;
+}
+[data-theme="dark"] .bubble.weak-note { background: #2a2000; color: #ffd60a; }
+
+/* ── Blitz-Quiz button ───────────────────────────────────────────────────── */
+.btn-blitz { background: #ff9500 !important; }
+.btn-blitz:active:not(:disabled) { background: #e08000 !important; }
+.btn-blitz:disabled { background: var(--border) !important; color: var(--text2) !important; }
+
+/* ── Multiple-Choice grid ────────────────────────────────────────────────── */
+.mc-grid { width: 100%; display: flex; flex-direction: column; gap: 10px; }
+.mc-btn {
+  width: 100%; background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 12px; padding: 13px 14px; font-size: 16px; text-align: left;
+  cursor: pointer; display: flex; align-items: center; gap: 10px;
+  color: var(--text); transition: background .15s, border-color .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.mc-btn:active:not(:disabled) { background: var(--bg); }
+.mc-btn:disabled { cursor: default; }
+.mc-btn.mc-correct { background: #e5f8ed; border-color: var(--green); color: #1a7e42; }
+.mc-btn.mc-wrong   { background: #fde8e8; border-color: var(--red);   color: #c0392b; }
+[data-theme="dark"] .mc-btn.mc-correct { background: #1a2e1a; color: #4cd964; border-color: #2d6a3f; }
+[data-theme="dark"] .mc-btn.mc-wrong   { background: #2e1a1a; color: #ff6b60; border-color: #6a2d2d; }
+.mc-letter { font-weight: 700; font-size: 15px; color: var(--accent); min-width: 22px; text-align: center; }
+.mc-btn.mc-correct .mc-letter,
+.mc-btn.mc-wrong   .mc-letter { color: inherit; }
+
+/* ── Blitz result ────────────────────────────────────────────────────────── */
+.blitz-result-card {
+  width: 100%; background: var(--surface); border-radius: var(--radius);
+  padding: 24px 20px; box-shadow: var(--shadow); text-align: center;
+}
+.blitz-score { font-size: 52px; font-weight: 800; line-height: 1; }
+.blitz-label { font-size: 15px; color: var(--text2); margin-top: 6px; }
+.blitz-rows  { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.blitz-row   { font-size: 15px; text-align: left; }
+.blitz-row.ok   { color: var(--green); }
+.blitz-row.fail { color: var(--red); }
+
+/* ── Fehlerkatalog ───────────────────────────────────────────────────────── */
+.fehler-content {
+  flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+.fehler-list { display: flex; flex-direction: column; gap: 14px; }
+.fehler-item {
+  background: var(--surface); border-radius: var(--radius);
+  padding: 16px 18px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.fehler-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex-wrap: wrap;
+}
+.fehler-topic {
+  font-size: 12px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: .4px;
+}
+.fehler-q    { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.fehler-user { font-size: 14px; color: var(--text2); line-height: 1.4; }
+.fehler-feedback {
+  font-size: 14px; color: var(--text); line-height: 1.5;
+  background: var(--bg); border-radius: 8px; padding: 8px 12px;
+}
+.btn-chat-this {
+  align-self: flex-start; background: none; border: 1.5px solid var(--accent);
+  border-radius: 8px; padding: 6px 12px; font-size: 14px; font-weight: 500;
+  color: var(--accent); cursor: pointer; transition: background .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-chat-this:active { background: var(--border); }
+
+/* ── Sparkline ───────────────────────────────────────────────────────────── */
+.spark-wrap {
+  width: 100%; background: var(--surface); border-radius: 12px;
+  padding: 12px 16px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.spark-wrap:empty { display: none; }
+.spark-label {
+  font-size: 12px; color: var(--text2); font-weight: 600;
+  text-transform: uppercase; letter-spacing: .4px;
+}
+.spark-row  { display: flex; gap: 5px; flex-wrap: wrap; }
+.spark-dot  {
+  width: 14px; height: 14px; border-radius: 50%; display: inline-block;
+  transition: transform .1s;
+}
+.spark-dot:hover { transform: scale(1.35); }
+
+/* ── Lernziel slider ─────────────────────────────────────────────────────── */
+.lernziel-row {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border-radius: 12px;
+  padding: 12px 16px; box-shadow: var(--shadow);
+  font-size: 15px; font-weight: 500;
+}
+.lernziel-row span   { flex-shrink: 0; }
+.lernziel-row strong { flex-shrink: 0; min-width: 42px; text-align: right; color: var(--accent); }
+.lernziel-row input[type=range] { flex: 1; accent-color: var(--accent); }
+
+/* ── Gauge target marker ─────────────────────────────────────────────────── */
+.gauge-bar   { position: relative; overflow: visible; }
+.gauge-target {
+  position: absolute; top: -16px;
+  transform: translateX(-50%);
+  font-size: 16px; line-height: 1;
+  pointer-events: none; z-index: 1;
+}
+
+/* ── Panel fehler ────────────────────────────────────────────────────────── */
+#panel-fehler { flex-direction: column; }
+
+@media (min-width: 768px) {
+  .fehler-content { max-width: 680px; margin: 0 auto; width: 100%; }
+}

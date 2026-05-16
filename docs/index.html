@@ -10,7 +10,7 @@
 </head>
 <body>
 
-<!-- ══ SETUP SCREEN (nur beim ersten Start) ══════════════════════════════ -->
+<!-- ══ SETUP SCREEN ══════════════════════════════════════════════════════ -->
 <div id="setup-screen" class="screen active">
   <div class="setup-wrap">
     <div class="logo">🎓</div>
@@ -54,7 +54,10 @@
       <button class="btn-primary" id="btn-first-subject">Erstes Fach erstellen</button>
     </div>
   </div>
-  <button class="settings-btn" id="settings-btn" title="API-Key ändern">⚙️</button>
+  <div class="subj-foot">
+    <button class="foot-btn" id="btn-dark-toggle" title="Dark Mode">🌙</button>
+    <button class="foot-btn" id="settings-btn" title="API-Key ändern">⚙️</button>
+  </div>
 </div>
 
 <!-- ══ MAIN SCREEN ════════════════════════════════════════════════════════ -->
@@ -85,6 +88,7 @@
     <button class="tab" data-mode="quiz">❓ Quiz</button>
     <button class="tab" data-mode="exam">📝 Klausur</button>
     <button class="tab" data-mode="analysis">📊 Analyse</button>
+    <button class="tab" data-mode="fehler">📋 Fehler</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -122,6 +126,7 @@
         <p>Ich stelle dir Prüfungsfragen nach strengen Maßstäben und bewerte deine Antworten (0–3 Punkte).</p>
         <div id="quiz-summary" class="progress-summary hidden"></div>
         <button class="btn-primary" id="quiz-start-btn">Erste Frage</button>
+        <button class="btn-primary btn-blitz" id="quiz-blitz-btn">⚡ Blitz-Quiz (5 MC-Fragen)</button>
         <button class="btn-secondary btn-sm" id="quiz-reset-btn">Quiz zurücksetzen</button>
       </div>
       <div id="quiz-q" class="cx-state hidden">
@@ -146,6 +151,22 @@
         <div class="quiz-btns">
           <button class="btn-primary"   id="quiz-next">Nächste Frage →</button>
           <button class="btn-secondary" id="quiz-stop">Stopp &amp; Analyse</button>
+        </div>
+      </div>
+      <div id="quiz-blitz-q" class="cx-state hidden">
+        <div class="q-header">
+          <span class="q-num" id="blitz-q-num">Frage 1/5</span>
+          <span class="q-score" id="blitz-q-score"></span>
+        </div>
+        <div class="q-box" id="blitz-q-box"></div>
+        <div class="mc-grid" id="mc-grid"></div>
+        <button class="btn-secondary btn-sm" id="blitz-stop-btn">Beenden</button>
+      </div>
+      <div id="quiz-blitz-done" class="cx-state hidden">
+        <div class="blitz-result-card" id="blitz-result-card"></div>
+        <div class="quiz-btns">
+          <button class="btn-primary btn-blitz" id="blitz-again-btn">⚡ Nochmal Blitz-Quiz</button>
+          <button class="btn-secondary" id="blitz-stop-btn2">Zur Analyse</button>
         </div>
       </div>
     </div>
@@ -190,6 +211,11 @@
         <div class="big-icon">📊</div>
         <h2>Lernstandsanalyse</h2>
         <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen für eine Analyse.</p>
+        <div class="lernziel-row">
+          <span>🎯 Lernziel:</span>
+          <input type="range" id="lernziel-slider" min="50" max="100" value="75" step="5" />
+          <strong id="lernziel-val">75%</strong>
+        </div>
         <div class="pessimism-note">⚠️ Bewusst pessimistische Einschätzung – um falsche Sicherheit zu vermeiden.</div>
         <button class="btn-primary" id="analysis-btn" disabled>Analyse erstellen</button>
       </div>
@@ -199,10 +225,23 @@
       </div>
       <div id="analysis-result" class="cx-state hidden">
         <div class="gauge" id="gauge"></div>
+        <div class="spark-wrap" id="spark-wrap"></div>
         <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
         <div class="analysis-body" id="analysis-body"></div>
         <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ── FEHLER ── -->
+  <div id="panel-fehler" class="panel">
+    <div class="fehler-content" id="fehler-content">
+      <div class="cx-state" id="fehler-empty">
+        <div class="big-icon">📋</div>
+        <h2>Fehlerkatalog</h2>
+        <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
+      </div>
+      <div class="fehler-list" id="fehler-list"></div>
     </div>
   </div>
 </div>
