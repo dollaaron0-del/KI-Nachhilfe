@@ -89,6 +89,7 @@
     <button class="tab" data-mode="exam">📝 Klausur</button>
     <button class="tab" data-mode="analysis">📊 Analyse</button>
     <button class="tab" data-mode="fehler">📋 Fehler</button>
+    <button class="tab" data-mode="aufgaben">🎯 Aufgaben</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -242,6 +243,40 @@
         <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
       </div>
       <div class="fehler-list" id="fehler-list"></div>
+    </div>
+  </div>
+
+  <!-- ── AUFGABEN ── -->
+  <div id="panel-aufgaben" class="panel">
+    <div class="aufgaben-content">
+      <div id="aufgaben-idle" class="cx-state">
+        <div class="big-icon">🎯</div>
+        <h2>Themen-Aufgaben</h2>
+        <p>Erkenne die Themen aus deinen Dokumenten und übe gezielt einzelne Bereiche – mit Übungsaufgaben oder einer Mini-Klausur.</p>
+        <button class="btn-primary" id="aufgaben-scan-btn">Themen erkennen</button>
+      </div>
+      <div id="aufgaben-topics" class="cx-state hidden">
+        <h2>Thema wählen</h2>
+        <div class="topic-chips" id="topic-chips"></div>
+        <div class="aufg-type-row">
+          <button class="aufg-type-btn active" data-type="uebung">📝 Übungsaufgaben</button>
+          <button class="aufg-type-btn" data-type="klausur">📋 Klausur lite</button>
+        </div>
+        <button class="btn-primary" id="aufgaben-gen-btn" disabled>Aufgaben generieren</button>
+        <button class="btn-secondary btn-sm" id="aufgaben-rescan-btn">Themen neu erkennen</button>
+      </div>
+      <div id="aufgaben-loading" class="cx-state hidden">
+        <div class="big-icon spin">⚙️</div>
+        <p id="aufgaben-loading-txt">Themen werden erkannt…</p>
+      </div>
+      <div id="aufgaben-result" class="cx-state hidden">
+        <div class="aufgaben-toolbar">
+          <button class="btn-secondary btn-sm" id="aufgaben-back-btn">← Anderes Thema</button>
+          <button class="btn-secondary btn-sm" id="aufgaben-ans-btn">Lösungen anzeigen</button>
+          <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
+        </div>
+        <div class="aufgaben-body exam-body" id="aufgaben-body"></div>
+      </div>
     </div>
   </div>
 </div>

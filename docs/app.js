@@ -16,8 +16,12 @@ let selIcon      = ICONS[0];
 let selColor     = COLORS[0];
 let selDiff      = 'mittel';
 let examAnsVis   = false;
-let blitzIdx     = 0;
-let blitzResults = [];
+let blitzIdx       = 0;
+let blitzResults   = [];
+let scannedTopics  = [];
+let selTopic       = null;
+let selAufgabenType = 'uebung';
+let aufgabenAnsVis  = false;
 
 // ── DB (localforage) ───────────────────────────────────────────────────────
 const DB = {
@@ -471,6 +475,7 @@ function switchMode(mode) {
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${mode}`));
   if (mode === 'analysis') refreshAnalysisState();
   if (mode === 'fehler') renderFehlerkatalog();
+  if (mode === 'aufgaben') initAufgaben();
 }
 
 // ══ SCORE CHIP ════════════════════════════════════════════════════════════
@@ -1065,6 +1070,155 @@ function md(text) {
     .replace(/(<li>[\s\S]*?<\/li>)(?=\s*(?!<li>))/g, '<ul>$1</ul>')
     .replace(/\n\n/g, '<br><br>')
     .trim();
+}
+
+// ══ AUFGABEN ══════════════════════════════════════════════════════════════
+
+function showAufgabenState(el) {
+  document.querySelectorAll('#panel-aufgaben .cx-state').forEach(s => s.classList.add('hidden'));
+  el.classList.remove('hidden');
+}
+
+function initAufgaben() {
+  if (scannedTopics.length) {
+    showAufgabenState(document.getElementById('aufgaben-topics'));
+  } else {
+    showAufgabenState(document.getElementById('aufgaben-idle'));
+  }
+}
+
+document.getElementById('aufgaben-scan-btn').addEventListener('click', scanTopics);
+document.getElementById('aufgaben-rescan-btn').addEventListener('click', scanTopics);
+
+async function scanTopics() {
+  if (!sessionTxt) { alert('Bitte zuerst Dokumente hochladen.'); return; }
+  document.getElementById('aufgaben-loading-txt').textContent = 'Themen werden erkannt…';
+  showAufgabenState(document.getElementById('aufgaben-loading'));
+  selTopic = null;
+  document.getElementById('aufgaben-gen-btn').disabled = true;
+
+  const prompt = `Analysiere den folgenden Lernstoff und erstelle eine Liste der wichtigsten Themen und Unterthemen.
+Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter je Thema):
+["Thema 1", "Thema 2", "Thema 3", ...]`;
+
+  try {
+    const raw = await claude(
+      [{ role: 'user', content: 'Welche Hauptthemen gibt es in den Unterlagen?' }],
+      sysBlocks(prompt), 400,
+    );
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('Keine Themen erkannt');
+    scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
+    if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
+    renderTopicChips();
+    showAufgabenState(document.getElementById('aufgaben-topics'));
+  } catch (e) {
+    showAufgabenState(document.getElementById('aufgaben-idle'));
+    alert('Fehler beim Erkennen: ' + e.message);
+  }
+}
+
+function renderTopicChips() {
+  const wrap = document.getElementById('topic-chips');
+  wrap.innerHTML = '';
+  scannedTopics.forEach(topic => {
+    const btn = document.createElement('button');
+    btn.className = 'topic-chip';
+    btn.textContent = topic;
+    btn.addEventListener('click', () => {
+      selTopic = topic;
+      wrap.querySelectorAll('.topic-chip').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      document.getElementById('aufgaben-gen-btn').disabled = false;
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+document.querySelectorAll('.aufg-type-btn').forEach(b => b.addEventListener('click', () => {
+  selAufgabenType = b.dataset.type;
+  document.querySelectorAll('.aufg-type-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+}));
+
+document.getElementById('aufgaben-gen-btn').addEventListener('click', generateAufgaben);
+document.getElementById('aufgaben-back-btn').addEventListener('click', () => {
+  showAufgabenState(document.getElementById('aufgaben-topics'));
+});
+document.getElementById('aufgaben-ans-btn').addEventListener('click', () => {
+  aufgabenAnsVis = !aufgabenAnsVis;
+  document.getElementById('aufgaben-body').closest('.aufgaben-content')
+    .classList.toggle('answers-hidden', !aufgabenAnsVis);
+  document.getElementById('aufgaben-ans-btn').textContent =
+    aufgabenAnsVis ? 'Lösungen verbergen' : 'Lösungen anzeigen';
+});
+
+async function generateAufgaben() {
+  if (!selTopic) return;
+  aufgabenAnsVis = false;
+  document.getElementById('aufgaben-loading-txt').textContent = 'Aufgaben werden erstellt…';
+  showAufgabenState(document.getElementById('aufgaben-loading'));
+
+  const isKlausur = selAufgabenType === 'klausur';
+
+  const prompt = isKlausur
+    ? `Erstelle eine kompakte Mini-Klausur NUR zum Thema "${selTopic}" aus dem Fach "${sessionMeta.name}".
+
+# Mini-Klausur: ${selTopic}
+**Punkte:** XX | **Zeit:** ca. XX Min
+
+## Teil A – Multiple Choice (je 1 Punkt)
+[3 MC-Fragen mit Optionen a–d, nur zu "${selTopic}"]
+
+## Teil B – Kurzantworten (je 3 Punkte)
+[2 Kurzantwort-Fragen zu "${selTopic}"]
+
+## Teil C – Ausführliche Antwort (6 Punkte)
+[1 tiefe Verständnisfrage zu "${selTopic}"]
+
+---
+## Lösungsschlüssel
+[Vollständige Lösungen mit Erklärungen]`
+    : `Erstelle 5 abwechslungsreiche Übungsaufgaben NUR zum Thema "${selTopic}" aus dem Fach "${sessionMeta.name}".
+
+Aufgaben sollen echtes Verständnis testen – nicht reines Auswendiglernen:
+- Mix aus: Erklären, Anwenden, Vergleichen, Beispiele nennen, Zusammenhänge erläutern
+- Jede Aufgabe mit Punktzahl (1–4 Punkte je nach Schwierigkeit)
+- Aufsteigende Schwierigkeit
+
+Format:
+## Übungsaufgaben: ${selTopic}
+
+**Aufgabe 1 (X Pkt.):** [Aufgabe]
+
+**Aufgabe 2 (X Pkt.):** [Aufgabe]
+
+...
+
+---
+## Musterlösungen
+[Vollständige Lösungen mit Hintergrundinformationen]`;
+
+  try {
+    const result = await claude(
+      [{ role: 'user', content: 'Aufgaben erstellen.' }],
+      sysBlocks(prompt), 2500,
+    );
+    const body = document.getElementById('aufgaben-body');
+    const sepIdx = result.search(/---\s*\n+##\s*(Lösungsschlüssel|Musterlösungen)/i);
+    if (sepIdx > -1) {
+      body.innerHTML = md(result.slice(0, sepIdx)) +
+        `<div class="ans-section">${md(result.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`;
+    } else {
+      body.innerHTML = md(result);
+    }
+    document.getElementById('aufgaben-body').closest('.aufgaben-content').classList.add('answers-hidden');
+    document.getElementById('aufgaben-ans-btn').textContent = 'Lösungen anzeigen';
+    showAufgabenState(document.getElementById('aufgaben-result'));
+  } catch (e) {
+    showAufgabenState(document.getElementById('aufgaben-topics'));
+    alert('Fehler: ' + e.message);
+  }
 }
 
 // ══ INIT ══════════════════════════════════════════════════════════════════

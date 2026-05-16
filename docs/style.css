@@ -693,3 +693,51 @@ html, body {
 @media (min-width: 768px) {
   .fehler-content { max-width: 680px; margin: 0 auto; width: 100%; }
 }
+
+/* ── Aufgaben ────────────────────────────────────────────────────────────── */
+#panel-aufgaben { flex-direction: column; }
+.aufgaben-content {
+  flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column;
+  -webkit-overflow-scrolling: touch;
+}
+
+.topic-chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  justify-content: center; width: 100%; max-width: 520px;
+}
+.topic-chip {
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 20px; padding: 8px 16px; font-size: 14px; font-weight: 500;
+  color: var(--text); cursor: pointer; transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.topic-chip:active  { background: var(--bg); }
+.topic-chip.selected {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
+}
+
+.aufg-type-row {
+  display: flex; gap: 8px; width: 100%; max-width: 400px;
+}
+.aufg-type-btn {
+  flex: 1; border: 1.5px solid var(--border); background: var(--surface);
+  border-radius: 10px; padding: 10px 12px; font-size: 14px; font-weight: 500;
+  color: var(--text2); cursor: pointer; transition: all .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.aufg-type-btn.active {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
+}
+
+.aufgaben-toolbar {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+  margin-bottom: 16px; width: 100%;
+}
+.aufgaben-body {
+  width: 100%; text-align: left;
+}
+.aufgaben-content.answers-hidden .ans-section { display: none; }
+
+@media (min-width: 768px) {
+  .aufgaben-content { max-width: 680px; margin: 0 auto; width: 100%; }
+}
