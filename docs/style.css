@@ -741,3 +741,28 @@ html, body {
 @media (min-width: 768px) {
   .aufgaben-content { max-width: 680px; margin: 0 auto; width: 100%; }
 }
+
+/* ── Mermaid diagrams ────────────────────────────────────────────────────── */
+.mermaid-wrap {
+  width: 100%; margin: 10px 0;
+  background: var(--surface); border-radius: 12px;
+  padding: 16px; box-shadow: var(--shadow);
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.mermaid-wrap svg {
+  max-width: 100%; height: auto; display: block; margin: 0 auto;
+}
+[data-theme="dark"] .mermaid-wrap { background: #2c2c2e; }
+
+/* ── Chat quick buttons (Diagramm / Mind-Map) ────────────────────────────── */
+.chat-quick-btns {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.btn-quick {
+  background: none; border: 1px solid var(--border);
+  border-radius: 16px; padding: 5px 12px;
+  font-size: 13px; color: var(--text2); cursor: pointer;
+  transition: background .15s, border-color .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-quick:active { background: var(--border); }

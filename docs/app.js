@@ -4,6 +4,9 @@
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+// ── Mermaid ────────────────────────────────────────────────────────────────
+mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+
 // ── Constants ──────────────────────────────────────────────────────────────
 const ICONS  = ['📐','📊','🧪','🔬','🧬','📚','🖥️','⚖️','💰','🌍','🎨','🎵','🏥','🏛️','✈️','🔧','📡','🧮','⚗️','🔭','🤖','🧠','💡','🎯','🌱','🏋️'];
 const COLORS = ['#5856d6','#007aff','#34c759','#ff9500','#ff3b30','#ff2d55','#30b0c7','#a2845e'];
@@ -107,6 +110,10 @@ ANTWORTFORMAT IM CHAT:
 --- UNTERLAGEN ---
 ${sessionTxt || '(noch keine Dokumente hochgeladen)'}
 --- ENDE ---
+
+DIAGRAMME: Wenn es das Verständnis fördert, erstelle Mermaid-Diagramme in \`\`\`mermaid ... \`\`\` Blöcken.
+Verfügbare Typen: flowchart TD (Abläufe/Strukturen), mindmap (Konzepte), sequenceDiagram (Prozesse/Interaktionen).
+Halte Diagramme einfach – max. 8 Knoten. Nur einsetzen wenn es wirklich hilft.
 
 Antworte immer auf Deutsch.${extra ? '\n\n' + extra : ''}`,
       cache_control: { type: 'ephemeral' },
@@ -544,6 +551,18 @@ async function rephraseReply(originalReply) {
     addMsg(chatMessages, 'assistant', '⚠️ ' + e.message);
   }
 }
+
+document.getElementById('btn-diagram').addEventListener('click', () => {
+  chatInput.value = 'Erkläre den aktuellen Sachverhalt als Mermaid-Diagramm (flowchart TD). Zeige Zusammenhänge, Abläufe oder Strukturen visuell.';
+  autoResize(chatInput);
+  sendChat();
+});
+
+document.getElementById('btn-mindmap').addEventListener('click', () => {
+  chatInput.value = 'Erstelle eine Mermaid-Mind-Map (mindmap) zu dem Thema, das wir gerade besprochen haben. Zeige Hauptkonzept und alle wichtigen Unterthemen.';
+  autoResize(chatInput);
+  sendChat();
+});
 
 document.getElementById('chat-reset').addEventListener('click', async () => {
   sessionMeta.chatHistory = [];
@@ -1034,6 +1053,8 @@ function addMsg(container, role, text, rephraseCallback) {
   }
   container.appendChild(w);
   container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+  const mermaidEls = w.querySelectorAll('.mermaid');
+  if (mermaidEls.length) mermaid.run({ nodes: mermaidEls });
   return w;
 }
 
@@ -1058,7 +1079,15 @@ function esc(s) {
 function md(text) {
   if (!text) return '';
   const e = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  return e(text)
+
+  // Extract mermaid blocks before HTML escaping
+  const mermaidBlocks = [];
+  text = text.replace(/```mermaid\n?([\s\S]*?)```/g, (_, code) => {
+    mermaidBlocks.push(code.trim());
+    return `\x00MBL${mermaidBlocks.length - 1}\x00`;
+  });
+
+  let html = e(text)
     .replace(/^---$/gm, '<hr>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -1070,6 +1099,13 @@ function md(text) {
     .replace(/(<li>[\s\S]*?<\/li>)(?=\s*(?!<li>))/g, '<ul>$1</ul>')
     .replace(/\n\n/g, '<br><br>')
     .trim();
+
+  mermaidBlocks.forEach((code, i) => {
+    html = html.replace(`\x00MBL${i}\x00`,
+      `<div class="mermaid-wrap"><div class="mermaid">${code}</div></div>`);
+  });
+
+  return html;
 }
 
 // ══ AUFGABEN ══════════════════════════════════════════════════════════════
