@@ -766,3 +766,13 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 .btn-quick:active { background: var(--border); }
+
+/* ── KaTeX math rendering ──────────────────────────────────────────────────── */
+.math-block {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  padding: 14px 0; text-align: center;
+}
+.math-block .katex-display { margin: 0; }
+.math-inline { display: inline; }
+.katex { font-size: 1.05em; }
+[data-theme="dark"] .katex { color: #f2f2f7; }

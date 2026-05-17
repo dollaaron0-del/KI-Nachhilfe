@@ -115,6 +115,10 @@ DIAGRAMME: Wenn es das Verständnis fördert, erstelle Mermaid-Diagramme in \`\`
 Verfügbare Typen: flowchart TD (Abläufe/Strukturen), mindmap (Konzepte), sequenceDiagram (Prozesse/Interaktionen).
 Halte Diagramme einfach – max. 8 Knoten. Nur einsetzen wenn es wirklich hilft.
 
+MATHEMATIK: Für mathematische Formeln und Gleichungen verwende LaTeX-Notation.
+Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$
+Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
+
 Antworte immer auf Deutsch.${extra ? '\n\n' + extra : ''}`,
       cache_control: { type: 'ephemeral' },
     },
@@ -560,6 +564,12 @@ document.getElementById('btn-diagram').addEventListener('click', () => {
 
 document.getElementById('btn-mindmap').addEventListener('click', () => {
   chatInput.value = 'Erstelle eine Mermaid-Mind-Map (mindmap) zu dem Thema, das wir gerade besprochen haben. Zeige Hauptkonzept und alle wichtigen Unterthemen.';
+  autoResize(chatInput);
+  sendChat();
+});
+
+document.getElementById('btn-formula').addEventListener('click', () => {
+  chatInput.value = 'Liste die wichtigsten Formeln zu dem Thema, das wir gerade besprochen haben. Schreibe jede Formel in LaTeX-Notation ($$...$$) und erkläre kurz was jede Variable bedeutet.';
   autoResize(chatInput);
   sendChat();
 });
@@ -1087,6 +1097,17 @@ function md(text) {
     return `\x00MBL${mermaidBlocks.length - 1}\x00`;
   });
 
+  // Extract math before HTML escaping ($$...$$ then $...$)
+  const mathParts = [];
+  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
+    mathParts.push({ latex: latex.trim(), display: true });
+    return `\x00MTH${mathParts.length - 1}\x00`;
+  });
+  text = text.replace(/\$([^\$\n]+?)\$/g, (_, latex) => {
+    mathParts.push({ latex: latex.trim(), display: false });
+    return `\x00MTH${mathParts.length - 1}\x00`;
+  });
+
   let html = e(text)
     .replace(/^---$/gm, '<hr>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
@@ -1103,6 +1124,16 @@ function md(text) {
   mermaidBlocks.forEach((code, i) => {
     html = html.replace(`\x00MBL${i}\x00`,
       `<div class="mermaid-wrap"><div class="mermaid">${code}</div></div>`);
+  });
+
+  mathParts.forEach(({ latex, display }, i) => {
+    try {
+      const rendered = katex.renderToString(latex, { displayMode: display, throwOnError: false, output: 'html' });
+      html = html.replace(`\x00MTH${i}\x00`,
+        display ? `<div class="math-block">${rendered}</div>` : `<span class="math-inline">${rendered}</span>`);
+    } catch {
+      html = html.replace(`\x00MTH${i}\x00`, display ? `<div class="math-block">$$${e(latex)}$$</div>` : `$${e(latex)}$`);
+    }
   });
 
   return html;
