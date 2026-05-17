@@ -835,10 +835,10 @@ async function generateExam() {
     const body = document.getElementById('exam-body');
     const sepIdx = exam.search(/---\s*\n+##\s*Lösungsschlüssel/i);
     if (sepIdx > -1) {
-      body.innerHTML = md(exam.slice(0, sepIdx)) +
-        `<div class="ans-section">${md(exam.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`;
+      body.innerHTML = safeHtml(md(exam.slice(0, sepIdx)) +
+        `<div class="ans-section">${md(exam.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`);
     } else {
-      body.innerHTML = md(exam);
+      body.innerHTML = safeHtml(md(exam));
     }
     body.closest('.exam-content').classList.add('answers-hidden');
     document.getElementById('exam-ans-btn').textContent = 'Lösungen anzeigen';
@@ -961,7 +961,7 @@ Format:
         <div class="gauge-target" style="left:${targetLeft}%">🎯</div>
       </div>
       <div class="gauge-meta">${questions.length} Fragen · Rohwert: ${raw}% → korrigiert: ${percent}% · Ziel: ${targetScore}%</div>`;
-    document.getElementById('analysis-body').innerHTML = md(analysis);
+    document.getElementById('analysis-body').innerHTML = safeHtml(md(analysis));
     renderSparkline();
     document.getElementById('analysis-loading').classList.add('hidden');
     document.getElementById('analysis-result').classList.remove('hidden');
@@ -1052,7 +1052,7 @@ function addMsg(container, role, text, rephraseCallback) {
   const w = document.createElement('div');
   w.className = `message ${role}`;
   const b = document.createElement('div');
-  b.className = 'bubble'; b.innerHTML = md(text);
+  b.className = 'bubble'; b.innerHTML = safeHtml(md(text));
   w.appendChild(b);
   if (role === 'assistant' && rephraseCallback) {
     const btn = document.createElement('button');
@@ -1085,6 +1085,16 @@ function autoResize(el) {
 function esc(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// KaTeX emits SVG + inline styles; allow those while blocking actual XSS
+const PURIFY_CFG = {
+  ADD_TAGS: ['svg','path','g','use','defs','clipPath','line','circle','rect','polygon','text','tspan','marker'],
+  ADD_ATTR: ['viewBox','xmlns','xmlns:xlink','xlink:href','href','d','points','transform',
+             'x','y','x1','y1','x2','y2','r','cx','cy','clip-path','marker-end',
+             'stroke','stroke-width','fill','fill-rule'],
+  ALLOW_DATA_ATTR: false,
+};
+const safeHtml = html => DOMPurify.sanitize(html, PURIFY_CFG);
 
 function md(text) {
   if (!text) return '';
@@ -1274,10 +1284,10 @@ Format:
     const body = document.getElementById('aufgaben-body');
     const sepIdx = result.search(/---\s*\n+##\s*(Lösungsschlüssel|Musterlösungen)/i);
     if (sepIdx > -1) {
-      body.innerHTML = md(result.slice(0, sepIdx)) +
-        `<div class="ans-section">${md(result.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`;
+      body.innerHTML = safeHtml(md(result.slice(0, sepIdx)) +
+        `<div class="ans-section">${md(result.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`);
     } else {
-      body.innerHTML = md(result);
+      body.innerHTML = safeHtml(md(result));
     }
     document.getElementById('aufgaben-body').closest('.aufgaben-content').classList.add('answers-hidden');
     document.getElementById('aufgaben-ans-btn').textContent = 'Lösungen anzeigen';
