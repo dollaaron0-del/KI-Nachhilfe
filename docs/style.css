@@ -767,6 +767,102 @@ html, body {
 }
 .btn-quick:active { background: var(--border); }
 
+/* ── Rechnen (Apple Pencil) Panel ────────────────────────────────────────── */
+#panel-rechnen { overflow: hidden !important; }
+
+.rechnen-wrap {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;
+}
+
+/* Idle / Loading / Result: normal scrollable cx-states */
+#rechnen-idle, #rechnen-loading {
+  padding: 32px 24px;
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 14px; overflow-y: auto;
+}
+
+/* Solve state must flex-fill available height */
+#rechnen-solve { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+#rechnen-solve.hidden { display: none !important; }
+
+.aufgabe-display {
+  flex-shrink: 0; max-height: 28%;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 14px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  font-size: 15px; line-height: 1.6;
+}
+
+.canvas-bar {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.canvas-bar-spacer { flex: 1; }
+
+.btn-canvas-tool {
+  min-width: 42px; min-height: 42px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; font-size: 18px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background .12s;
+}
+.btn-canvas-tool:active { background: var(--border); }
+
+.btn-canvas-check {
+  background: #34c759; color: #fff;
+  border: none; border-radius: 10px;
+  padding: 0 18px; height: 42px; font-size: 15px; font-weight: 600;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+.btn-canvas-check:active { opacity: .82; }
+
+#math-canvas {
+  flex: 1; min-height: 0; display: block; width: 100%;
+  touch-action: none; /* essential for Apple Pencil pointer events */
+  cursor: crosshair; background: #fff;
+}
+[data-theme="dark"] #math-canvas { background: #fff; } /* keep white for vision API */
+
+/* Result state */
+#rechnen-result { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; gap: 14px; display: flex; flex-direction: column; }
+#rechnen-result.hidden { display: none !important; }
+.result-top {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.result-box {
+  background: var(--surface); border-radius: 12px;
+  padding: 12px; box-shadow: var(--shadow);
+  font-size: 14px; line-height: 1.5;
+}
+.result-lbl {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--text2); margin-bottom: 8px;
+}
+.result-preview-img {
+  width: 100%; height: auto; border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.rechnen-feedback {
+  background: var(--surface); border-radius: 12px;
+  padding: 16px; box-shadow: var(--shadow);
+  font-size: 15px; line-height: 1.6;
+}
+.rechnen-result-btns { display: flex; gap: 10px; }
+.rechnen-result-btns button { flex: 1; }
+
+/* Difficulty buttons for rechnen (reuse style, avoid conflict) */
+.diff-btn-r {
+  padding: 6px 14px; border-radius: 20px;
+  border: 1px solid var(--border); background: none;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  color: var(--text2); -webkit-tap-highlight-color: transparent;
+}
+.diff-btn-r.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
 /* ── KaTeX math rendering ──────────────────────────────────────────────────── */
 .math-block {
   overflow-x: auto; -webkit-overflow-scrolling: touch;

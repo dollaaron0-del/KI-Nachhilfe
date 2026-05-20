@@ -91,6 +91,7 @@
     <button class="tab" data-mode="analysis">📊 Analyse</button>
     <button class="tab" data-mode="fehler">📋 Fehler</button>
     <button class="tab" data-mode="aufgaben">🎯 Aufgaben</button>
+    <button class="tab" data-mode="rechnen">✏️ Rechnen</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -283,6 +284,63 @@
         </div>
         <div class="aufgaben-body exam-body" id="aufgaben-body"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- ── RECHNEN (Apple Pencil) ── -->
+  <div id="panel-rechnen" class="panel">
+    <div class="rechnen-wrap">
+
+      <div id="rechnen-idle" class="cx-state">
+        <div class="big-icon">✏️</div>
+        <h2>Aufgabe handschriftlich lösen</h2>
+        <p>Ich erstelle eine Rechenaufgabe aus deinen Unterlagen. Du löst sie mit dem Apple Pencil – ich prüfe deine Lösung.</p>
+        <div class="diff-row">
+          <span>Schwierigkeit:</span>
+          <div class="diff-group">
+            <button class="diff-btn-r active" data-rdiff="leicht">Leicht</button>
+            <button class="diff-btn-r" data-rdiff="mittel">Mittel</button>
+            <button class="diff-btn-r" data-rdiff="schwer">Schwer</button>
+          </div>
+        </div>
+        <button class="btn-primary" id="rechnen-gen-btn">Aufgabe generieren</button>
+      </div>
+
+      <div id="rechnen-loading" class="cx-state hidden">
+        <div class="big-icon spin">⚙️</div>
+        <p id="rechnen-loading-txt">Aufgabe wird erstellt…</p>
+      </div>
+
+      <div id="rechnen-solve" class="cx-state hidden">
+        <div class="aufgabe-display" id="aufgabe-display"></div>
+        <div class="canvas-bar">
+          <button class="btn-canvas-tool" id="canvas-undo-btn" title="Rückgängig">↩️</button>
+          <button class="btn-canvas-tool" id="canvas-clear-btn" title="Alles löschen">🗑️</button>
+          <div class="canvas-bar-spacer"></div>
+          <button class="btn-canvas-check" id="canvas-check-btn">✅ Prüfen</button>
+          <button class="btn-canvas-tool" id="rechnen-new-btn" title="Neue Aufgabe">🔄</button>
+        </div>
+        <canvas id="math-canvas"></canvas>
+      </div>
+
+      <div id="rechnen-result" class="cx-state hidden">
+        <div class="result-top">
+          <div class="result-box">
+            <div class="result-lbl">Aufgabe</div>
+            <div id="result-aufgabe-txt"></div>
+          </div>
+          <div class="result-box">
+            <div class="result-lbl">Deine Lösung</div>
+            <img id="result-preview" class="result-preview-img" alt="Handschriftliche Lösung" />
+          </div>
+        </div>
+        <div class="rechnen-feedback" id="rechnen-feedback"></div>
+        <div class="rechnen-result-btns">
+          <button class="btn-secondary" id="rechnen-retry-btn">✏️ Nochmal</button>
+          <button class="btn-primary"   id="rechnen-next-btn">🔄 Neue Aufgabe</button>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>

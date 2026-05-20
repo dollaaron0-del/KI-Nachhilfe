@@ -25,6 +25,13 @@ let scannedTopics  = [];
 let selTopic       = null;
 let selAufgabenType = 'uebung';
 let aufgabenAnsVis  = false;
+let currentAufgabe  = '';
+let rechnenDiff     = 'mittel';
+let mathCtx         = null;
+let isDrawingCanvas = false;
+let canvasLastX     = 0, canvasLastY = 0;
+let undoStack       = [];
+let savedCanvasData = null;
 
 // ── DB (localforage) ───────────────────────────────────────────────────────
 const DB = {
@@ -61,6 +68,39 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
     body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, system: systemBlocks, messages }),
   });
 
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    if (r.status === 401) throw new Error('Ungültiger API-Key – bitte prüfen');
+    throw new Error(e.error?.message || `Fehler ${r.status}`);
+  }
+  return (await r.json()).content[0].text;
+}
+
+// ── Anthropic Vision API ───────────────────────────────────────────────────
+async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
+  const key = await DB.apiKey();
+  if (!key) throw new Error('Kein API-Key gespeichert');
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: maxTokens,
+      system: systemBlocks,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
+          { type: 'text', text: textPrompt },
+        ],
+      }],
+    }),
+  });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     if (r.status === 401) throw new Error('Ungültiger API-Key – bitte prüfen');
@@ -314,6 +354,8 @@ async function openSubject(subj) {
   sessionId   = subj.id;
   sessionMeta = await DB.meta(subj.id) || { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
   sessionTxt  = await DB.content(subj.id);
+  scannedTopics = []; selTopic = null;
+  currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
   document.getElementById('header-label').textContent = `${subj.icon}  ${subj.name}`;
   updateHeaderPages();
@@ -482,11 +524,17 @@ document.querySelectorAll('.tab').forEach(b =>
   b.addEventListener('click', () => switchMode(b.dataset.mode)));
 
 function switchMode(mode) {
+  // Save canvas drawing before leaving rechnen
+  const rechnenSolve = document.getElementById('rechnen-solve');
+  if (mathCtx && rechnenSolve && !rechnenSolve.classList.contains('hidden')) {
+    savedCanvasData = document.getElementById('math-canvas').toDataURL('image/png');
+  }
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${mode}`));
   if (mode === 'analysis') refreshAnalysisState();
   if (mode === 'fehler') renderFehlerkatalog();
   if (mode === 'aufgaben') initAufgaben();
+  if (mode === 'rechnen') initRechnen();
 }
 
 // ══ SCORE CHIP ════════════════════════════════════════════════════════════
@@ -1295,6 +1343,228 @@ Format:
   } catch (e) {
     showAufgabenState(document.getElementById('aufgaben-topics'));
     alert('Fehler: ' + e.message);
+  }
+}
+
+// ══ RECHNEN (Apple Pencil) ════════════════════════════════════════════════
+
+function showRechnenState(el) {
+  document.querySelectorAll('#panel-rechnen .cx-state').forEach(s => s.classList.add('hidden'));
+  el.classList.remove('hidden');
+  if (el.id === 'rechnen-solve') {
+    // Two rAF frames ensure layout is complete before sizing canvas
+    requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
+  }
+}
+
+function initRechnen() {
+  if (currentAufgabe) {
+    const display = document.getElementById('aufgabe-display');
+    display.innerHTML = safeHtml(md(currentAufgabe));
+    showRechnenState(document.getElementById('rechnen-solve'));
+  } else {
+    showRechnenState(document.getElementById('rechnen-idle'));
+  }
+}
+
+function initCanvas() {
+  const canvas = document.getElementById('math-canvas');
+  const rect   = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const dpr    = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(rect.width  * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  mathCtx = canvas.getContext('2d');
+  mathCtx.scale(dpr, dpr);
+  // Fill white background (needed for vision API)
+  mathCtx.fillStyle = '#ffffff';
+  mathCtx.fillRect(0, 0, rect.width, rect.height);
+  // Restore saved drawing when returning from another tab
+  if (savedCanvasData) {
+    const img = new Image();
+    img.onload = () => { mathCtx.drawImage(img, 0, 0, rect.width, rect.height); applyCtxStyle(); };
+    img.src = savedCanvasData;
+    savedCanvasData = null;
+  } else {
+    applyCtxStyle();
+  }
+  undoStack = [];
+}
+
+function applyCtxStyle() {
+  if (!mathCtx) return;
+  mathCtx.strokeStyle = '#1c1c1e';
+  mathCtx.lineCap     = 'round';
+  mathCtx.lineJoin    = 'round';
+  mathCtx.lineWidth   = 2;
+}
+
+function setupCanvasEvents() {
+  const canvas = document.getElementById('math-canvas');
+
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    isDrawingCanvas = true;
+    // Snapshot before stroke → enables undo
+    if (mathCtx) {
+      undoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
+      if (undoStack.length > 20) undoStack.shift();
+    }
+    const p = canvasPos(e, canvas);
+    canvasLastX = p.x; canvasLastY = p.y;
+    // Dot for tap/click
+    if (mathCtx) {
+      mathCtx.beginPath();
+      mathCtx.arc(p.x, p.y, Math.max(0.5, (e.pressure || 0.5) * 1.5), 0, Math.PI * 2);
+      mathCtx.fillStyle = '#1c1c1e';
+      mathCtx.fill();
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('pointermove', e => {
+    if (!isDrawingCanvas || !mathCtx) return;
+    e.preventDefault();
+    const p        = canvasPos(e, canvas);
+    const pressure = e.pressure > 0 ? e.pressure : 0.5;
+    mathCtx.lineWidth = Math.max(1, pressure * 3.5);
+    mathCtx.strokeStyle = '#1c1c1e';
+    mathCtx.beginPath();
+    mathCtx.moveTo(canvasLastX, canvasLastY);
+    mathCtx.lineTo(p.x, p.y);
+    mathCtx.stroke();
+    canvasLastX = p.x; canvasLastY = p.y;
+  }, { passive: false });
+
+  const endDraw = () => { isDrawingCanvas = false; };
+  canvas.addEventListener('pointerup',     endDraw);
+  canvas.addEventListener('pointercancel', endDraw);
+  canvas.addEventListener('pointerleave',  endDraw);
+  canvas.addEventListener('contextmenu',   e => e.preventDefault());
+}
+
+function canvasPos(e, canvas) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+function clearCanvas() {
+  if (!mathCtx) return;
+  const canvas = document.getElementById('math-canvas');
+  const r      = canvas.getBoundingClientRect();
+  undoStack = [];
+  mathCtx.fillStyle = '#ffffff';
+  mathCtx.fillRect(0, 0, r.width, r.height);
+}
+
+function undoCanvas() {
+  if (!mathCtx || !undoStack.length) return;
+  mathCtx.putImageData(undoStack.pop(), 0, 0);
+}
+
+// Difficulty buttons
+document.querySelectorAll('.diff-btn-r').forEach(b => b.addEventListener('click', () => {
+  rechnenDiff = b.dataset.rdiff;
+  document.querySelectorAll('.diff-btn-r').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+}));
+
+document.getElementById('rechnen-gen-btn').addEventListener('click', generateMathAufgabe);
+document.getElementById('canvas-undo-btn').addEventListener('click', undoCanvas);
+document.getElementById('canvas-clear-btn').addEventListener('click', clearCanvas);
+document.getElementById('canvas-check-btn').addEventListener('click', checkHandwriting);
+document.getElementById('rechnen-new-btn').addEventListener('click', () => {
+  currentAufgabe = ''; savedCanvasData = null;
+  showRechnenState(document.getElementById('rechnen-idle'));
+});
+document.getElementById('rechnen-retry-btn').addEventListener('click', () => {
+  savedCanvasData = null;
+  showRechnenState(document.getElementById('rechnen-solve'));
+});
+document.getElementById('rechnen-next-btn').addEventListener('click', generateMathAufgabe);
+
+setupCanvasEvents();
+
+async function generateMathAufgabe() {
+  if (!sessionMeta) { alert('Bitte zuerst ein Fach öffnen.'); return; }
+  document.getElementById('rechnen-loading-txt').textContent = 'Aufgabe wird erstellt…';
+  showRechnenState(document.getElementById('rechnen-loading'));
+
+  const prompt = `Erstelle EINE einzelne Rechenaufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
+
+Regeln:
+- Genau eine Aufgabe, klar und präzise formuliert
+- Leicht = direkte Berechnung (1–2 Schritte) | Mittel = mehrere Schritte | Schwer = komplexe Aufgabe
+- Verwende LaTeX für alle Formeln und Gleichungen ($$...$$)
+- Schließe mit einer klaren Handlungsaufforderung: "Berechne:", "Bestimme:", "Löse:" etc.
+- Keine Lösung – NUR die Aufgabenstellung
+
+Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
+
+  try {
+    const aufgabe = await claude(
+      [{ role: 'user', content: 'Rechenaufgabe erstellen.' }],
+      sysBlocks(prompt), 500,
+    );
+    currentAufgabe  = aufgabe.trim();
+    savedCanvasData = null;
+    undoStack       = [];
+    document.getElementById('aufgabe-display').innerHTML = safeHtml(md(currentAufgabe));
+    showRechnenState(document.getElementById('rechnen-solve'));
+  } catch (e) {
+    showRechnenState(document.getElementById('rechnen-idle'));
+    alert('Fehler: ' + e.message);
+  }
+}
+
+async function checkHandwriting() {
+  if (!mathCtx) return;
+  const canvas = document.getElementById('math-canvas');
+
+  // Detect whether anything was drawn (any non-white pixel)
+  const px = mathCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let hasInk = false;
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i] < 200 || px[i + 1] < 200 || px[i + 2] < 200) { hasInk = true; break; }
+  }
+  if (!hasInk) { alert('Bitte schreibe zuerst deine Lösung auf die Zeichenfläche.'); return; }
+
+  document.getElementById('rechnen-loading-txt').textContent = 'Lösung wird geprüft…';
+  showRechnenState(document.getElementById('rechnen-loading'));
+
+  const dataURL = canvas.toDataURL('image/png');
+  const base64  = dataURL.split(',')[1];
+
+  const checkPrompt = `Ein Schüler hat die folgende Aufgabe handschriftlich auf dem beigefügten Bild gelöst.
+
+**Aufgabe:** ${currentAufgabe}
+
+Analysiere die handgeschriebene Lösung im Bild und antworte auf Deutsch:
+
+## ✅ Richtig / ❌ Falsch
+Ist die finale Antwort korrekt? Eindeutige Aussage zuerst.
+
+## Lösungsweg des Schülers
+Was erkennst du auf dem Bild? Wie ist der Schüler vorgegangen?
+
+## Fehleranalyse (nur wenn falsch)
+Wo genau liegt der Fehler? Erkläre präzise warum er falsch ist.
+
+## Musterlösung
+Vollständiger korrekter Lösungsweg mit LaTeX-Notation ($$...$$).
+
+Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was du erkennst.`;
+
+  try {
+    const feedback = await claudeVision(base64, checkPrompt, sysBlocks(), 1800);
+    document.getElementById('result-aufgabe-txt').innerHTML = safeHtml(md(currentAufgabe));
+    document.getElementById('result-preview').src = dataURL;
+    document.getElementById('rechnen-feedback').innerHTML = safeHtml(md(feedback));
+    showRechnenState(document.getElementById('rechnen-result'));
+  } catch (e) {
+    showRechnenState(document.getElementById('rechnen-solve'));
+    requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
+    alert('Fehler beim Prüfen: ' + e.message);
   }
 }
 
