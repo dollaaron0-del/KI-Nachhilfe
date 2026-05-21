@@ -45,12 +45,46 @@ const DB = {
   setContent:  (id, v) => localforage.setItem(`cnt_${id}`, v),
   darkMode:    () => localforage.getItem('dark_mode'),
   setDarkMode: v  => localforage.setItem('dark_mode', v),
+  streak:      () => localforage.getItem('streak').then(v => v || { count: 0, lastDate: null }),
+  setStreak:   v  => localforage.setItem('streak', v),
+  cards:       id => localforage.getItem(`cards_${id}`).then(v => v || []),
+  setCards:    (id, v) => localforage.setItem(`cards_${id}`, v),
   async del(id) {
-    await Promise.all([localforage.removeItem(`meta_${id}`), localforage.removeItem(`cnt_${id}`)]);
+    await Promise.all([
+      localforage.removeItem(`meta_${id}`),
+      localforage.removeItem(`cnt_${id}`),
+      localforage.removeItem(`cards_${id}`),
+    ]);
     const list = await this.subjects();
     await this.setSubjects(list.filter(s => s.id !== id));
   },
 };
+
+// ── Streak ─────────────────────────────────────────────────────────────────
+async function touchStreak() {
+  const s = await DB.streak();
+  const today = new Date().toDateString();
+  const yest  = new Date(Date.now() - 86400000).toDateString();
+  if (s.lastDate === today) return s.count;
+  s.count = (s.lastDate === yest) ? s.count + 1 : 1;
+  s.lastDate = today;
+  await DB.setStreak(s);
+  renderStreak(s.count);
+  return s.count;
+}
+
+async function renderStreak(count) {
+  if (count === undefined) {
+    const s = await DB.streak();
+    const today = new Date().toDateString();
+    const yest  = new Date(Date.now() - 86400000).toDateString();
+    count = (s.lastDate === today || s.lastDate === yest) ? s.count : 0;
+  }
+  const el = document.getElementById('streak-badge');
+  if (!el) return;
+  el.textContent = count > 0 ? `🔥 ${count}` : '';
+  el.classList.toggle('hidden', count === 0);
+}
 
 // ── Anthropic API ──────────────────────────────────────────────────────────
 async function claude(messages, systemBlocks, maxTokens = 1500) {
@@ -535,6 +569,7 @@ function switchMode(mode) {
   if (mode === 'fehler') renderFehlerkatalog();
   if (mode === 'aufgaben') initAufgaben();
   if (mode === 'rechnen') initRechnen();
+  if (mode === 'karten') initKarten();
 }
 
 // ══ SCORE CHIP ════════════════════════════════════════════════════════════
@@ -722,6 +757,7 @@ Antworte NUR als JSON:
     const m  = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Modellantwort');
     const ev = JSON.parse(m[0]);
+    haptic(ev.score >= 2 ? 40 : [80,40,80]);
 
     sessionMeta.quizStats.questions.push({
       question: sessionMeta.currentQuestion, userAnswer: answer,
@@ -733,6 +769,7 @@ Antworte NUR als JSON:
     await DB.setMeta(sessionId, sessionMeta);
     await syncSubjectSummary();
     updateScoreChip();
+    touchStreak();
 
     const labels  = ['❌ Falsch (0/3)', '⚠️ Ansatz (1/3)', '🔶 Teilweise (2/3)', '✅ Korrekt (3/3)'];
     const classes = ['c0', 'c1', 'c2', 'c3'];
@@ -802,6 +839,7 @@ function selectBlitzAnswer(chosen, correct, question, explanation, grid, options
   });
 
   const isCorrect = chosen === correct;
+  haptic(isCorrect ? 40 : [80,40,80]);
   blitzResults.push({ correct: isCorrect });
 
   sessionMeta.quizStats.questions.push({
@@ -811,6 +849,7 @@ function selectBlitzAnswer(chosen, correct, question, explanation, grid, options
     correctAnswer: (options[correct] || '').replace(/^[A-D]:\s*/, '') + (explanation ? ' – ' + explanation : ''),
     feedback: explanation || '', ts: Date.now(), blitz: true,
   });
+  touchStreak();
 
   blitzIdx++;
   if (blitzIdx < 5) {
@@ -1011,6 +1050,7 @@ Format:
       <div class="gauge-meta">${questions.length} Fragen · Rohwert: ${raw}% → korrigiert: ${percent}% · Ziel: ${targetScore}%</div>`;
     document.getElementById('analysis-body').innerHTML = safeHtml(md(analysis));
     renderSparkline();
+    renderProgressChart();
     document.getElementById('analysis-loading').classList.add('hidden');
     document.getElementById('analysis-result').classList.remove('hidden');
   } catch (e) {
@@ -1095,6 +1135,10 @@ async function compressHistory(history) {
 }
 
 // ══ UTILS ═════════════════════════════════════════════════════════════════
+
+function haptic(pattern = 10) {
+  if (navigator.vibrate) navigator.vibrate(pattern);
+}
 
 function addMsg(container, role, text, rephraseCallback) {
   const w = document.createElement('div');
@@ -1568,9 +1612,399 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
   }
 }
 
+// ══ BACKUP / RESTORE ══════════════════════════════════════════════════════
+async function exportBackup() {
+  const subjects = await DB.subjects();
+  const payload = { v: 2, date: new Date().toISOString(), subjects: [] };
+  for (const s of subjects) {
+    payload.subjects.push({
+      summary: s,
+      meta:    await DB.meta(s.id),
+      content: await DB.content(s.id),
+      cards:   await DB.cards(s.id),
+    });
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `ki-backup-${new Date().toISOString().slice(0,10)}.json`,
+  });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importBackup(file) {
+  const data = JSON.parse(await file.text());
+  if (!data.subjects) throw new Error('Ungültiges Backup-Format');
+  const existing = await DB.subjects();
+  const existingIds = new Set(existing.map(s => s.id));
+  const toAdd = [];
+  for (const s of data.subjects) {
+    if (!s.summary) continue;
+    if (!existingIds.has(s.summary.id)) toAdd.push(s.summary);
+    if (s.meta)    await DB.setMeta(s.summary.id, s.meta);
+    if (s.content) await DB.setContent(s.summary.id, s.content);
+    if (s.cards)   await DB.setCards(s.summary.id, s.cards);
+  }
+  if (toAdd.length) await DB.setSubjects([...toAdd, ...existing]);
+  await loadSubjects();
+  alert(`✅ ${data.subjects.length} Fach/Fächer importiert.`);
+}
+
+document.getElementById('btn-export').addEventListener('click', exportBackup);
+document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-input').click());
+document.getElementById('import-input').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { await importBackup(f); } catch(err) { alert('Import-Fehler: ' + err.message); }
+  e.target.value = '';
+});
+
+// ══ CHEAT SHEET ═══════════════════════════════════════════════════════════
+document.getElementById('cheat-gen-btn').addEventListener('click', generateCheatSheet);
+document.getElementById('cheat-new-btn').addEventListener('click', () => {
+  document.getElementById('cheat-result').classList.add('hidden');
+  document.getElementById('cheat-idle').classList.remove('hidden');
+});
+
+async function generateCheatSheet() {
+  document.getElementById('cheat-idle').classList.add('hidden');
+  document.getElementById('cheat-loading').classList.remove('hidden');
+
+  const prompt = `Erstelle eine präzise, kompakte Zusammenfassung für "${sessionMeta.name}" als Cheat Sheet / Spickzettel.
+
+Struktur:
+# ${sessionMeta.name} – Zusammenfassung
+
+## Kernkonzepte
+- [Konzept]: [1-Satz-Erklärung]
+(alle wichtigen Konzepte)
+
+## Wichtige Formeln
+$$[Formel 1]$$
+*[Was die Formel bedeutet und wann sie gilt]*
+
+(alle relevanten Formeln mit LaTeX)
+
+## Definitionen
+**[Begriff]:** [präzise Definition]
+(alle Schlüsselbegriffe)
+
+## Merksätze & Faustregeln
+- [Wichtige Regeln, Ausnahmen, Tricks]
+
+## Typische Fehler ⚠️
+- [Was Schüler häufig falsch machen]
+
+Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
+
+  try {
+    const result = await claude(
+      [{ role: 'user', content: 'Zusammenfassung erstellen.' }],
+      sysBlocks(prompt), 3000,
+    );
+    document.getElementById('cheat-body').innerHTML = safeHtml(md(result));
+    document.getElementById('cheat-loading').classList.add('hidden');
+    document.getElementById('cheat-result').classList.remove('hidden');
+  } catch (e) {
+    document.getElementById('cheat-loading').classList.add('hidden');
+    document.getElementById('cheat-idle').classList.remove('hidden');
+    alert('Fehler: ' + e.message);
+  }
+}
+
+// ══ GLOSSAR ════════════════════════════════════════════════════════════════
+let glossarTerms = [];
+
+document.getElementById('glossar-gen-btn').addEventListener('click', generateGlossar);
+document.getElementById('glossar-new-btn').addEventListener('click', () => {
+  glossarTerms = [];
+  document.getElementById('glossar-result').classList.add('hidden');
+  document.getElementById('glossar-idle').classList.remove('hidden');
+});
+document.getElementById('glossar-search').addEventListener('input', e => {
+  renderGlossarList(e.target.value.toLowerCase());
+});
+
+async function generateGlossar() {
+  document.getElementById('glossar-idle').classList.add('hidden');
+  document.getElementById('glossar-loading').classList.remove('hidden');
+
+  const prompt = `Extrahiere alle wichtigen Fachbegriffe aus dem Lernstoff für "${sessionMeta.name}".
+Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
+[{"term":"Begriff","def":"Präzise 1-2 Satz Erklärung"},...]`;
+
+  try {
+    const raw  = await claude(
+      [{ role: 'user', content: 'Alle Fachbegriffe extrahieren.' }],
+      sysBlocks(prompt), 2500,
+    );
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('Keine Begriffe gefunden');
+    glossarTerms = JSON.parse(m[0]).filter(t => t.term && t.def);
+    glossarTerms.sort((a, b) => a.term.localeCompare(b.term, 'de'));
+    renderGlossarList('');
+    document.getElementById('glossar-loading').classList.add('hidden');
+    document.getElementById('glossar-result').classList.remove('hidden');
+  } catch (e) {
+    document.getElementById('glossar-loading').classList.add('hidden');
+    document.getElementById('glossar-idle').classList.remove('hidden');
+    alert('Fehler: ' + e.message);
+  }
+}
+
+function renderGlossarList(filter) {
+  const list    = document.getElementById('glossar-list');
+  const visible = filter ? glossarTerms.filter(t =>
+    t.term.toLowerCase().includes(filter) || t.def.toLowerCase().includes(filter)
+  ) : glossarTerms;
+  list.innerHTML = visible.map(t => `
+    <div class="glossar-item">
+      <div class="glossar-term">${esc(t.term)}</div>
+      <div class="glossar-def">${esc(t.def)}</div>
+    </div>`).join('');
+}
+
+// ══ CHART.JS FORTSCHRITTSDIAGRAMM ═════════════════════════════════════════
+let _progressChart = null;
+
+function renderProgressChart() {
+  const wrap = document.getElementById('chart-wrap');
+  const questions = (sessionMeta?.quizStats?.questions || []);
+  if (questions.length < 5) { if (wrap) wrap.classList.add('hidden'); return; }
+  if (wrap) wrap.classList.remove('hidden');
+
+  // Rolling 5-question average
+  const pcts = questions.map(q => Math.round(q.score / 3 * 100));
+  const rolling = pcts.map((_, i) => {
+    const w = pcts.slice(Math.max(0, i - 4), i + 1);
+    return Math.round(w.reduce((a, b) => a + b, 0) / w.length);
+  });
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.07)';
+  const textColor = isDark ? '#ebebf5' : '#1c1c1e';
+
+  if (_progressChart) _progressChart.destroy();
+  _progressChart = new Chart(document.getElementById('progress-chart'), {
+    type: 'line',
+    data: {
+      labels: questions.map((_, i) => i + 1),
+      datasets: [
+        {
+          label: 'Einzelantwort',
+          data: pcts,
+          borderColor: 'rgba(88,86,214,0.3)',
+          backgroundColor: 'transparent',
+          pointRadius: 3, pointBackgroundColor: 'rgba(88,86,214,0.5)',
+          tension: 0, borderWidth: 1,
+        },
+        {
+          label: 'Ø 5-Fragen',
+          data: rolling,
+          borderColor: '#5856d6',
+          backgroundColor: 'rgba(88,86,214,0.08)',
+          fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2.5,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { color: textColor, maxTicksLimit: 10 }, grid: { color: gridColor } },
+        y: { min: 0, max: 100, ticks: { callback: v => v + '%', color: textColor }, grid: { color: gridColor } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%` } },
+      },
+    },
+  });
+}
+
+// ══ KARTEIKARTEN ══════════════════════════════════════════════════════════
+let reviewQueue = [];
+let reviewIdx   = 0;
+let reviewStats = { again: 0, hard: 0, good: 0, easy: 0 };
+
+function srsUpdate(card, grade) {
+  if (grade < 2) {
+    card.interval    = 1;
+    card.repetitions = 0;
+  } else {
+    if      (card.repetitions === 0) card.interval = 1;
+    else if (card.repetitions === 1) card.interval = 6;
+    else card.interval = Math.round(card.interval * card.ef);
+    card.repetitions++;
+  }
+  card.ef  = Math.max(1.3, card.ef + 0.1 - (3 - grade) * (0.08 + (3 - grade) * 0.02));
+  card.due = Date.now() + card.interval * 86400000;
+  return card;
+}
+
+function showKartenState(el) {
+  document.querySelectorAll('#panel-karten .cx-state').forEach(s => s.classList.add('hidden'));
+  el.classList.remove('hidden');
+}
+
+async function initKarten() {
+  const cards = await DB.cards(sessionId);
+  const now   = Date.now();
+  const due   = cards.filter(c => c.due <= now);
+  const stats = document.getElementById('karten-stats');
+  const revBtn = document.getElementById('karten-review-btn');
+
+  if (!cards.length) {
+    stats.innerHTML = '<p style="color:var(--text2)">Noch keine Karten. Generiere sie aus deinen Dokumenten.</p>';
+    revBtn.style.display = 'none';
+  } else {
+    stats.innerHTML = `
+      <div class="karten-stat-row">
+        <span class="kstat">📦 ${cards.length} Karten gesamt</span>
+        <span class="kstat kstat-due">⏰ ${due.length} heute fällig</span>
+      </div>`;
+    revBtn.style.display = due.length ? '' : 'none';
+    if (!due.length) {
+      const next = Math.min(...cards.map(c => c.due));
+      const hrs  = Math.ceil((next - now) / 3600000);
+      stats.innerHTML += `<p style="color:var(--text2);font-size:14px;margin-top:8px">✅ Alle Karten erledigt! Nächste Wiederholung in ${hrs < 24 ? hrs + ' Std.' : Math.ceil(hrs/24) + ' Tagen'}</p>`;
+    }
+  }
+  showKartenState(document.getElementById('karten-idle'));
+}
+
+async function generateKarten() {
+  if (!sessionTxt) { alert('Bitte zuerst Dokumente hochladen.'); return; }
+  showKartenState(document.getElementById('karten-loading'));
+
+  const prompt = `Erstelle 15 hochwertige Karteikarten aus dem Lernstoff für "${sessionMeta.name}".
+
+Regeln:
+- Vorderseite: präzise Frage oder Begriff (max 2 Zeilen)
+- Rückseite: vollständige Antwort/Erklärung mit dem Kerninhalt (2–4 Sätze)
+- Mix aus: Begriffsdefinitionen, Konzeptfragen, Formelanwendungen, Zusammenhängen
+- Keine trivialen Fragen; echtes Verständnis prüfen
+- Formeln in LaTeX ($$...$$)
+
+Antworte NUR als JSON-Array:
+[{"front":"Frage oder Begriff","back":"Vollständige Antwort/Erklärung"},...]`;
+
+  try {
+    const raw  = await claude(
+      [{ role: 'user', content: 'Karteikarten erstellen.' }],
+      sysBlocks(prompt), 2500,
+    );
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('Keine Karten erkannt');
+    const parsed = JSON.parse(m[0]).filter(c => c.front && c.back);
+    const existing = await DB.cards(sessionId);
+    const newCards = parsed.map(c => ({
+      id:          Math.random().toString(36).slice(2),
+      front:       c.front,
+      back:        c.back,
+      interval:    1,
+      ef:          2.5,
+      repetitions: 0,
+      due:         Date.now(),
+    }));
+    await DB.setCards(sessionId, [...existing, ...newCards]);
+    await initKarten();
+  } catch (e) {
+    showKartenState(document.getElementById('karten-idle'));
+    alert('Fehler: ' + e.message);
+  }
+}
+
+async function startReview() {
+  const cards = await DB.cards(sessionId);
+  reviewQueue = cards.filter(c => c.due <= Date.now());
+  if (!reviewQueue.length) { await initKarten(); return; }
+  reviewIdx   = 0;
+  reviewStats = { again: 0, hard: 0, good: 0, easy: 0 };
+  showKartenState(document.getElementById('karten-review'));
+  showCard();
+}
+
+function showCard() {
+  const card   = reviewQueue[reviewIdx];
+  const total  = reviewQueue.length;
+  const pct    = Math.round(reviewIdx / total * 100);
+
+  document.getElementById('karten-counter').textContent = `${reviewIdx + 1} / ${total}`;
+  document.getElementById('karten-progress-fill').style.width = pct + '%';
+  document.getElementById('card-front-text').innerHTML = safeHtml(md(card.front));
+  document.getElementById('card-back-text').innerHTML  = safeHtml(md(card.back));
+
+  const flip = document.getElementById('card-flip');
+  flip.classList.remove('flipped');
+  document.getElementById('card-flip-btn').classList.remove('hidden');
+  document.getElementById('card-grade-row').classList.add('hidden');
+}
+
+document.getElementById('card-flip-btn').addEventListener('click', () => {
+  document.getElementById('card-flip').classList.add('flipped');
+  document.getElementById('card-flip-btn').classList.add('hidden');
+  document.getElementById('card-grade-row').classList.remove('hidden');
+  haptic(10);
+});
+
+document.querySelectorAll('.grade-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const grade = parseInt(btn.dataset.grade, 10);
+    haptic(grade >= 2 ? 40 : [60, 30, 60]);
+    const keys = ['again','hard','good','easy'];
+    reviewStats[keys[grade]]++;
+
+    const cards   = await DB.cards(sessionId);
+    const cardIdx = cards.findIndex(c => c.id === reviewQueue[reviewIdx].id);
+    if (cardIdx >= 0) {
+      srsUpdate(cards[cardIdx], grade);
+      await DB.setCards(sessionId, cards);
+      touchStreak();
+    }
+
+    reviewIdx++;
+    if (reviewIdx >= reviewQueue.length) {
+      endReview();
+    } else {
+      showCard();
+    }
+  });
+});
+
+function endReview() {
+  const total = reviewQueue.length;
+  const good  = reviewStats.good + reviewStats.easy;
+  const pct   = Math.round(good / total * 100);
+
+  document.getElementById('karten-done-title').textContent =
+    pct >= 80 ? '🌟 Ausgezeichnet!' : pct >= 60 ? '👍 Gut gemacht!' : '💪 Weiter üben!';
+  document.getElementById('karten-done-stats').innerHTML = `
+    <div class="done-stat-row">
+      <span class="done-stat">😄 Einfach: ${reviewStats.easy}</span>
+      <span class="done-stat">🙂 Gut: ${reviewStats.good}</span>
+      <span class="done-stat">😕 Schwer: ${reviewStats.hard}</span>
+      <span class="done-stat">😵 Nochmal: ${reviewStats.again}</span>
+    </div>
+    <div class="done-pct" style="color:${pct>=70?'var(--green)':pct>=50?'var(--yellow)':'var(--red)'}">${pct}% gewusst</div>`;
+  showKartenState(document.getElementById('karten-done'));
+}
+
+document.getElementById('karten-gen-btn').addEventListener('click', generateKarten);
+document.getElementById('karten-review-btn').addEventListener('click', startReview);
+document.getElementById('karten-done-btn').addEventListener('click', initKarten);
+
 // ══ INIT ══════════════════════════════════════════════════════════════════
 (async () => {
   await initDarkMode();
+  renderStreak();
   const key = await DB.apiKey();
   if (key) { showScreen('subjects-screen'); loadSubjects(); }
 })();
+
+// ── Service Worker ─────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}

@@ -158,7 +158,7 @@ html, body {
 .mode-tabs::-webkit-scrollbar { display: none; }
 
 .tab {
-  flex: 1; min-width: 76px; border: none; background: none;
+  flex: 1; min-width: 76px; flex-shrink: 0; border: none; background: none;
   height: 48px; font-size: 13px; font-weight: 500; color: var(--text2);
   cursor: pointer; border-bottom: 2.5px solid transparent;
   transition: color .15s, border-color .15s; white-space: nowrap;
@@ -872,3 +872,198 @@ html, body {
 .math-inline { display: inline; }
 .katex { font-size: 1.05em; }
 [data-theme="dark"] .katex { color: #f2f2f7; }
+
+/* ── Streak badge ────────────────────────────────────────────────────────── */
+.streak-badge {
+  font-size: 17px; font-weight: 700;
+  background: linear-gradient(135deg, #ff9500, #ff3b30);
+  color: #fff; border-radius: 20px; padding: 4px 13px; align-self: center;
+}
+
+/* ── Backup foot buttons ─────────────────────────────────────────────────── */
+/* (foot-btn already styled; no extra CSS needed) */
+
+/* ── Chart.js progress ───────────────────────────────────────────────────── */
+.chart-wrap {
+  background: var(--surface); border-radius: 12px;
+  padding: 16px; box-shadow: var(--shadow);
+  height: 190px; position: relative; margin-bottom: 4px;
+}
+
+/* ── Karteikarten ────────────────────────────────────────────────────────── */
+.karten-content {
+  display: flex; flex-direction: column; padding: 20px;
+  gap: 16px; overflow-y: auto; flex: 1; align-items: center;
+}
+#karten-idle { align-items: center; text-align: center; gap: 14px; width: 100%; max-width: 480px; }
+#karten-review { width: 100%; max-width: 540px; gap: 14px; align-items: stretch; }
+#karten-done { align-items: center; text-align: center; gap: 14px; width: 100%; max-width: 480px; }
+
+.karten-stat-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.kstat {
+  background: var(--surface); border-radius: 10px;
+  padding: 8px 16px; font-size: 14px; font-weight: 600; box-shadow: var(--shadow);
+}
+.kstat-due { background: var(--accent); color: #fff; }
+
+.karten-progress-bar { height: 4px; background: var(--border); border-radius: 2px; }
+.karten-progress-fill { height: 4px; background: var(--accent); border-radius: 2px; transition: width .3s; }
+.karten-counter { text-align: center; font-size: 13px; color: var(--text2); }
+
+/* Card flip animation */
+.card-scene { width: 100%; perspective: 1200px; }
+.card-flip {
+  width: 100%; min-height: 200px; position: relative;
+  transform-style: preserve-3d;
+  transition: transform .45s cubic-bezier(.4,0,.2,1);
+}
+.card-flip.flipped { transform: rotateY(180deg); }
+.card-face {
+  position: absolute; width: 100%; min-height: 200px;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: var(--surface); border-radius: 18px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 28px 22px; font-size: 17px; line-height: 1.6; text-align: center;
+}
+.card-back { transform: rotateY(180deg); }
+.card-face::before {
+  position: absolute; top: 13px; left: 16px;
+  font-size: 10px; font-weight: 700; letter-spacing: .7px; opacity: .5;
+}
+.card-front::before { content: 'FRAGE';   color: var(--accent); }
+.card-back::before  { content: 'ANTWORT'; color: var(--green); }
+
+.btn-flip { width: 100%; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 600; }
+
+.card-grade-row { display: flex; gap: 8px; }
+.grade-btn {
+  flex: 1; padding: 12px 4px; border-radius: 12px; border: none;
+  font-size: 12px; font-weight: 600; cursor: pointer; line-height: 1.3;
+  -webkit-tap-highlight-color: transparent;
+}
+.grade-0 { background: #ff3b30; color: #fff; }
+.grade-1 { background: #ff9500; color: #fff; }
+.grade-2 { background: #007aff; color: #fff; }
+.grade-3 { background: #34c759; color: #fff; }
+
+.done-stat-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 10px 0; }
+.done-stat {
+  background: var(--surface); border-radius: 10px;
+  padding: 8px 13px; font-size: 13px; font-weight: 600; box-shadow: var(--shadow);
+}
+.done-pct { font-size: 40px; font-weight: 800; margin-top: 4px; }
+.karten-done-stats { text-align: center; }
+
+/* ── Cheat Sheet ─────────────────────────────────────────────────────────── */
+.cheat-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: 16px; gap: 12px; }
+#cheat-idle { align-items: center; text-align: center; gap: 14px; padding: 32px 24px; }
+.cheat-toolbar { display: flex; gap: 8px; }
+.cheat-body {
+  background: var(--surface); border-radius: 12px;
+  padding: 20px; box-shadow: var(--shadow);
+  font-size: 15px; line-height: 1.7;
+}
+.cheat-body h1 { font-size: 20px; margin-bottom: 12px; }
+.cheat-body h2 {
+  font-size: 15px; margin: 18px 0 8px;
+  color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 4px;
+}
+
+/* ── Glossar ─────────────────────────────────────────────────────────────── */
+.glossar-content { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+#glossar-idle { align-items: center; text-align: center; gap: 14px; padding: 32px 24px; }
+.glossar-toolbar {
+  display: flex; gap: 8px; padding: 10px 14px;
+  background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.glossar-search {
+  flex: 1; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 10px; font-size: 15px;
+  background: var(--surface); color: var(--text);
+}
+.glossar-list { overflow-y: auto; -webkit-overflow-scrolling: touch; flex: 1; }
+.glossar-item { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.glossar-item:last-child { border-bottom: none; }
+.glossar-term { font-weight: 700; font-size: 15px; margin-bottom: 3px; color: var(--accent); }
+.glossar-def  { font-size: 14px; color: var(--text2); line-height: 1.5; }
+
+/* ── Lernstreak Badge ────────────────────────────────────────────────────── */
+.streak-badge {
+  font-size: 18px; font-weight: 700;
+  background: linear-gradient(135deg, #ff9500, #ff3b30);
+  color: white; border-radius: 20px;
+  padding: 4px 14px; align-self: center;
+}
+
+/* ── Chart.js Fortschrittsdiagramm ──────────────────────────────────────── */
+.chart-wrap { background: var(--surface); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); margin-bottom: 8px; height: 180px; position: relative; }
+
+/* ── Cheat Sheet ─────────────────────────────────────────────────────────── */
+.cheat-content { display: flex; flex-direction: column; flex: 1; overflow-y: auto; padding: 16px; gap: 14px; }
+.cheat-toolbar { display: flex; gap: 8px; margin-bottom: 4px; }
+.cheat-body { background: var(--surface); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); line-height: 1.7; font-size: 15px; }
+.cheat-body h1 { font-size: 20px; margin-bottom: 12px; }
+.cheat-body h2 { font-size: 16px; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+
+/* ── Glossar ─────────────────────────────────────────────────────────────── */
+.glossar-content { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.glossar-toolbar { display: flex; gap: 8px; padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.glossar-search { flex: 1; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 15px; background: var(--surface); color: var(--text); }
+.glossar-list { overflow-y: auto; -webkit-overflow-scrolling: touch; flex: 1; padding: 8px 12px; }
+.glossar-item { padding: 12px; border-bottom: 1px solid var(--border); }
+.glossar-item:last-child { border-bottom: none; }
+.glossar-term { font-weight: 700; font-size: 15px; margin-bottom: 4px; color: var(--accent); }
+.glossar-def { font-size: 14px; color: var(--text2); line-height: 1.5; }
+
+/* ── Karteikarten ────────────────────────────────────────────────────────── */
+.karten-content { display: flex; flex-direction: column; padding: 20px; gap: 14px; overflow-y: auto; flex: 1; }
+#karten-idle { align-items: center; text-align: center; gap: 14px; }
+.karten-stats { width: 100%; }
+.karten-stat-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.kstat { background: var(--surface); border-radius: 10px; padding: 8px 14px; font-size: 14px; font-weight: 600; box-shadow: var(--shadow); }
+.kstat-due { background: var(--accent); color: white; }
+
+.karten-progress-bar { height: 4px; background: var(--border); border-radius: 2px; width: 100%; }
+.karten-progress-fill { height: 4px; background: var(--accent); border-radius: 2px; transition: width .3s; }
+.karten-counter { text-align: center; font-size: 13px; color: var(--text2); }
+
+/* Card flip */
+.card-scene { width: 100%; perspective: 1200px; cursor: pointer; }
+.card-flip {
+  width: 100%; min-height: 220px;
+  position: relative; transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(.4,0,.2,1);
+}
+.card-flip.flipped { transform: rotateY(180deg); }
+.card-face {
+  position: absolute; width: 100%; min-height: 220px;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  background: var(--surface); border-radius: 16px;
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 24px; font-size: 17px; line-height: 1.6; text-align: center;
+}
+.card-back { transform: rotateY(180deg); }
+.card-front::before { content: 'FRAGE'; font-size: 10px; font-weight: 700; letter-spacing: .8px; color: var(--accent); position: absolute; top: 14px; left: 16px; }
+.card-back::before  { content: 'ANTWORT'; font-size: 10px; font-weight: 700; letter-spacing: .8px; color: var(--green); position: absolute; top: 14px; left: 16px; }
+
+.btn-flip {
+  width: 100%; padding: 14px;
+  border-radius: 12px; font-size: 15px; font-weight: 600;
+}
+.card-grade-row { display: flex; gap: 8px; }
+.grade-btn {
+  flex: 1; padding: 12px 4px; border-radius: 12px;
+  border: none; font-size: 12px; font-weight: 600; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.grade-0 { background: #ff3b30; color: white; }
+.grade-1 { background: #ff9500; color: white; }
+.grade-2 { background: #007aff; color: white; }
+.grade-3 { background: #34c759; color: white; }
+
+.done-stat-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 12px 0; }
+.done-stat { background: var(--surface); border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 600; box-shadow: var(--shadow); }
+.done-pct { font-size: 36px; font-weight: 700; }
+.karten-done-stats { text-align: center; }
