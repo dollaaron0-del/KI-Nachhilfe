@@ -1,0 +1,13 @@
+{
+  "name": "KI-Nachhilfelehrer",
+  "short_name": "Nachhilfe",
+  "description": "Dein persönlicher KI-Nachhilfelehrer",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#5856d6",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

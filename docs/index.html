@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
@@ -39,6 +42,7 @@
       <h1>🎓 Meine Fächer</h1>
       <p>Wähle ein Fach oder erstelle ein neues</p>
     </div>
+    <span class="streak-badge hidden" id="streak-badge"></span>
     <button class="btn-new" id="btn-new-subject">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
         <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -56,6 +60,9 @@
     </div>
   </div>
   <div class="subj-foot">
+    <button class="foot-btn" id="btn-export" title="Backup exportieren">💾</button>
+    <button class="foot-btn" id="btn-import" title="Backup importieren">📥</button>
+    <input type="file" id="import-input" accept=".json" style="display:none" />
     <button class="foot-btn" id="btn-dark-toggle" title="Dark Mode">🌙</button>
     <button class="foot-btn" id="settings-btn" title="API-Key ändern">⚙️</button>
   </div>
@@ -92,6 +99,9 @@
     <button class="tab" data-mode="fehler">📋 Fehler</button>
     <button class="tab" data-mode="aufgaben">🎯 Aufgaben</button>
     <button class="tab" data-mode="rechnen">✏️ Rechnen</button>
+    <button class="tab" data-mode="karten">🃏 Karten</button>
+    <button class="tab" data-mode="cheat">📄 Cheat</button>
+    <button class="tab" data-mode="glossar">📖 Glossar</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -234,6 +244,9 @@
       <div id="analysis-result" class="cx-state hidden">
         <div class="gauge" id="gauge"></div>
         <div class="spark-wrap" id="spark-wrap"></div>
+        <div class="chart-wrap hidden" id="chart-wrap">
+          <canvas id="progress-chart" height="160"></canvas>
+        </div>
         <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
         <div class="analysis-body" id="analysis-body"></div>
         <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
@@ -343,6 +356,101 @@
 
     </div>
   </div>
+
+  <!-- ── KARTEN (SRS) ── -->
+  <div id="panel-karten" class="panel">
+    <div class="karten-content">
+
+      <div id="karten-idle" class="cx-state">
+        <div class="big-icon">🃏</div>
+        <h2>Karteikarten</h2>
+        <p>Lerne mit Spaced Repetition – die wissenschaftlich effektivste Methode. Karten die du nicht kennst, kommen früher wieder.</p>
+        <div class="karten-stats" id="karten-stats"></div>
+        <button class="btn-primary" id="karten-review-btn" style="display:none">Heute lernen</button>
+        <button class="btn-secondary" id="karten-gen-btn">🔄 Neue Karten generieren</button>
+      </div>
+
+      <div id="karten-loading" class="cx-state hidden">
+        <div class="big-icon spin">🃏</div>
+        <p>Karteikarten werden erstellt…</p>
+      </div>
+
+      <div id="karten-review" class="cx-state hidden">
+        <div class="karten-progress-bar">
+          <div class="karten-progress-fill" id="karten-progress-fill"></div>
+        </div>
+        <div class="karten-counter" id="karten-counter">1 / 10</div>
+        <div class="card-scene" id="card-scene">
+          <div class="card-flip" id="card-flip">
+            <div class="card-face card-front" id="card-front-text"></div>
+            <div class="card-face card-back"  id="card-back-text"></div>
+          </div>
+        </div>
+        <button class="btn-secondary btn-flip" id="card-flip-btn">Umdrehen 👆</button>
+        <div class="card-grade-row hidden" id="card-grade-row">
+          <button class="grade-btn grade-0" data-grade="0">😵 Nochmal</button>
+          <button class="grade-btn grade-1" data-grade="1">😕 Schwer</button>
+          <button class="grade-btn grade-2" data-grade="2">🙂 Gut</button>
+          <button class="grade-btn grade-3" data-grade="3">😄 Einfach</button>
+        </div>
+      </div>
+
+      <div id="karten-done" class="cx-state hidden">
+        <div class="big-icon">🎉</div>
+        <h2 id="karten-done-title">Session abgeschlossen!</h2>
+        <div class="karten-done-stats" id="karten-done-stats"></div>
+        <button class="btn-primary" id="karten-done-btn">Zurück zur Übersicht</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── CHEAT SHEET ── -->
+  <div id="panel-cheat" class="panel">
+    <div class="cheat-content">
+      <div id="cheat-idle" class="cx-state">
+        <div class="big-icon">📄</div>
+        <h2>Zusammenfassung</h2>
+        <p>Ich erstelle eine kompakte Zusammenfassung mit allen wichtigen Konzepten, Formeln und Definitionen – ideal zum Ausdrucken vor der Prüfung.</p>
+        <button class="btn-primary" id="cheat-gen-btn">Zusammenfassung erstellen</button>
+      </div>
+      <div id="cheat-loading" class="cx-state hidden">
+        <div class="big-icon spin">📝</div>
+        <p>Zusammenfassung wird erstellt…</p>
+      </div>
+      <div id="cheat-result" class="cx-state hidden">
+        <div class="cheat-toolbar">
+          <button class="btn-secondary btn-sm" id="cheat-new-btn">Neu erstellen</button>
+          <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
+        </div>
+        <div class="cheat-body" id="cheat-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GLOSSAR ── -->
+  <div id="panel-glossar" class="panel">
+    <div class="glossar-content">
+      <div id="glossar-idle" class="cx-state">
+        <div class="big-icon">📖</div>
+        <h2>Fachbegriffs-Glossar</h2>
+        <p>Ich extrahiere alle Fachbegriffe aus deinen Dokumenten und erkläre sie präzise.</p>
+        <button class="btn-primary" id="glossar-gen-btn">Glossar erstellen</button>
+      </div>
+      <div id="glossar-loading" class="cx-state hidden">
+        <div class="big-icon spin">📖</div>
+        <p>Fachbegriffe werden extrahiert…</p>
+      </div>
+      <div id="glossar-result" class="cx-state hidden">
+        <div class="glossar-toolbar">
+          <input class="glossar-search" id="glossar-search" type="search" placeholder="Begriff suchen…" />
+          <button class="btn-secondary btn-sm" id="glossar-new-btn">Neu</button>
+        </div>
+        <div class="glossar-list" id="glossar-list"></div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══ SUBJECT CREATION MODAL ═════════════════════════════════════════════ -->
@@ -393,6 +501,7 @@
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
