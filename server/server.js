@@ -120,6 +120,21 @@ app.get('/api/subjects/:id/documents', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Accept pre-extracted text (from client-side PDF.js)
+app.post('/api/subjects/:id/documents/text', async (req, res) => {
+  const { filename, content } = req.body;
+  if (!filename || !content) return res.status(400).json({ error: 'filename und content erforderlich' });
+  try {
+    const { rows } = await pool.query(
+      'INSERT INTO documents (subject_id,filename,content) VALUES ($1,$2,$3) RETURNING id,filename,uploaded_at',
+      [req.params.id, filename, content]
+    );
+    // Auto-generate cards in background
+    autoGenerateCards(req.params.id, filename, content).catch(e => console.error('Auto-cards:', e.message));
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/subjects/:id/documents', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei' });
   try {
@@ -166,15 +181,46 @@ app.post('/api/claude', claudeLimit, async (req, res) => {
     // Fetch subject documents as context if subject_id provided
     let systemContent = system || '';
     if (req.body.subject_id) {
-      const { rows } = await pool.query(
-        'SELECT filename,content FROM documents WHERE subject_id=$1',
-        [req.body.subject_id]
-      );
-      if (rows.length > 0) {
-        const docContext = rows.map(r => `[Dokument: ${r.filename}]\n${r.content.slice(0, 8000)}`).join('\n\n---\n\n');
+      const lastMsg = messages[messages.length - 1];
+      const query = typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 300) : '';
+
+      let docContext = '';
+      if (query) {
+        // Try RAG full-text search first
+        try {
+          const { rows: ragRows } = await pool.query(`
+            SELECT filename,
+                   ts_headline('german', content, plainto_tsquery('german', $1),
+                     'MaxWords=80, MinWords=30, StartSel=, StopSel=') AS snippet
+            FROM documents
+            WHERE subject_id = $2
+              AND length(content) > 10
+              AND to_tsvector('german', content) @@ plainto_tsquery('german', $1)
+            ORDER BY ts_rank(to_tsvector('german', content), plainto_tsquery('german', $1)) DESC
+            LIMIT 4
+          `, [query, req.body.subject_id]);
+
+          if (ragRows.length > 0) {
+            docContext = ragRows.map(r => `[${r.filename}]\n${r.snippet}`).join('\n\n---\n\n');
+          }
+        } catch {} // ts_headline may fail if query has special chars
+      }
+
+      if (!docContext) {
+        // Fallback: first 6000 chars of each doc
+        const { rows } = await pool.query(
+          'SELECT filename, content FROM documents WHERE subject_id=$1',
+          [req.body.subject_id]
+        );
+        if (rows.length > 0) {
+          docContext = rows.map(r => `[${r.filename}]\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
+        }
+      }
+
+      if (docContext) {
         systemContent = systemContent
-          ? `${systemContent}\n\n---\nHochgeladene Dokumente:\n${docContext}`
-          : `Hochgeladene Dokumente:\n${docContext}`;
+          ? `${systemContent}\n\n---\nDokumenten-Kontext:\n${docContext}`
+          : `Dokumanten-Kontext:\n${docContext}`;
       }
     }
 

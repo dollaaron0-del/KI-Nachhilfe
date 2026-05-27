@@ -33,30 +33,64 @@ let canvasLastX     = 0, canvasLastY = 0;
 let undoStack       = [];
 let savedCanvasData = null;
 
-// ── DB (localforage) ───────────────────────────────────────────────────────
+// ── DB (server-backed) ────────────────────────────────────────────────────
+const api = (url, opts = {}) =>
+  fetch(url, { headers: { 'content-type': 'application/json' }, ...opts })
+    .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); }));
+
 const DB = {
-  apiKey:      () => localforage.getItem('api_key'),
-  setApiKey:   k  => localforage.setItem('api_key', k),
-  subjects:    () => localforage.getItem('subjects').then(v => v || []),
-  setSubjects: v  => localforage.setItem('subjects', v),
+  // ── Server ──────────────────────────────────────────────────────────────
+  subjects:     () => api('/api/subjects').catch(() => []),
+  addSubject:   s  => api('/api/subjects', { method: 'POST', body: JSON.stringify({ id: s.id, name: s.name, emoji: s.icon || s.emoji || '📚' }) }),
+  delSubject:   id => fetch(`/api/subjects/${id}`, { method: 'DELETE' }),
+
+  messages:     id => api(`/api/subjects/${id}/messages`).catch(() => []),
+  addMessage:   (id, role, content) => fetch(`/api/subjects/${id}/messages`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ role, content }),
+  }).catch(() => {}),
+  clearMessages: id => fetch(`/api/subjects/${id}/messages`, { method: 'DELETE' }),
+
+  cards:    id    => api(`/api/subjects/${id}/cards`).catch(() => []),
+  setCards: (id, cards) => api(`/api/subjects/${id}/cards`, {
+    method: 'POST', body: JSON.stringify({ cards }),
+  }),
+
+  addQuizResult: (id, score, total) => fetch(`/api/subjects/${id}/quiz`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ score, total }),
+  }).catch(() => {}),
+  quizResults: id => api(`/api/subjects/${id}/quiz`).catch(() => []),
+
+  streak: async () => {
+    try { const s = await api('/api/streak'); return { count: s.count, lastDate: s.last_date }; }
+    catch { return { count: 0, lastDate: null }; }
+  },
+  setStreak: v => fetch('/api/streak', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ count: v.count, last_date: v.lastDate }),
+  }).catch(() => {}),
+
+  setGlossar: (id, terms) => api(`/api/subjects/${id}/glossar`, {
+    method: 'POST', body: JSON.stringify({ terms }),
+  }),
+
+  stats: id => api(`/api/subjects/${id}/stats`).catch(() => null),
+
+  // ── Local-only (ephemeral / preferences) ────────────────────────────────
+  darkMode:    () => localforage.getItem('dark_mode'),
+  setDarkMode: v  => localforage.setItem('dark_mode', v),
   meta:        id => localforage.getItem(`meta_${id}`),
   setMeta:     (id, v) => localforage.setItem(`meta_${id}`, v),
   content:     id => localforage.getItem(`cnt_${id}`).then(v => v || ''),
   setContent:  (id, v) => localforage.setItem(`cnt_${id}`, v),
-  darkMode:    () => localforage.getItem('dark_mode'),
-  setDarkMode: v  => localforage.setItem('dark_mode', v),
-  streak:      () => localforage.getItem('streak').then(v => v || { count: 0, lastDate: null }),
-  setStreak:   v  => localforage.setItem('streak', v),
-  cards:       id => localforage.getItem(`cards_${id}`).then(v => v || []),
-  setCards:    (id, v) => localforage.setItem(`cards_${id}`, v),
+
   async del(id) {
     await Promise.all([
+      this.delSubject(id),
       localforage.removeItem(`meta_${id}`),
       localforage.removeItem(`cnt_${id}`),
-      localforage.removeItem(`cards_${id}`),
     ]);
-    const list = await this.subjects();
-    await this.setSubjects(list.filter(s => s.id !== id));
   },
 };
 
@@ -91,7 +125,7 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
   const r = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, subject_id: sessionId }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -319,8 +353,7 @@ async function createSubject() {
     fileCount: 0, quizCount: 0, lastScore: null };
 
   const meta = { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
-  const list = await DB.subjects();
-  await Promise.all([DB.setSubjects([subj, ...list]), DB.setMeta(id, meta), DB.setContent(id, '')]);
+  await Promise.all([DB.addSubject(subj), DB.setMeta(id, meta)]);
 
   document.getElementById('subj-modal').classList.add('hidden');
   openSubject(subj);
@@ -329,9 +362,24 @@ async function createSubject() {
 // ══ OPEN SUBJECT ═══════════════════════════════════════════════════════════
 
 async function openSubject(subj) {
-  sessionId   = subj.id;
-  sessionMeta = await DB.meta(subj.id) || { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
-  sessionTxt  = await DB.content(subj.id);
+  sessionId = subj.id;
+  const [savedMeta, serverMsgs, quizRows, serverDocs] = await Promise.all([
+    DB.meta(subj.id),
+    DB.messages(subj.id),
+    DB.quizResults(subj.id),
+    api(`/api/subjects/${subj.id}/documents`).catch(() => []),
+  ]);
+  sessionMeta = savedMeta || { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
+  if (serverMsgs.length) sessionMeta.chatHistory = serverMsgs;
+  if (quizRows.length) {
+    sessionMeta.quizStats.questions = quizRows.map(r => ({
+      score: r.score, topic: '', blitz: false,
+    }));
+  }
+  if (serverDocs.length) {
+    sessionMeta.files = serverDocs.map(d => ({ name: d.filename, uploadedAt: d.uploaded_at }));
+  }
+  sessionTxt = await DB.content(subj.id);
   scannedTopics = []; selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
@@ -384,17 +432,7 @@ function updateHeaderPages() {
 }
 
 async function syncSubjectSummary() {
-  const q  = sessionMeta.quizStats.questions;
-  const sc = q.reduce((a, x) => a + x.score, 0);
-  const list = await DB.subjects();
-  const idx  = list.findIndex(s => s.id === sessionId);
-  if (idx >= 0) {
-    list[idx] = { ...list[idx],
-      fileCount: sessionMeta.files.length, quizCount: q.length,
-      lastScore: q.length ? Math.round(sc / (q.length * 3) * 100) : null,
-      updatedAt: new Date().toISOString() };
-    await DB.setSubjects(list);
-  }
+  // Stats are now live from server — nothing to sync locally
 }
 
 // ── Schwächen-Awareness ───────────────────────────────────────────────────
@@ -473,21 +511,25 @@ async function handleUpload(files) {
       const { text, pages, name } = await extractPDF(files[i]);
       added += '\n\n' + text;
       newFiles.push({ name, pages, uploadedAt: new Date().toISOString() });
+      // Save to server for RAG + auto-card generation
+      fetch(`/api/subjects/${sessionId}/documents/text`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: name, content: text }),
+      }).catch(() => {});
     }
     sessionTxt = (sessionTxt || '') + added;
     sessionMeta.files = [...(sessionMeta.files || []), ...newFiles];
     sessionMeta.updatedAt = new Date().toISOString();
 
     await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
-    await syncSubjectSummary();
 
     prog.classList.add('hidden');
-    status.textContent = `✓ ${newFiles.map(f => f.name).join(', ')} hochgeladen`;
+    status.textContent = `✓ ${newFiles.map(f => f.name).join(', ')} hochgeladen · Karteikarten werden generiert…`;
     status.className = 'sheet-status success';
     status.classList.remove('hidden');
     updateHeaderPages();
     document.getElementById('no-docs-banner').classList.add('hidden');
-    setTimeout(hideUploadSheet, 1500);
+    setTimeout(hideUploadSheet, 2000);
   } catch (err) {
     prog.classList.add('hidden');
     status.textContent = 'Fehler: ' + err.message;
@@ -514,6 +556,7 @@ function switchMode(mode) {
   if (mode === 'aufgaben') initAufgaben();
   if (mode === 'rechnen') initRechnen();
   if (mode === 'karten') initKarten();
+  if (mode === 'dashboard') initDashboard();
 }
 
 // ══ SCORE CHIP ════════════════════════════════════════════════════════════
@@ -547,12 +590,14 @@ async function sendChat() {
   addMsg(chatMessages, 'user', text);
   const typ = addTyping(chatMessages);
   sessionMeta.chatHistory.push({ role: 'user', content: text });
+  DB.addMessage(sessionId, 'user', text);
   try {
     const reply = await claude(sessionMeta.chatHistory, sysBlocks(
       'Erkläre mit echtem Verständnis – nicht nur Definitionen. Nutze Beispiele aus dem echten Leben, Analogien und erkläre den Hintergrund. ' +
       'Wenn etwas unklar wirkt, gehe tiefer. Wenn sinnvoll, stelle am Ende eine Denkfrage um das Verständnis zu festigen.'
     ));
     sessionMeta.chatHistory.push({ role: 'assistant', content: reply });
+    DB.addMessage(sessionId, 'assistant', reply);
     if (sessionMeta.chatHistory.length > 20) {
       sessionMeta.chatHistory = await compressHistory(sessionMeta.chatHistory);
     }
@@ -710,6 +755,7 @@ Antworte NUR als JSON:
       ts: Date.now(), blitz: false,
     });
     sessionMeta.currentQuestion = null;
+    DB.addQuizResult(sessionId, ev.score, 3);
     await DB.setMeta(sessionId, sessionMeta);
     await syncSubjectSummary();
     updateScoreChip();
@@ -1558,21 +1604,11 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
 
 // ══ BACKUP / RESTORE ══════════════════════════════════════════════════════
 async function exportBackup() {
-  const subjects = await DB.subjects();
-  const payload = { v: 2, date: new Date().toISOString(), subjects: [] };
-  for (const s of subjects) {
-    payload.subjects.push({
-      summary: s,
-      meta:    await DB.meta(s.id),
-      content: await DB.content(s.id),
-      cards:   await DB.cards(s.id),
-    });
-  }
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = Object.assign(document.createElement('a'), {
-    href: url,
-    download: `ki-backup-${new Date().toISOString().slice(0,10)}.json`,
+  const r = await fetch('/api/backup');
+  const blob = new Blob([JSON.stringify(await r.json(), null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a   = Object.assign(document.createElement('a'), {
+    href: url, download: `ki-backup-${new Date().toISOString().slice(0,10)}.json`,
   });
   a.click();
   URL.revokeObjectURL(url);
@@ -1581,17 +1617,10 @@ async function exportBackup() {
 async function importBackup(file) {
   const data = JSON.parse(await file.text());
   if (!data.subjects) throw new Error('Ungültiges Backup-Format');
-  const existing = await DB.subjects();
-  const existingIds = new Set(existing.map(s => s.id));
-  const toAdd = [];
-  for (const s of data.subjects) {
-    if (!s.summary) continue;
-    if (!existingIds.has(s.summary.id)) toAdd.push(s.summary);
-    if (s.meta)    await DB.setMeta(s.summary.id, s.meta);
-    if (s.content) await DB.setContent(s.summary.id, s.content);
-    if (s.cards)   await DB.setCards(s.summary.id, s.cards);
-  }
-  if (toAdd.length) await DB.setSubjects([...toAdd, ...existing]);
+  await fetch('/api/restore', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(data),
+  });
   await loadSubjects();
   alert(`✅ ${data.subjects.length} Fach/Fächer importiert.`);
 }
@@ -1688,6 +1717,7 @@ Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
     if (!m) throw new Error('Keine Begriffe gefunden');
     glossarTerms = JSON.parse(m[0]).filter(t => t.term && t.def);
     glossarTerms.sort((a, b) => a.term.localeCompare(b.term, 'de'));
+    DB.setGlossar(sessionId, glossarTerms.map(t => ({ term: t.term, definition: t.def }))).catch(() => {});
     renderGlossarList('');
     document.getElementById('glossar-loading').classList.add('hidden');
     document.getElementById('glossar-result').classList.remove('hidden');
@@ -1845,13 +1875,8 @@ Antworte NUR als JSON-Array:
     const parsed = JSON.parse(m[0]).filter(c => c.front && c.back);
     const existing = await DB.cards(sessionId);
     const newCards = parsed.map(c => ({
-      id:          Math.random().toString(36).slice(2),
-      front:       c.front,
-      back:        c.back,
-      interval:    1,
-      ef:          2.5,
-      repetitions: 0,
-      due:         Date.now(),
+      front: c.front, back: c.back,
+      interval: 1, ef: 2.5, repetitions: 0, due: Date.now(),
     }));
     await DB.setCards(sessionId, [...existing, ...newCards]);
     await initKarten();
@@ -1939,6 +1964,89 @@ function endReview() {
 document.getElementById('karten-gen-btn').addEventListener('click', generateKarten);
 document.getElementById('karten-review-btn').addEventListener('click', startReview);
 document.getElementById('karten-done-btn').addEventListener('click', initKarten);
+
+// ══ DASHBOARD ════════════════════════════════════════════════════════════
+
+async function initDashboard() {
+  const el = document.getElementById('panel-dashboard');
+  if (!el) return;
+  el.innerHTML = '<div class="dash-loading">Lädt…</div>';
+
+  const stats = await DB.stats(sessionId);
+  if (!stats) { el.innerHTML = '<div class="dash-loading">Keine Daten verfügbar.</div>'; return; }
+
+  const { quizCount, avgScore, quizHistory, cardsTotal, cardsDue, docCount, messageCount } = stats;
+
+  const scoreColor = p => p >= 70 ? 'var(--green)' : p >= 50 ? 'var(--yellow)' : 'var(--red)';
+
+  // Chart data
+  const labels = quizHistory.map((_, i) => `#${i + 1}`);
+  const scores = quizHistory.map(q => q.pct);
+
+  el.innerHTML = `
+    <div class="dash-content">
+      <div class="dash-kpi-row">
+        <div class="dash-kpi">
+          <div class="dash-kpi-val" style="color:${scoreColor(avgScore)}">${avgScore}%</div>
+          <div class="dash-kpi-lbl">Ø Quiz-Score</div>
+        </div>
+        <div class="dash-kpi">
+          <div class="dash-kpi-val">${quizCount}</div>
+          <div class="dash-kpi-lbl">Quizfragen</div>
+        </div>
+        <div class="dash-kpi">
+          <div class="dash-kpi-val" style="color:${cardsDue > 0 ? 'var(--red)' : 'var(--green)'}">${cardsDue}</div>
+          <div class="dash-kpi-lbl">Karten fällig</div>
+        </div>
+        <div class="dash-kpi">
+          <div class="dash-kpi-val">${cardsTotal}</div>
+          <div class="dash-kpi-lbl">Karten gesamt</div>
+        </div>
+      </div>
+      <div class="dash-kpi-row">
+        <div class="dash-kpi">
+          <div class="dash-kpi-val">${docCount}</div>
+          <div class="dash-kpi-lbl">Dokumente</div>
+        </div>
+        <div class="dash-kpi">
+          <div class="dash-kpi-val">${messageCount}</div>
+          <div class="dash-kpi-lbl">Chat-Nachrichten</div>
+        </div>
+      </div>
+      ${scores.length >= 2 ? `
+      <div class="dash-chart-wrap">
+        <div class="dash-chart-title">Quiz-Verlauf</div>
+        <canvas id="dash-chart" height="130"></canvas>
+      </div>` : '<div class="dash-empty">Noch zu wenige Quizdaten für einen Verlauf.</div>'}
+    </div>`;
+
+  if (scores.length >= 2) {
+    const ctx = document.getElementById('dash-chart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Score %',
+          data: scores,
+          borderColor: '#5856d6',
+          backgroundColor: 'rgba(88,86,214,0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 4,
+        }],
+      },
+      options: {
+        scales: {
+          y: { min: 0, max: 100, ticks: { callback: v => v + '%' } },
+          x: { grid: { display: false } },
+        },
+        plugins: { legend: { display: false } },
+        animation: false,
+      },
+    });
+  }
+}
 
 // ══ INIT ══════════════════════════════════════════════════════════════════
 (async () => {

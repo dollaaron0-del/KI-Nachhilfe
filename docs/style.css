@@ -987,3 +987,24 @@ html, body {
 .glossar-item:last-child { border-bottom: none; }
 .glossar-term { font-weight: 700; font-size: 15px; margin-bottom: 3px; color: var(--accent); }
 .glossar-def  { font-size: 14px; color: var(--text2); line-height: 1.5; }
+
+/* ── Dashboard ───────────────────────────────────────────────────────────── */
+#panel-dashboard { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.dash-loading { display: flex; align-items: center; justify-content: center; height: 200px; color: var(--text2); font-size: 15px; }
+.dash-empty   { text-align: center; color: var(--text2); font-size: 14px; padding: 24px; }
+.dash-content { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.dash-kpi-row {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+}
+.dash-kpi {
+  background: var(--surface); border-radius: 14px;
+  padding: 16px 12px; text-align: center;
+  border: 1px solid var(--border);
+}
+.dash-kpi-val { font-size: 28px; font-weight: 700; line-height: 1.1; }
+.dash-kpi-lbl { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.dash-chart-wrap {
+  background: var(--surface); border-radius: 14px;
+  padding: 14px; border: 1px solid var(--border);
+}
+.dash-chart-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text2); }
