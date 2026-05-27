@@ -44,7 +44,7 @@ const upload = multer({
 });
 
 // ── Static frontend ────────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, '../Aktien/docs')));
+app.use(express.static(path.join(__dirname, '../docs')));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SUBJECTS
@@ -372,7 +372,7 @@ app.get('/api/health', async (req, res) => {
 
 // ── SPA fallback ───────────────────────────────────────────────────────────
 app.get('/{*path}', (req, res) => {
-  res.sendFile(path.join(__dirname, '../Aktien/docs/index.html'));
+  res.sendFile(path.join(__dirname, '../docs/index.html'));
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────
