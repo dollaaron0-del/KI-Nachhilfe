@@ -204,9 +204,6 @@ function showScreen(id) {
 // ══ SETUP SCREEN ══════════════════════════════════════════════════════════
 
 document.getElementById('save-key-btn').addEventListener('click', saveApiKey);
-document.getElementById('api-key-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') saveApiKey();
-});
 
 async function saveApiKey() {
   // Legacy: kept for compatibility, but no API key needed when using server
