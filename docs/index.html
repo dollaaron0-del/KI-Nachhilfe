@@ -15,22 +15,19 @@
 <body>
 
 <!-- ══ SETUP SCREEN ══════════════════════════════════════════════════════ -->
-<div id="setup-screen" class="screen active">
+<div id="setup-screen" class="screen">
   <div class="setup-wrap">
     <div class="logo">🎓</div>
     <h1>KI-Nachhilfelehrer</h1>
-    <p class="subtitle">Einmalig deinen API-Key eingeben – wird nur auf deinem iPad gespeichert</p>
+    <p class="subtitle">Server-Modus aktiv – kein API-Key erforderlich</p>
 
     <div class="setup-card">
-      <label class="field-lbl">Anthropic API-Key</label>
-      <input class="field-inp" type="password" id="api-key-input"
-             placeholder="sk-ant-api03-…" autocomplete="off" spellcheck="false" />
-      <p class="setup-hint">
-        Kostenlosen Key erstellen auf
-        <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>
+      <p class="setup-hint" style="text-align:center;margin:0 0 12px">
+        Alle Anfragen laufen über deinen eigenen Server.<br>
+        Dein API-Key ist sicher serverseitig gespeichert.
       </p>
       <div id="setup-error" class="sheet-status error hidden"></div>
-      <button class="btn-primary" id="save-key-btn">Speichern &amp; Starten</button>
+      <button class="btn-primary" id="save-key-btn" onclick="saveApiKey()">Zur App →</button>
     </div>
   </div>
 </div>

@@ -86,59 +86,37 @@ async function renderStreak(count) {
   el.classList.toggle('hidden', count === 0);
 }
 
-// ── Anthropic API ──────────────────────────────────────────────────────────
+// ── Anthropic API (via server proxy) ──────────────────────────────────────
 async function claude(messages, systemBlocks, maxTokens = 1500) {
-  const key = await DB.apiKey();
-  if (!key) throw new Error('Kein API-Key gespeichert');
-
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+  const r = await fetch('/api/claude', {
     method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: maxTokens, system: systemBlocks, messages }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
   });
-
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
-    if (r.status === 401) throw new Error('Ungültiger API-Key – bitte prüfen');
-    throw new Error(e.error?.message || `Fehler ${r.status}`);
+    throw new Error(e.error || `Serverfehler ${r.status}`);
   }
   return (await r.json()).content[0].text;
 }
 
-// ── Anthropic Vision API ───────────────────────────────────────────────────
+// ── Anthropic Vision API (via server proxy) ────────────────────────────────
 async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
-  const key = await DB.apiKey();
-  if (!key) throw new Error('Kein API-Key gespeichert');
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+  const messages = [{
+    role: 'user',
+    content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
+      { type: 'text', text: textPrompt },
+    ],
+  }];
+  const r = await fetch('/api/claude', {
     method: 'POST',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: maxTokens,
-      system: systemBlocks,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64 } },
-          { type: 'text', text: textPrompt },
-        ],
-      }],
-    }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
-    if (r.status === 401) throw new Error('Ungültiger API-Key – bitte prüfen');
-    throw new Error(e.error?.message || `Fehler ${r.status}`);
+    throw new Error(e.error || `Serverfehler ${r.status}`);
   }
   return (await r.json()).content[0].text;
 }
@@ -231,43 +209,12 @@ document.getElementById('api-key-input').addEventListener('keydown', e => {
 });
 
 async function saveApiKey() {
-  const key = document.getElementById('api-key-input').value.trim();
-  const err = document.getElementById('setup-error');
-  err.classList.add('hidden');
-
-  if (!key.startsWith('sk-ant-')) {
-    err.textContent = 'API-Key muss mit "sk-ant-" beginnen.';
-    err.classList.remove('hidden');
-    return;
-  }
-
-  document.getElementById('save-key-btn').textContent = 'Wird geprüft…';
-  document.getElementById('save-key-btn').disabled = true;
-
-  try {
-    await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 5, messages: [{ role: 'user', content: 'Hi' }] }),
-    });
-    await DB.setApiKey(key);
-    showScreen('subjects-screen');
-    loadSubjects();
-  } catch {
-    err.textContent = 'Verbindung fehlgeschlagen. Bitte Internetverbindung prüfen.';
-    err.classList.remove('hidden');
-  }
-  document.getElementById('save-key-btn').textContent = 'Speichern & Starten';
-  document.getElementById('save-key-btn').disabled = false;
+  // Legacy: kept for compatibility, but no API key needed when using server
+  showScreen('subjects-screen');
+  loadSubjects();
 }
 
 document.getElementById('settings-btn').addEventListener('click', () => {
-  document.getElementById('api-key-input').value = '';
   showScreen('setup-screen');
 });
 
@@ -2000,8 +1947,9 @@ document.getElementById('karten-done-btn').addEventListener('click', initKarten)
 (async () => {
   await initDarkMode();
   renderStreak();
-  const key = await DB.apiKey();
-  if (key) { showScreen('subjects-screen'); loadSubjects(); }
+  // API key now stored on server — go straight to subjects
+  showScreen('subjects-screen');
+  loadSubjects();
 })();
 
 // ── Service Worker ─────────────────────────────────────────────────────────
