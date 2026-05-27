@@ -134,6 +134,20 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
   return (await r.json()).content[0].text;
 }
 
+// ── Local model via Ollama (free, for batch tasks) ────────────────────────
+async function claudeLocal(messages, systemBlocks, maxTokens = 2000) {
+  const r = await fetch('/api/local', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || `Serverfehler ${r.status}`);
+  }
+  return (await r.json()).content[0].text;
+}
+
 // ── Anthropic Vision API (via server proxy) ────────────────────────────────
 async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
   const messages = [{
@@ -1673,7 +1687,7 @@ $$[Formel 1]$$
 Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
 
   try {
-    const result = await claude(
+    const result = await claudeLocal(
       [{ role: 'user', content: 'Zusammenfassung erstellen.' }],
       sysBlocks(prompt), 3000,
     );
@@ -1709,7 +1723,7 @@ Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
 [{"term":"Begriff","def":"Präzise 1-2 Satz Erklärung"},...]`;
 
   try {
-    const raw  = await claude(
+    const raw  = await claudeLocal(
       [{ role: 'user', content: 'Alle Fachbegriffe extrahieren.' }],
       sysBlocks(prompt), 2500,
     );
@@ -1866,7 +1880,7 @@ Antworte NUR als JSON-Array:
 [{"front":"Frage oder Begriff","back":"Vollständige Antwort/Erklärung"},...]`;
 
   try {
-    const raw  = await claude(
+    const raw  = await claudeLocal(
       [{ role: 'user', content: 'Karteikarten erstellen.' }],
       sysBlocks(prompt), 2500,
     );

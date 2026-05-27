@@ -240,6 +240,49 @@ app.post('/api/claude', claudeLimit, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// OLLAMA PROXY (local model — free, for batch tasks)
+// ═══════════════════════════════════════════════════════════════════════════
+const OLLAMA_MODEL = 'llama3.2:3b';
+const OLLAMA_URL   = 'http://localhost:11434/v1/chat/completions';
+
+async function callOllama(messages, maxTokens = 2000) {
+  const r = await fetch(OLLAMA_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: OLLAMA_MODEL, messages, max_tokens: maxTokens, stream: false }),
+  });
+  if (!r.ok) throw new Error(`Ollama error ${r.status}`);
+  const data = await r.json();
+  return data.choices[0].message.content;
+}
+
+app.post('/api/local', async (req, res) => {
+  const { messages, system, max_tokens } = req.body;
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array erforderlich' });
+  }
+  try {
+    const msgs = system
+      ? [{ role: 'system', content: system }, ...messages]
+      : messages;
+    const text = await callOllama(msgs, max_tokens || 2000);
+    // Return same shape as Claude so frontend code is identical
+    res.json({ content: [{ text }] });
+  } catch (e) {
+    console.error('Ollama error:', e.message);
+    // Fallback to Claude if Ollama is down
+    try {
+      const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
+      if (system) params.system = system;
+      const response = await anthropic.messages.create(params);
+      res.json(response);
+    } catch (e2) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // FLASHCARDS
 // ═══════════════════════════════════════════════════════════════════════════
 app.get('/api/subjects/:id/cards', async (req, res) => {
@@ -404,6 +447,54 @@ app.post('/api/restore', async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// ── Auto-card generation (uses Ollama) ────────────────────────────────────
+async function autoGenerateCards(subjectId, filename, content) {
+  const truncated = content.slice(0, 8000);
+  const text = await callOllama([{
+    role: 'user',
+    content: `Erstelle 12 Lernkarten (Frage/Antwort) aus diesem Text. Antworte NUR als JSON-Array ohne Erklärung:\n[{"front":"Frage?","back":"Antwort."},...]\n\nText:\n${truncated}`,
+  }], 2000);
+  const m = text.match(/\[[\s\S]*\]/);
+  if (!m) return;
+  const cards = JSON.parse(m[0]).filter(c => c.front && c.back);
+  for (const c of cards) {
+    await pool.query(
+      'INSERT INTO flashcards (subject_id,front,back,ef,interval,repetitions,due) VALUES ($1,$2,$3,2.5,1,0,0)',
+      [subjectId, c.front, c.back]
+    );
+  }
+  console.log(`Auto-generated ${cards.length} cards from "${filename}" using Ollama`);
+}
+
+// ── Stats endpoint ─────────────────────────────────────────────────────────
+app.get('/api/subjects/:id/stats', async (req, res) => {
+  const id = req.params.id;
+  try {
+    const [quizRes, cardsRes, docsRes, msgsRes] = await Promise.all([
+      pool.query('SELECT score, total, taken_at FROM quiz_results WHERE subject_id=$1 ORDER BY taken_at ASC', [id]),
+      pool.query('SELECT COUNT(*) AS total, COUNT(CASE WHEN due < $2 THEN 1 END) AS due FROM flashcards WHERE subject_id=$1', [id, Date.now()]),
+      pool.query('SELECT COUNT(*) AS count FROM documents WHERE subject_id=$1', [id]),
+      pool.query('SELECT COUNT(*) AS count FROM messages WHERE subject_id=$1', [id]),
+    ]);
+    const questions = quizRes.rows;
+    const avgScore = questions.length > 0
+      ? Math.round(questions.reduce((a, q) => a + q.score / q.total, 0) / questions.length * 100)
+      : 0;
+    res.json({
+      quizCount: questions.length,
+      avgScore,
+      quizHistory: questions.slice(-20).map(q => ({
+        pct: Math.round(q.score / q.total * 100),
+        date: q.taken_at,
+      })),
+      cardsTotal: parseInt(cardsRes.rows[0].total),
+      cardsDue: parseInt(cardsRes.rows[0].due),
+      docCount: parseInt(docsRes.rows[0].count),
+      messageCount: parseInt(msgsRes.rows[0].count),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Health check ───────────────────────────────────────────────────────────
