@@ -375,16 +375,26 @@ async function createSubject() {
   const name = document.getElementById('subj-name').value.trim();
   if (!name) { document.getElementById('subj-name').focus(); return; }
 
-  const id   = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  const subj = { id, name, icon: selIcon, color: selColor,
-    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-    fileCount: 0, quizCount: 0, lastScore: null };
+  const btn = document.getElementById('subj-create-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
 
-  const meta = { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
-  await Promise.all([DB.addSubject(subj), DB.setMeta(id, meta)]);
+  try {
+    const id   = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const subj = { id, name, icon: selIcon, color: selColor,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      fileCount: 0, quizCount: 0, lastScore: null };
 
-  document.getElementById('subj-modal').classList.add('hidden');
-  openSubject(subj);
+    const meta = { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
+    await Promise.all([DB.addSubject(subj), DB.setMeta(id, meta)]);
+
+    document.getElementById('subj-modal').classList.add('hidden');
+    openSubject(subj);
+  } catch (e) {
+    alert('Fehler beim Erstellen: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Fach erstellen';
+  }
 }
 
 // ══ OPEN SUBJECT ═══════════════════════════════════════════════════════════
