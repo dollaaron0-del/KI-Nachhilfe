@@ -134,6 +134,20 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
   return (await r.json()).content[0].text;
 }
 
+// ── Haiku for simple generation tasks (12x cheaper than Sonnet) ──────────
+async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
+  const r = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      messages, system: systemBlocks, max_tokens: maxTokens,
+      model: 'claude-haiku-4-5-20251001', subject_id: sessionId,
+    }),
+  });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Serverfehler ${r.status}`); }
+  return (await r.json()).content[0].text;
+}
+
 // ── Local model via Ollama (free, for batch tasks) ────────────────────────
 async function claudeLocal(messages, systemBlocks, maxTokens = 2000) {
   const r = await fetch('/api/local', {
@@ -714,7 +728,7 @@ ${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
 Antworte NUR mit der Frage, ohne Kommentar.`;
 
   try {
-    const q = await claude([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
+    const q = await claudeHaiku([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
     sessionMeta.currentQuestion = q.trim();
     await DB.setMeta(sessionId, sessionMeta);
     document.getElementById('q-box').textContent = q.trim();
@@ -815,7 +829,7 @@ Antworte NUR als JSON (kein Text davor oder danach):
 "correct" ist der 0-basierte Index der richtigen Option (0=A, 1=B, 2=C, 3=D).`;
 
   try {
-    const raw = await claude([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
+    const raw = await claudeHaiku([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Antwort');
     const data = JSON.parse(m[0]);
@@ -1123,7 +1137,7 @@ async function compressHistory(history) {
   ).join('\n\n');
 
   try {
-    const summary = await claude(
+    const summary = await claudeHaiku(
       [{ role: 'user', content: `Fasse dieses Gespräch in max. 150 Wörtern zusammen. Wichtige Fakten, Erklärungen und offene Fragen beibehalten:\n\n${convText}` }],
       [{ type: 'text', text: 'Du fasst Lernunterhaltungen prägnant zusammen.' }],
       400,
@@ -1550,7 +1564,7 @@ Regeln:
 Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
 
   try {
-    const aufgabe = await claude(
+    const aufgabe = await claudeHaiku(
       [{ role: 'user', content: 'Rechenaufgabe erstellen.' }],
       sysBlocks(prompt), 500,
     );

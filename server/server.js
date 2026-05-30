@@ -178,58 +178,54 @@ app.post('/api/claude', claudeLimit, async (req, res) => {
     return res.status(400).json({ error: 'messages array erforderlich' });
   }
   try {
-    // Fetch subject documents as context if subject_id provided
-    let systemContent = system || '';
+    // Build system blocks array (preserves cache_control for prompt caching)
+    let systemBlocks = Array.isArray(system)
+      ? system
+      : system ? [{ type: 'text', text: system }] : [];
+
+    // RAG: inject relevant document context if subject_id provided
     if (req.body.subject_id) {
       const lastMsg = messages[messages.length - 1];
       const query = typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 300) : '';
-
       let docContext = '';
+
       if (query) {
-        // Try RAG full-text search first
         try {
-          const { rows: ragRows } = await pool.query(`
+          const { rows } = await pool.query(`
             SELECT filename,
                    ts_headline('german', content, plainto_tsquery('german', $1),
                      'MaxWords=80, MinWords=30, StartSel=, StopSel=') AS snippet
             FROM documents
-            WHERE subject_id = $2
-              AND length(content) > 10
+            WHERE subject_id=$2 AND length(content) > 10
               AND to_tsvector('german', content) @@ plainto_tsquery('german', $1)
             ORDER BY ts_rank(to_tsvector('german', content), plainto_tsquery('german', $1)) DESC
             LIMIT 4
           `, [query, req.body.subject_id]);
-
-          if (ragRows.length > 0) {
-            docContext = ragRows.map(r => `[${r.filename}]\n${r.snippet}`).join('\n\n---\n\n');
-          }
-        } catch {} // ts_headline may fail if query has special chars
+          if (rows.length) docContext = rows.map(r => `[${r.filename}]\n${r.snippet}`).join('\n\n---\n\n');
+        } catch {}
       }
 
       if (!docContext) {
-        // Fallback: first 6000 chars of each doc
         const { rows } = await pool.query(
-          'SELECT filename, content FROM documents WHERE subject_id=$1',
-          [req.body.subject_id]
+          'SELECT filename, content FROM documents WHERE subject_id=$1', [req.body.subject_id]
         );
-        if (rows.length > 0) {
-          docContext = rows.map(r => `[${r.filename}]\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
-        }
+        if (rows.length) docContext = rows.map(r => `[${r.filename}]\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
       }
 
       if (docContext) {
-        systemContent = systemContent
-          ? `${systemContent}\n\n---\nDokumenten-Kontext:\n${docContext}`
-          : `Dokumanten-Kontext:\n${docContext}`;
+        systemBlocks = [...systemBlocks, { type: 'text', text: `Dokumenten-Kontext:\n${docContext}` }];
       }
     }
+
+    // Limit messages to last 12 to control costs
+    const trimmedMessages = messages.slice(-12);
 
     const params = {
       model: model || 'claude-sonnet-4-6',
       max_tokens: Math.min(max_tokens || 2000, 4096),
-      messages,
+      messages: trimmedMessages,
     };
-    if (systemContent) params.system = systemContent;
+    if (systemBlocks.length) params.system = systemBlocks;
 
     const response = await anthropic.messages.create(params);
     res.json(response);
