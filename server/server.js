@@ -225,7 +225,7 @@ app.post('/api/claude', claudeLimit, async (req, res) => {
     }
 
     const params = {
-      model: model || 'claude-opus-4-5',
+      model: model || 'claude-sonnet-4-6',
       max_tokens: Math.min(max_tokens || 2000, 4096),
       messages,
     };
