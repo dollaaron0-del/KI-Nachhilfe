@@ -222,7 +222,7 @@ ANTWORTFORMAT IM CHAT:
 4. Optional: eine einprägsame Eselsbrücke oder Verknüpfung zu anderen Konzepten
 
 --- UNTERLAGEN ---
-${sessionTxt || '(noch keine Dokumente hochgeladen)'}
+${sessionTxt ? sessionTxt.slice(0, 6000) + (sessionTxt.length > 6000 ? '\n[…gekürzt]' : '') : '(noch keine Dokumente hochgeladen)'}
 --- ENDE ---
 
 DIAGRAMME: Wenn es das Verständnis fördert, erstelle Mermaid-Diagramme in \`\`\`mermaid ... \`\`\` Blöcken.
@@ -300,7 +300,7 @@ function makeCard(s) {
     ? `<span class="card-score" style="background:${scoreColor(s.lastScore)}">${s.lastScore}%</span>` : '';
   div.innerHTML = `
     <button class="card-del" data-id="${s.id}">×</button>
-    <div class="card-icon">${s.icon}</div>
+    <div class="card-icon">${s.emoji || s.icon || '📚'}</div>
     <div class="card-name">${esc(s.name)}</div>
     <div class="card-meta">${meta}</div>
     ${scoreHtml}`;
@@ -422,7 +422,7 @@ async function openSubject(subj) {
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
-  document.getElementById('header-label').textContent = `${subj.icon}  ${subj.name}`;
+  document.getElementById('header-label').textContent = `${subj.emoji || subj.icon || '📚'}  ${subj.name}`;
   updateHeaderPages();
 
   const q = sessionMeta.quizStats.questions;
@@ -433,7 +433,7 @@ async function openSubject(subj) {
 
   document.getElementById('chat-messages').innerHTML = `
     <div class="welcome">
-      <div class="welcome-icon">${subj.icon}</div>
+      <div class="welcome-icon">${subj.emoji || subj.icon || '📚'}</div>
       <p>Stelle mir Fragen zu <strong>${esc(subj.name)}</strong>.<br>Ich erkläre alles geduldig!</p>
     </div>`;
 
