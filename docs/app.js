@@ -418,7 +418,8 @@ async function openSubject(subj) {
     sessionMeta.files = serverDocs.map(d => ({ name: d.filename, uploadedAt: d.uploaded_at }));
   }
   sessionTxt = await DB.content(subj.id);
-  scannedTopics = []; selTopic = null;
+  scannedTopics = (await localforage.getItem(`topics_${subj.id}`)) || [];
+  selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
   document.getElementById('header-label').textContent = `${subj.icon}  ${subj.name}`;
@@ -1307,6 +1308,7 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
     if (!m) throw new Error('Keine Themen erkannt');
     scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
+    await localforage.setItem(`topics_${sessionId}`, scannedTopics);
     renderTopicChips();
     showAufgabenState(document.getElementById('aufgaben-topics'));
   } catch (e) {
