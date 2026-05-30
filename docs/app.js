@@ -275,7 +275,21 @@ async function saveApiKey() {
 
 document.getElementById('settings-btn').addEventListener('click', () => {
   showScreen('setup-screen');
+  loadUsage();
 });
+
+async function loadUsage() {
+  try {
+    const u = await api('/api/usage');
+    const pct = Math.min(100, (u.today.cost_eur / u.limit_eur) * 100);
+    const color = pct >= 90 ? 'var(--red)' : pct >= 60 ? 'var(--yellow)' : 'var(--green)';
+    document.getElementById('usage-cost').textContent = `${u.today.cost_eur.toFixed(3)}€`;
+    document.getElementById('usage-cost').style.color = color;
+    document.getElementById('usage-limit').textContent = `${u.limit_eur.toFixed(2)}€ / Tag`;
+    document.getElementById('usage-bar').style.width = pct + '%';
+    document.getElementById('usage-bar').style.background = color;
+  } catch { /* ignore */ }
+}
 
 // ══ SUBJECTS SCREEN ════════════════════════════════════════════════════════
 

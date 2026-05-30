@@ -18,6 +18,33 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // ── Anthropic ──────────────────────────────────────────────────────────────
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Cost per token in EUR (approximate, based on USD/EUR 0.92)
+const TOKEN_COST = {
+  'claude-sonnet-4-6':        { in: 0.00000276, out: 0.0000138  },
+  'claude-haiku-4-5-20251001':{ in: 0.00000023, out: 0.00000115 },
+};
+const DAILY_LIMIT_EUR = parseFloat(process.env.DAILY_LIMIT_EUR || '1.0');
+
+async function checkDailyLimit() {
+  const today = new Date().toISOString().slice(0, 10);
+  const { rows } = await pool.query('SELECT cost_eur, calls FROM daily_usage WHERE date=$1', [today]);
+  return { today, cost: rows[0]?.cost_eur || 0, calls: rows[0]?.calls || 0 };
+}
+
+async function recordUsage(today, model, inputTokens, outputTokens) {
+  const mc = TOKEN_COST[model] || TOKEN_COST['claude-sonnet-4-6'];
+  const cost = inputTokens * mc.in + outputTokens * mc.out;
+  await pool.query(`
+    INSERT INTO daily_usage (date, cost_eur, calls, tokens_in, tokens_out)
+    VALUES ($1, $2, 1, $3, $4)
+    ON CONFLICT (date) DO UPDATE SET
+      cost_eur   = daily_usage.cost_eur + $2,
+      calls      = daily_usage.calls + 1,
+      tokens_in  = daily_usage.tokens_in + $3,
+      tokens_out = daily_usage.tokens_out + $4
+  `, [today, cost, inputTokens, outputTokens]);
+}
+
 // ── Middleware ─────────────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: false,  // CSP handled by nginx
@@ -227,7 +254,22 @@ app.post('/api/claude', claudeLimit, async (req, res) => {
     };
     if (systemBlocks.length) params.system = systemBlocks;
 
+    // Daily limit check
+    const { today, cost } = await checkDailyLimit();
+    if (cost >= DAILY_LIMIT_EUR) {
+      return res.status(429).json({
+        error: `Tageslimit erreicht (${cost.toFixed(2)}€ / ${DAILY_LIMIT_EUR}€). Morgen wieder verfügbar.`,
+      });
+    }
+
     const response = await anthropic.messages.create(params);
+
+    // Record usage asynchronously (don't block response)
+    recordUsage(today, params.model,
+      response.usage?.input_tokens || 0,
+      response.usage?.output_tokens || 0,
+    ).catch(e => console.error('Usage tracking error:', e.message));
+
     res.json(response);
   } catch (e) {
     console.error('Claude error:', e.message);
@@ -501,6 +543,16 @@ app.get('/api/health', async (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+app.get('/api/usage', async (req, res) => {
+  try {
+    const { cost, calls } = await checkDailyLimit();
+    const last7 = (await pool.query(
+      'SELECT date, cost_eur, calls FROM daily_usage ORDER BY date DESC LIMIT 7'
+    )).rows;
+    res.json({ today: { cost_eur: cost, calls }, limit_eur: DAILY_LIMIT_EUR, last7 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── SPA fallback ───────────────────────────────────────────────────────────

@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS streak (
 
 INSERT INTO streak (id, count, last_date) VALUES (1, 0, NULL) ON CONFLICT DO NOTHING;
 
+-- Daily API usage tracking
+CREATE TABLE IF NOT EXISTS daily_usage (
+  date       TEXT PRIMARY KEY,
+  cost_eur   FLOAT DEFAULT 0,
+  calls      INT DEFAULT 0,
+  tokens_in  INT DEFAULT 0,
+  tokens_out INT DEFAULT 0
+);
+
 -- Glossar terms
 CREATE TABLE IF NOT EXISTS glossar (
   id          SERIAL PRIMARY KEY,
