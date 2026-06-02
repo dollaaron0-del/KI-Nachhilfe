@@ -620,7 +620,7 @@
 </div>
 
 <div id="settings-sheet" class="sheet-overlay hidden">
-  <div class="sheet-bg" id="settings-bg"></div>
+  <div class="sheet-bg" id="settings-bg" onclick="document.getElementById('settings-sheet').classList.add('hidden')"></div>
   <div class="sheet">
     <div class="sheet-handle"></div>
     <h2 class="sheet-title">⚙️ Fach-Einstellungen</h2>
@@ -635,7 +635,7 @@
     </div>
     <div class="settings-actions">
       <button class="btn-primary" id="settings-save-btn">Speichern</button>
-      <button class="btn-secondary" id="settings-close-btn">Abbrechen</button>
+      <button class="btn-secondary" id="settings-close-btn" onclick="document.getElementById('settings-sheet').classList.add('hidden')">Abbrechen</button>
     </div>
   </div>
 </div>
