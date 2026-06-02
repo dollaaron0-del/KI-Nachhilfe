@@ -88,6 +88,41 @@ function switchAuthTab(mode) {
   document.getElementById('auth-error').classList.add('hidden');
 }
 
+let approvalPollInterval = null;
+
+function stopApprovalPolling() {
+  if (approvalPollInterval) { clearInterval(approvalPollInterval); approvalPollInterval = null; }
+}
+
+function startApprovalPolling(username, password) {
+  stopApprovalPolling();
+  approvalPollInterval = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/auth/approval-status?username=${encodeURIComponent(username)}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      if (!data.approved) return;
+      stopApprovalPolling();
+      // Auto-login with stored credentials
+      const lr = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!lr.ok) return;
+      const ld = await lr.json();
+      authToken    = ld.token;
+      authUsername = ld.username;
+      authIsAdmin  = ld.is_admin || false;
+      localStorage.setItem('auth_token',    authToken);
+      localStorage.setItem('auth_username', authUsername);
+      localStorage.setItem('auth_is_admin', authIsAdmin ? '1' : '0');
+      toast('✅ Dein Konto wurde freigeschaltet!', 'success', 4000);
+      onAuthSuccess();
+    } catch (_) {}
+  }, 10000);
+}
+
 document.getElementById('auth-submit-btn')?.addEventListener('click', async () => {
   const username = document.getElementById('auth-username').value.trim();
   const password = document.getElementById('auth-password').value;
@@ -95,6 +130,7 @@ document.getElementById('auth-submit-btn')?.addEventListener('click', async () =
   errEl.classList.add('hidden');
   if (!username || !password) { errEl.textContent = 'Bitte alle Felder ausfüllen.'; errEl.classList.remove('hidden'); return; }
   try {
+    stopApprovalPolling();
     document.getElementById('auth-submit-btn').textContent = '…';
     const r = await fetch(`/api/auth/${authMode}`, {
       method: 'POST',
@@ -107,6 +143,7 @@ document.getElementById('auth-submit-btn')?.addEventListener('click', async () =
       errEl.textContent = '⏳ ' + data.message;
       errEl.classList.remove('hidden');
       switchAuthTab(authMode);
+      startApprovalPolling(username, password);
       return;
     }
     errEl.style.color = '';

@@ -352,6 +352,18 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+app.get('/api/auth/approval-status', async (req, res) => {
+  const username = (req.query.username || '').toLowerCase().trim();
+  if (!username) return res.status(400).json({ error: 'username required' });
+  try {
+    const { rows } = await pool.query(
+      'SELECT approved FROM users WHERE LOWER(username)=$1', [username]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json({ approved: rows[0].approved });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/auth/approve', async (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).send('Ungültiger Link.');
