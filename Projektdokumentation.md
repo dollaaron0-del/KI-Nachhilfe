@@ -100,6 +100,24 @@ Der entscheidende Punkt: Im System-Prompt steht explizit, dass die KI **ausschli
 
 Claude bietet eine Funktion namens **Prompt Caching**: Wenn man denselben System-Prompt mehrfach schickt, kann der erste Teil gecacht werden und kostet bei Folge-Anfragen nur 10% des normalen Preises. Da der System-Prompt (mit Unterlagen, Lehrphilosophie, Formatierungsregeln) der mit Abstand längste Teil jeder Anfrage ist, reduziert das die API-Kosten erheblich – typischerweise um 50–70%.
 
+### Ollama – kostenlose KI für Batch-Aufgaben
+
+Nicht alles läuft über die kostenpflichtige Claude-API. Für bestimmte Aufgaben läuft auf demselben Server **Ollama** mit dem Modell **llama3.2:3b** – ein Open-Source-Sprachmodell, das lokal auf der Server-CPU ausgeführt wird und komplett kostenlos ist.
+
+Ollama übernimmt die „schweren" Batch-Aufgaben, bei denen viel Text verarbeitet wird, aber keine hochwertige Erklärung nötig ist:
+
+| Aufgabe | Modell |
+|---|---|
+| Zusammenfassung aus Unterlagen generieren | Ollama (llama3.2:3b) |
+| Glossar – alle Fachbegriffe extrahieren | Ollama (llama3.2:3b) |
+| Karteikarten aus Dokumenten generieren | Ollama (llama3.2:3b) |
+| Automatische Karteikarten beim Dokumenten-Upload | Ollama (llama3.2:3b) |
+| Chat-Erklärungen, Quiz, Klausuren | Claude Sonnet / Haiku |
+
+Fällt Ollama mal aus (z. B. Neustart des Servers), greift das Backend automatisch auf Claude Haiku als Fallback zurück – der Nutzer merkt davon nichts.
+
+Das Besondere daran: Wenn ein Dokument hochgeladen wird, generiert der Server im Hintergrund sofort automatisch 12 Karteikarten daraus – komplett kostenlos über Ollama, ohne dass der Nutzer etwas tun muss.
+
 ### Kostenmanagement
 
 Die Claude-API kostet Geld pro Anfrage. Um den Verbrauch zu kontrollieren:
@@ -107,7 +125,8 @@ Die Claude-API kostet Geld pro Anfrage. Um den Verbrauch zu kontrollieren:
 - Jede Anfrage wird mit einem geschätzten Preis getrackt
 - Wenn das Limit erreicht ist, werden weitere Anfragen blockiert
 - Bei 90% des Limits bekomme ich eine Telegram-Warnung mit Buttons zum sofortigen Erhöhen
-- Einfachere Aufgaben (schnelle Quiz-Fragen, Karteikarten) nutzen **Claude Haiku** statt **Claude Sonnet** – das ist etwa 10x günstiger bei kaum merklichem Qualitätsunterschied für einfache Aufgaben
+- Einfachere Aufgaben (schnelle Quiz-Fragen) nutzen **Claude Haiku** statt **Claude Sonnet** – das ist etwa 10x günstiger bei kaum merklichem Qualitätsunterschied für einfache Aufgaben
+- Batch-Aufgaben (Glossar, Zusammenfassung, Karteikarten) laufen komplett kostenlos über Ollama
 
 ---
 
