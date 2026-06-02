@@ -11,7 +11,21 @@ const Anthropic = require('@anthropic-ai/sdk');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'nachhilfe-secret-change-in-production';
+const JWT_SECRET    = process.env.JWT_SECRET    || 'nachhilfe-secret-change-in-production';
+const TG_TOKEN      = process.env.TELEGRAM_BOT_TOKEN;
+const TG_CHAT_ID    = process.env.TELEGRAM_ADMIN_CHAT_ID;
+const ADMIN_USER    = (process.env.ADMIN_USERNAME || '').toLowerCase();
+
+async function sendTelegram(text) {
+  if (!TG_TOKEN || !TG_CHAT_ID) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: 'Markdown', disable_web_page_preview: true }),
+    });
+  } catch (_) {}
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -109,20 +123,54 @@ function authMiddleware(req, res, next) {
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Benutzername und Passwort erforderlich' });
-  if (username.length < 3) return res.status(400).json({ error: 'Benutzername mindestens 3 Zeichen' });
-  if (password.length < 6) return res.status(400).json({ error: 'Passwort mindestens 6 Zeichen' });
+  if (username.length < 3)  return res.status(400).json({ error: 'Benutzername mindestens 3 Zeichen' });
+  if (password.length < 6)  return res.status(400).json({ error: 'Passwort mindestens 6 Zeichen' });
+  const uname = username.trim().toLowerCase();
   try {
+    // First user or ADMIN_USERNAME → auto-approved
+    const { rows: existing } = await pool.query('SELECT COUNT(*) FROM users');
+    const isFirst   = parseInt(existing[0].count) === 0;
+    const isAdmin   = ADMIN_USER && uname === ADMIN_USER;
+    const approved  = isFirst || isAdmin || !TG_TOKEN;
+    const approvalToken = approved ? null : require('crypto').randomBytes(24).toString('hex');
+
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
-      'INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id, username',
-      [username.trim().toLowerCase(), hash]
+      'INSERT INTO users (username, password_hash, approved, approval_token) VALUES ($1,$2,$3,$4) RETURNING id, username, approved',
+      [uname, hash, approved, approvalToken]
     );
+
+    if (!approved) {
+      const host = process.env.APP_URL || `http://161.97.166.88:8080`;
+      const link = `${host}/api/auth/approve?token=${approvalToken}`;
+      await sendTelegram(
+        `🆕 *Neuer Registrierungsantrag*\n\n👤 Benutzername: \`${uname}\`\n📅 ${new Date().toLocaleString('de-DE')}\n\n[✅ Jetzt freischalten](${link})`
+      );
+      return res.status(202).json({ pending: true, message: 'Dein Konto wartet auf Freischaltung durch den Admin.' });
+    }
+
     const token = jwt.sign({ id: rows[0].id, username: rows[0].username }, JWT_SECRET, { expiresIn: '30d' });
     res.json({ token, username: rows[0].username });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Benutzername bereits vergeben' });
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get('/api/auth/approve', async (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).send('Ungültiger Link.');
+  try {
+    const { rows } = await pool.query(
+      'UPDATE users SET approved=true, approval_token=NULL WHERE approval_token=$1 RETURNING username',
+      [token]
+    );
+    if (!rows.length) return res.status(404).send('Link ungültig oder bereits verwendet.');
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px">
+      <h1>✅ Konto freigeschaltet</h1>
+      <p>Der Benutzer <strong>${rows[0].username}</strong> kann sich jetzt anmelden.</p>
+    </body></html>`);
+  } catch (e) { res.status(500).send('Fehler: ' + e.message); }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -132,6 +180,8 @@ app.post('/api/auth/login', async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM users WHERE username=$1', [username.trim().toLowerCase()]);
     if (!rows.length || !(await bcrypt.compare(password, rows[0].password_hash)))
       return res.status(401).json({ error: 'Benutzername oder Passwort falsch' });
+    if (!rows[0].approved)
+      return res.status(403).json({ error: 'Dein Konto wurde noch nicht freigeschaltet. Bitte warte auf die Bestätigung.' });
     const token = jwt.sign({ id: rows[0].id, username: rows[0].username }, JWT_SECRET, { expiresIn: '30d' });
     res.json({ token, username: rows[0].username });
   } catch (e) { res.status(500).json({ error: e.message }); }

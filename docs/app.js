@@ -98,6 +98,14 @@ document.getElementById('auth-submit-btn')?.addEventListener('click', async () =
       body: JSON.stringify({ username, password }),
     });
     const data = await r.json();
+    if (r.status === 202 && data.pending) {
+      errEl.style.color = '#34c759';
+      errEl.textContent = '⏳ ' + data.message;
+      errEl.classList.remove('hidden');
+      switchAuthTab(authMode);
+      return;
+    }
+    errEl.style.color = '';
     if (!r.ok) { errEl.textContent = data.error; errEl.classList.remove('hidden'); switchAuthTab(authMode); return; }
     authToken = data.token;
     authUsername = data.username;

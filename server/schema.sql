@@ -1,10 +1,16 @@
 -- Users
 CREATE TABLE IF NOT EXISTS users (
-  id            SERIAL PRIMARY KEY,
-  username      TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
+  id             SERIAL PRIMARY KEY,
+  username       TEXT UNIQUE NOT NULL,
+  password_hash  TEXT NOT NULL,
+  approved       BOOLEAN NOT NULL DEFAULT FALSE,
+  approval_token TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approved       BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_token TEXT;
+-- Existing users (registered before approval system) are auto-approved
+UPDATE users SET approved=true WHERE approved=false AND approval_token IS NULL;
 
 -- Subjects (Fächer)
 CREATE TABLE IF NOT EXISTS subjects (
