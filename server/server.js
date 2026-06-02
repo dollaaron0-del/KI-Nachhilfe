@@ -22,7 +22,7 @@ async function sendTelegram(text) {
     await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: 'Markdown', disable_web_page_preview: true }),
+      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: 'HTML', disable_web_page_preview: true }),
     });
   } catch (_) {}
 }
@@ -34,7 +34,7 @@ async function sendTelegramButtons(text, buttons) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        chat_id: TG_CHAT_ID, text, parse_mode: 'Markdown',
+        chat_id: TG_CHAT_ID, text, parse_mode: 'HTML',
         reply_markup: { inline_keyboard: buttons },
       }),
     });
@@ -123,7 +123,7 @@ async function checkAndNotify90pct(today, newCost) {
     if (rows[0]?.notified_90pct) return;
     await pool.query('UPDATE daily_usage SET notified_90pct=true WHERE date=$1', [today]);
     await sendTelegramButtons(
-      `⚠️ *90% des Tageslimits erreicht!*\n\nVerbraucht: ${newCost.toFixed(3)}€ / ${limit.toFixed(2)}€\n\nLimit für heute erhöhen:`,
+      `⚠️ <b>90% des Tageslimits erreicht!</b>\n\nVerbraucht: ${newCost.toFixed(3)}€ / ${limit.toFixed(2)}€\n\nLimit für heute erhöhen:`,
       [[
         { text: '+0,50€', callback_data: 'addlimit:0.50' },
         { text: '+1,00€', callback_data: 'addlimit:1.00' },
@@ -252,7 +252,7 @@ app.post('/api/auth/register', async (req, res) => {
       const host = process.env.APP_URL || `http://161.97.166.88:8080`;
       const link = `${host}/api/auth/approve?token=${approvalToken}`;
       await sendTelegram(
-        `🆕 *Neuer Registrierungsantrag*\n\n👤 Benutzername: \`${uname}\`\n📅 ${new Date().toLocaleString('de-DE')}\n\n[✅ Jetzt freischalten](${link})`
+        `🆕 <b>Neuer Registrierungsantrag</b>\n\n👤 Benutzername: <code>${uname}</code>\n📅 ${new Date().toLocaleString('de-DE')}\n\n<a href="${link}">✅ Jetzt freischalten</a>`
       );
       return res.status(202).json({ pending: true, message: 'Dein Konto wartet auf Freischaltung durch den Admin.' });
     }
