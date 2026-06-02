@@ -54,6 +54,78 @@ mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose
 const ICONS  = ['📐','📊','🧪','🔬','🧬','📚','🖥️','⚖️','💰','🌍','🎨','🎵','🏥','🏛️','✈️','🔧','📡','🧮','⚗️','🔭','🤖','🧠','💡','🎯','🌱','🏋️'];
 const COLORS = ['#5856d6','#007aff','#34c759','#ff9500','#ff3b30','#ff2d55','#30b0c7','#a2845e'];
 
+// ── Auth ───────────────────────────────────────────────────────────────────
+let authToken = localStorage.getItem('auth_token') || '';
+let authUsername = localStorage.getItem('auth_username') || '';
+let authMode = 'login';
+
+function authHeaders() {
+  return authToken ? { 'content-type': 'application/json', 'authorization': `Bearer ${authToken}` }
+                   : { 'content-type': 'application/json' };
+}
+
+function switchAuthTab(mode) {
+  authMode = mode;
+  document.getElementById('auth-tab-login').classList.toggle('active', mode === 'login');
+  document.getElementById('auth-tab-register').classList.toggle('active', mode === 'register');
+  document.getElementById('auth-submit-btn').textContent = mode === 'login' ? 'Anmelden' : 'Konto erstellen';
+  document.getElementById('auth-error').classList.add('hidden');
+}
+
+document.getElementById('auth-submit-btn').addEventListener('click', async () => {
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden');
+  if (!username || !password) { errEl.textContent = 'Bitte alle Felder ausfüllen.'; errEl.classList.remove('hidden'); return; }
+  try {
+    document.getElementById('auth-submit-btn').textContent = '…';
+    const r = await fetch(`/api/auth/${authMode}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) { errEl.textContent = data.error; errEl.classList.remove('hidden'); switchAuthTab(authMode); return; }
+    authToken = data.token;
+    authUsername = data.username;
+    localStorage.setItem('auth_token', authToken);
+    localStorage.setItem('auth_username', authUsername);
+    onAuthSuccess();
+  } catch (e) { errEl.textContent = 'Verbindungsfehler.'; errEl.classList.remove('hidden'); switchAuthTab(authMode); }
+});
+
+['auth-username','auth-password'].forEach(id =>
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('auth-submit-btn').click();
+  })
+);
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  authToken = ''; authUsername = '';
+  localStorage.removeItem('auth_token'); localStorage.removeItem('auth_username');
+  showScreen('auth-screen');
+});
+
+function onAuthSuccess() {
+  document.getElementById('auth-username-badge').textContent = '👤 ' + authUsername;
+  showScreen('setup-screen');
+  loadUsage();
+  loadSubjects();
+}
+
+async function checkAuth() {
+  if (!authToken) { showScreen('auth-screen'); return; }
+  try {
+    const r = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${authToken}` } });
+    if (!r.ok) { authToken = ''; localStorage.removeItem('auth_token'); showScreen('auth-screen'); return; }
+    const data = await r.json();
+    authUsername = data.username;
+    localStorage.setItem('auth_username', authUsername);
+    onAuthSuccess();
+  } catch { showScreen('auth-screen'); }
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let sessionId      = null;
 let sessionMeta    = null;
@@ -80,21 +152,23 @@ let savedCanvasData = null;
 
 // ── DB (server-backed) ────────────────────────────────────────────────────
 const api = (url, opts = {}) =>
-  fetch(url, { headers: { 'content-type': 'application/json' }, ...opts })
-    .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); }));
+  fetch(url, {
+    headers: { 'content-type': 'application/json', ...(authToken ? { authorization: `Bearer ${authToken}` } : {}) },
+    ...opts,
+  }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); }));
 
 const DB = {
   // ── Server ──────────────────────────────────────────────────────────────
   subjects:     () => api('/api/subjects').catch(() => []),
   addSubject:   s  => api('/api/subjects', { method: 'POST', body: JSON.stringify({ id: s.id, name: s.name, emoji: s.icon || s.emoji || '📚', color: s.color || '#5856d6' }) }),
-  delSubject:   id => fetch(`/api/subjects/${id}`, { method: 'DELETE' }),
+  delSubject:   id => fetch(`/api/subjects/${id}`, { method: 'DELETE', headers: authHeaders() }),
 
   messages:     id => api(`/api/subjects/${id}/messages`).catch(() => []),
   addMessage:   (id, role, content) => fetch(`/api/subjects/${id}/messages`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ role, content }),
   }).catch(() => {}),
-  clearMessages: id => fetch(`/api/subjects/${id}/messages`, { method: 'DELETE' }),
+  clearMessages: id => fetch(`/api/subjects/${id}/messages`, { method: 'DELETE', headers: authHeaders() }),
 
   cards:    id    => api(`/api/subjects/${id}/cards`).catch(() => []),
   setCards: (id, cards) => api(`/api/subjects/${id}/cards`, {
@@ -102,7 +176,7 @@ const DB = {
   }),
 
   addQuizResult: (id, score, total) => fetch(`/api/subjects/${id}/quiz`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ score, total }),
   }).catch(() => {}),
   quizResults: id => api(`/api/subjects/${id}/quiz`).catch(() => []),
@@ -112,7 +186,7 @@ const DB = {
     catch { return { count: 0, lastDate: null }; }
   },
   setStreak: v => fetch('/api/streak', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST', headers: authHeaders(),
     body: JSON.stringify({ count: v.count, last_date: v.lastDate }),
   }).catch(() => {}),
 
@@ -190,7 +264,7 @@ function friendlyApiError(errStr, status) {
 async function claude(messages, systemBlocks, maxTokens = 1500) {
   const r = await fetch('/api/claude', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, subject_id: sessionId }),
   });
   if (!r.ok) {
@@ -218,7 +292,7 @@ async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
 async function claudeLocal(messages, systemBlocks, maxTokens = 2000) {
   const r = await fetch('/api/local', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
   });
   if (!r.ok) {
@@ -239,7 +313,7 @@ async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) 
   }];
   const r = await fetch('/api/claude', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
   });
   if (!r.ok) {
@@ -605,7 +679,7 @@ document.getElementById('settings-save-btn').addEventListener('click', async () 
   try {
     await fetch(`/api/subjects/${sessionId}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ custom_prompt: val }),
     });
     customPrompt = val;
@@ -679,7 +753,7 @@ async function renderDocList() {
       <button class="doc-del-btn" title="Löschen">🗑</button>`;
     row.querySelector('.doc-del-btn').addEventListener('click', async () => {
       if (!confirm(`"${doc.filename}" löschen?`)) return;
-      await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE' });
+      await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });
       renderDocList();
     });
     list.appendChild(row);
@@ -723,7 +797,7 @@ async function handleUpload(files) {
       newFiles.push({ name, pages, uploadedAt: new Date().toISOString() });
       // Save to server for RAG + auto-card generation
       fetch(`/api/subjects/${sessionId}/documents/text`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST', headers: authHeaders(),
         body: JSON.stringify({ filename: name, content: text }),
       }).catch(() => {});
     }
@@ -1977,7 +2051,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
 
 // ══ BACKUP / RESTORE ══════════════════════════════════════════════════════
 async function exportBackup() {
-  const r = await fetch('/api/backup');
+  const r = await fetch('/api/backup', { headers: authHeaders() });
   const blob = new Blob([JSON.stringify(await r.json(), null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a   = Object.assign(document.createElement('a'), {
@@ -1991,7 +2065,7 @@ async function importBackup(file) {
   const data = JSON.parse(await file.text());
   if (!data.subjects) throw new Error('Ungültiges Backup-Format');
   await fetch('/api/restore', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST', headers: authHeaders(),
     body: JSON.stringify(data),
   });
   await loadSubjects();
@@ -2457,9 +2531,7 @@ async function initDashboard() {
 (async () => {
   await initDarkMode();
   renderStreak();
-  // API key now stored on server — go straight to subjects
-  showScreen('subjects-screen');
-  loadSubjects();
+  await checkAuth();
 })();
 
 // ── Service Worker ─────────────────────────────────────────────────────────

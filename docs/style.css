@@ -1071,6 +1071,37 @@ html, body {
 }
 .dash-chart-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text2); }
 
+/* ── Auth Screen ─────────────────────────────────────────────────────────── */
+.auth-screen { display: flex; align-items: center; justify-content: center; }
+.auth-wrap { width: 100%; max-width: 380px; padding: 24px 20px; }
+.auth-wrap .logo { font-size: 52px; text-align: center; margin-bottom: 8px; }
+.auth-wrap h1 { text-align: center; font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+.auth-wrap .subtitle { text-align: center; color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+.auth-tabs { display: flex; background: var(--surface); border-radius: 12px; padding: 3px; margin-bottom: 16px; }
+.auth-tab {
+  flex: 1; padding: 8px; border: none; background: transparent;
+  border-radius: 10px; font-size: 14px; font-weight: 500; cursor: pointer; color: var(--text2);
+}
+.auth-tab.active { background: var(--accent); color: #fff; }
+.form-group { margin-bottom: 12px; }
+.form-label { display: block; font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
+.form-input {
+  width: 100%; padding: 12px 14px;
+  background: var(--bg); color: var(--text);
+  border: 1.5px solid var(--border); border-radius: 12px;
+  font-size: 15px; font-family: inherit;
+}
+.form-input:focus { outline: none; border-color: var(--accent); }
+.auth-error {
+  background: #ff3b3020; color: #ff3b30; border: 1px solid #ff3b3040;
+  border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 8px;
+}
+.auth-username-badge {
+  font-size: 13px; font-weight: 600; color: var(--text2);
+  background: var(--surface); border-radius: 20px; padding: 4px 12px;
+  border: 1px solid var(--border); white-space: nowrap;
+}
+
 /* ── Settings Sheet ──────────────────────────────────────────────────────── */
 .settings-section { padding: 0 16px 16px; }
 .settings-label {

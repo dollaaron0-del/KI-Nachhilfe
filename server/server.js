@@ -8,6 +8,10 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const Anthropic = require('@anthropic-ai/sdk');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'nachhilfe-secret-change-in-production';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -91,52 +95,98 @@ const upload = multer({
 app.use(express.static(path.join(__dirname, '../docs')));
 
 // ═══════════════════════════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════════════════════════
+function authMiddleware(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return res.status(401).json({ error: 'Nicht angemeldet' });
+  try {
+    req.user = jwt.verify(header.slice(7), JWT_SECRET);
+    next();
+  } catch { res.status(401).json({ error: 'Sitzung abgelaufen – bitte neu anmelden' }); }
+}
+
+app.post('/api/auth/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Benutzername und Passwort erforderlich' });
+  if (username.length < 3) return res.status(400).json({ error: 'Benutzername mindestens 3 Zeichen' });
+  if (password.length < 6) return res.status(400).json({ error: 'Passwort mindestens 6 Zeichen' });
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const { rows } = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1,$2) RETURNING id, username',
+      [username.trim().toLowerCase(), hash]
+    );
+    const token = jwt.sign({ id: rows[0].id, username: rows[0].username }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: rows[0].username });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'Benutzername bereits vergeben' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Benutzername und Passwort erforderlich' });
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE username=$1', [username.trim().toLowerCase()]);
+    if (!rows.length || !(await bcrypt.compare(password, rows[0].password_hash)))
+      return res.status(401).json({ error: 'Benutzername oder Passwort falsch' });
+    const token = jwt.sign({ id: rows[0].id, username: rows[0].username }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: rows[0].username });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/auth/me', authMiddleware, (req, res) => res.json({ username: req.user.username }));
+
+// ═══════════════════════════════════════════════════════════════════════════
 // SUBJECTS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects', async (req, res) => {
+app.get('/api/subjects', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT s.id, s.name, s.emoji, s.color, s.created_at,
+      SELECT s.id, s.name, s.emoji, s.color, s.custom_prompt, s.created_at,
         COUNT(DISTINCT d.id)::int        AS doc_count,
         COUNT(DISTINCT qr.id)::int       AS quiz_count,
         ROUND(AVG(qr.score::float / NULLIF(qr.total,0) * 100))::int AS avg_score
       FROM subjects s
       LEFT JOIN documents   d  ON d.subject_id  = s.id
       LEFT JOIN quiz_results qr ON qr.subject_id = s.id
+      WHERE s.user_id = $1
       GROUP BY s.id
       ORDER BY s.created_at ASC
-    `);
+    `, [req.user.id]);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects', async (req, res) => {
+app.post('/api/subjects', authMiddleware, async (req, res) => {
   const { id, name, emoji, color } = req.body;
   if (!id || !name) return res.status(400).json({ error: 'id und name erforderlich' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO subjects (id,name,emoji,color) VALUES ($1,$2,$3,$4)
+      `INSERT INTO subjects (id,name,emoji,color,user_id) VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3,color=$4 RETURNING *`,
-      [id, name, emoji || '📚', color || '#5856d6']
+      [id, name, emoji || '📚', color || '#5856d6', req.user.id]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.patch('/api/subjects/:id', async (req, res) => {
+app.patch('/api/subjects/:id', authMiddleware, async (req, res) => {
   const { custom_prompt } = req.body;
   try {
     const { rows } = await pool.query(
-      'UPDATE subjects SET custom_prompt=$1 WHERE id=$2 RETURNING *',
-      [custom_prompt || '', req.params.id]
+      'UPDATE subjects SET custom_prompt=$1 WHERE id=$2 AND user_id=$3 RETURNING *',
+      [custom_prompt || '', req.params.id, req.user.id]
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id', async (req, res) => {
+app.delete('/api/subjects/:id', authMiddleware, async (req, res) => {
   try {
-    await pool.query('DELETE FROM subjects WHERE id=$1', [req.params.id]);
+    await pool.query('DELETE FROM subjects WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -144,7 +194,7 @@ app.delete('/api/subjects/:id', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // MESSAGES (chat history)
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/messages', async (req, res) => {
+app.get('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT role,content FROM messages WHERE subject_id=$1 ORDER BY created_at ASC',
@@ -154,7 +204,7 @@ app.get('/api/subjects/:id/messages', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/messages', async (req, res) => {
+app.post('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
   const { role, content } = req.body;
   if (!role || !content) return res.status(400).json({ error: 'role und content erforderlich' });
   try {
@@ -166,7 +216,7 @@ app.post('/api/subjects/:id/messages', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/messages', async (req, res) => {
+app.delete('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM messages WHERE subject_id=$1', [req.params.id]);
     res.json({ ok: true });
@@ -176,7 +226,7 @@ app.delete('/api/subjects/:id/messages', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // DOCUMENTS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/documents', async (req, res) => {
+app.get('/api/subjects/:id/documents', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id,filename,uploaded_at FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC',
@@ -187,7 +237,7 @@ app.get('/api/subjects/:id/documents', async (req, res) => {
 });
 
 // Accept pre-extracted text (from client-side PDF.js)
-app.post('/api/subjects/:id/documents/text', async (req, res) => {
+app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) => {
   const { filename, content } = req.body;
   if (!filename || !content) return res.status(400).json({ error: 'filename und content erforderlich' });
   try {
@@ -228,7 +278,7 @@ app.post('/api/subjects/:id/documents', upload.single('file'), async (req, res) 
   }
 });
 
-app.delete('/api/subjects/:id/documents/:docId', async (req, res) => {
+app.delete('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM documents WHERE id=$1 AND subject_id=$2', [req.params.docId, req.params.id]);
     res.json({ ok: true });
@@ -238,7 +288,7 @@ app.delete('/api/subjects/:id/documents/:docId', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // CLAUDE PROXY (hides API key)
 // ═══════════════════════════════════════════════════════════════════════════
-app.post('/api/claude', claudeLimit, async (req, res) => {
+app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
   const { messages, system, max_tokens, model } = req.body;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
@@ -333,7 +383,7 @@ async function callOllama(messages, maxTokens = 2000) {
   return data.choices[0].message.content;
 }
 
-app.post('/api/local', async (req, res) => {
+app.post('/api/local', authMiddleware, async (req, res) => {
   const { messages, system, max_tokens } = req.body;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
@@ -362,7 +412,7 @@ app.post('/api/local', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // FLASHCARDS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/cards', async (req, res) => {
+app.get('/api/subjects/:id/cards', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT * FROM flashcards WHERE subject_id=$1 ORDER BY created_at ASC',
@@ -372,7 +422,7 @@ app.get('/api/subjects/:id/cards', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/cards', async (req, res) => {
+app.post('/api/subjects/:id/cards', authMiddleware, async (req, res) => {
   const { cards } = req.body; // array of {front,back,ef,interval,repetitions,due}
   if (!Array.isArray(cards)) return res.status(400).json({ error: 'cards array erforderlich' });
   try {
@@ -390,7 +440,7 @@ app.post('/api/subjects/:id/cards', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // QUIZ RESULTS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/quiz', async (req, res) => {
+app.get('/api/subjects/:id/quiz', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT score,total,taken_at FROM quiz_results WHERE subject_id=$1 ORDER BY taken_at ASC',
@@ -400,7 +450,7 @@ app.get('/api/subjects/:id/quiz', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/quiz', async (req, res) => {
+app.post('/api/subjects/:id/quiz', authMiddleware, async (req, res) => {
   const { score, total } = req.body;
   if (score == null || total == null) return res.status(400).json({ error: 'score und total erforderlich' });
   try {
@@ -415,14 +465,14 @@ app.post('/api/subjects/:id/quiz', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // STREAK
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/streak', async (req, res) => {
+app.get('/api/streak', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT count,last_date FROM streak WHERE id=1');
     res.json(rows[0] || { count: 0, last_date: null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/streak', async (req, res) => {
+app.post('/api/streak', authMiddleware, async (req, res) => {
   const { count, last_date } = req.body;
   try {
     await pool.query(
@@ -436,7 +486,7 @@ app.post('/api/streak', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // GLOSSAR
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/glossar', async (req, res) => {
+app.get('/api/subjects/:id/glossar', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id,term,definition FROM glossar WHERE subject_id=$1 ORDER BY term ASC',
@@ -446,7 +496,7 @@ app.get('/api/subjects/:id/glossar', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/glossar', async (req, res) => {
+app.post('/api/subjects/:id/glossar', authMiddleware, async (req, res) => {
   const { terms } = req.body; // array of {term, definition}
   if (!Array.isArray(terms)) return res.status(400).json({ error: 'terms array erforderlich' });
   try {
@@ -464,9 +514,9 @@ app.post('/api/subjects/:id/glossar', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // BACKUP / RESTORE
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/backup', async (req, res) => {
+app.get('/api/backup', authMiddleware, async (req, res) => {
   try {
-    const subjects = (await pool.query('SELECT * FROM subjects ORDER BY created_at')).rows;
+    const subjects = (await pool.query('SELECT * FROM subjects WHERE user_id=$1 ORDER BY created_at', [req.user.id])).rows;
     const backup = { version: 2, exportedAt: new Date().toISOString(), subjects: [] };
 
     for (const s of subjects) {
@@ -482,7 +532,7 @@ app.get('/api/backup', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/restore', async (req, res) => {
+app.post('/api/restore', authMiddleware, async (req, res) => {
   const { subjects } = req.body;
   if (!Array.isArray(subjects)) return res.status(400).json({ error: 'Ungültiges Backup-Format' });
 
@@ -491,8 +541,8 @@ app.post('/api/restore', async (req, res) => {
     await client.query('BEGIN');
     for (const s of subjects) {
       await client.query(
-        'INSERT INTO subjects (id,name,emoji) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3',
-        [s.id, s.name, s.emoji || '📚']
+        'INSERT INTO subjects (id,name,emoji,user_id) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3,user_id=$4',
+        [s.id, s.name, s.emoji || '📚', req.user.id]
       );
       if (s.messages?.length) {
         await client.query('DELETE FROM messages WHERE subject_id=$1', [s.id]);
@@ -546,7 +596,7 @@ async function autoGenerateCards(subjectId, filename, content) {
 }
 
 // ── Stats endpoint ─────────────────────────────────────────────────────────
-app.get('/api/subjects/:id/stats', async (req, res) => {
+app.get('/api/subjects/:id/stats', authMiddleware, async (req, res) => {
   const id = req.params.id;
   try {
     const [quizRes, cardsRes, docsRes, msgsRes] = await Promise.all([
@@ -584,7 +634,7 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-app.get('/api/usage', async (req, res) => {
+app.get('/api/usage', authMiddleware, async (req, res) => {
   try {
     const { cost, calls } = await checkDailyLimit();
     const last7 = (await pool.query(

@@ -1,3 +1,11 @@
+-- Users
+CREATE TABLE IF NOT EXISTS users (
+  id            SERIAL PRIMARY KEY,
+  username      TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Subjects (Fächer)
 CREATE TABLE IF NOT EXISTS subjects (
   id          TEXT PRIMARY KEY,
@@ -8,6 +16,7 @@ CREATE TABLE IF NOT EXISTS subjects (
 );
 ALTER TABLE subjects ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#5856d6';
 ALTER TABLE subjects ADD COLUMN IF NOT EXISTS custom_prompt TEXT NOT NULL DEFAULT '';
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS user_id INT REFERENCES users(id) ON DELETE CASCADE;
 
 -- Documents (uploaded PDFs / text)
 CREATE TABLE IF NOT EXISTS documents (

@@ -14,6 +14,35 @@
 </head>
 <body>
 
+<!-- ══ AUTH SCREEN ═══════════════════════════════════════════════════════ -->
+<div id="auth-screen" class="screen auth-screen">
+  <div class="auth-wrap">
+    <div class="logo">🎓</div>
+    <h1>KI-Nachhilfelehrer</h1>
+    <p class="subtitle" id="auth-subtitle">Anmelden oder Konto erstellen</p>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="auth-tab-login" onclick="switchAuthTab('login')">Anmelden</button>
+      <button class="auth-tab" id="auth-tab-register" onclick="switchAuthTab('register')">Registrieren</button>
+    </div>
+
+    <div class="setup-card">
+      <div class="form-group">
+        <label class="form-label">Benutzername</label>
+        <input class="form-input" id="auth-username" type="text" autocomplete="username"
+               placeholder="Benutzername" autocapitalize="none" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Passwort</label>
+        <input class="form-input" id="auth-password" type="password" autocomplete="current-password"
+               placeholder="Passwort (min. 6 Zeichen)" />
+      </div>
+      <div id="auth-error" class="auth-error hidden"></div>
+      <button class="btn-primary" id="auth-submit-btn" style="width:100%;margin-top:8px">Anmelden</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ SETUP SCREEN ══════════════════════════════════════════════════════ -->
 <div id="setup-screen" class="screen">
   <div class="setup-wrap">
@@ -52,6 +81,7 @@
       <h1>🎓 Meine Fächer</h1>
       <p>Wähle ein Fach oder erstelle ein neues</p>
     </div>
+    <span class="auth-username-badge" id="auth-username-badge"></span>
     <span class="streak-badge hidden" id="streak-badge"></span>
     <button class="btn-new" id="btn-new-subject">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
@@ -74,7 +104,7 @@
     <button class="foot-btn" id="btn-import" title="Backup importieren">📥</button>
     <input type="file" id="import-input" accept=".json" style="display:none" />
     <button class="foot-btn" id="btn-dark-toggle" title="Dark Mode">🌙</button>
-    <button class="foot-btn" id="settings-btn" title="API-Key ändern">⚙️</button>
+    <button class="foot-btn" id="btn-logout" title="Abmelden">🚪</button>
   </div>
 </div>
 
