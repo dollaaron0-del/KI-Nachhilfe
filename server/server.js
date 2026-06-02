@@ -18,15 +18,16 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // ── Anthropic ──────────────────────────────────────────────────────────────
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-async function callClaude(params, maxRetries = 3) {
+async function callClaude(params, maxRetries = 5) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await anthropic.messages.create(params);
     } catch (e) {
-      const retryable = e.status === 529 || e.status === 529 ||
+      const retryable = e.status === 529 ||
         (e.message && (e.message.includes('overloaded') || e.message.includes('529')));
       if (retryable && attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 2000));
+        // backoff: 3s, 6s, 12s, 24s, 48s
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 3000));
         continue;
       }
       throw e;
