@@ -27,6 +27,113 @@ async function sendTelegram(text) {
   } catch (_) {}
 }
 
+async function sendTelegramButtons(text, buttons) {
+  if (!TG_TOKEN || !TG_CHAT_ID) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TG_CHAT_ID, text, parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons },
+      }),
+    });
+  } catch (_) {}
+}
+
+// Dynamic daily limit (stored in settings table, fallback to env var)
+async function getDailyLimit() {
+  try {
+    const { rows } = await pool.query("SELECT value FROM settings WHERE key='daily_limit_eur'");
+    if (rows.length) return parseFloat(rows[0].value) || 1.0;
+  } catch (_) {}
+  return parseFloat(process.env.DAILY_LIMIT_EUR || '1.0');
+}
+
+// ── Telegram polling (handle bot commands & inline button presses) ─────────
+let tgOffset = 0;
+
+async function pollTelegram() {
+  if (!TG_TOKEN) return;
+  try {
+    const r = await fetch(
+      `https://api.telegram.org/bot${TG_TOKEN}/getUpdates?offset=${tgOffset}&timeout=0&limit=10`
+    );
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const upd of data.result || []) {
+      tgOffset = upd.update_id + 1;
+      // Inline button press
+      if (upd.callback_query) {
+        const cb = upd.callback_query;
+        const chatId = cb.message?.chat?.id?.toString();
+        if (chatId === TG_CHAT_ID && cb.data?.startsWith('addlimit:')) {
+          const add = parseFloat(cb.data.split(':')[1]);
+          if (!isNaN(add) && add > 0) {
+            const current = await getDailyLimit();
+            const newLimit = +(current + add).toFixed(2);
+            await pool.query(
+              "INSERT INTO settings (key,value) VALUES ('daily_limit_eur',$1) ON CONFLICT (key) DO UPDATE SET value=$1",
+              [newLimit.toString()]
+            );
+            await fetch(`https://api.telegram.org/bot${TG_TOKEN}/answerCallbackQuery`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ callback_query_id: cb.id, text: `✅ Limit → ${newLimit.toFixed(2)}€` }),
+            }).catch(() => {});
+            await sendTelegram(`✅ Tageslimit auf *${newLimit.toFixed(2)}€* erhöht (war ${current.toFixed(2)}€)`);
+          }
+        }
+      }
+      // Text commands
+      const msg = upd.message;
+      if (msg && msg.chat?.id?.toString() === TG_CHAT_ID) {
+        const text = msg.text?.trim() || '';
+        if (text.startsWith('/setlimit ')) {
+          const val = parseFloat(text.split(' ')[1]);
+          if (!isNaN(val) && val > 0) {
+            await pool.query(
+              "INSERT INTO settings (key,value) VALUES ('daily_limit_eur',$1) ON CONFLICT (key) DO UPDATE SET value=$1",
+              [val.toString()]
+            );
+            await sendTelegram(`✅ Tageslimit auf *${val.toFixed(2)}€* gesetzt`);
+          } else {
+            await sendTelegram('❌ Ungültiger Betrag. Beispiel: `/setlimit 2.00`');
+          }
+        } else if (text === '/status') {
+          const { cost, calls } = await checkDailyLimit();
+          const limit = await getDailyLimit();
+          const pct = limit > 0 ? Math.round(cost / limit * 100) : 0;
+          await sendTelegram(
+            `📊 *Tagesstatus*\n\nVerbraucht: ${cost.toFixed(3)}€\nLimit: ${limit.toFixed(2)}€\nAuslastung: ${pct}%\nAPI-Calls: ${calls}`
+          );
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+async function checkAndNotify90pct(today, newCost) {
+  const limit = await getDailyLimit();
+  if (limit <= 0 || newCost / limit < 0.9) return;
+  try {
+    const { rows } = await pool.query(
+      'SELECT notified_90pct FROM daily_usage WHERE date=$1', [today]
+    );
+    if (rows[0]?.notified_90pct) return;
+    await pool.query('UPDATE daily_usage SET notified_90pct=true WHERE date=$1', [today]);
+    await sendTelegramButtons(
+      `⚠️ *90% des Tageslimits erreicht!*\n\nVerbraucht: ${newCost.toFixed(3)}€ / ${limit.toFixed(2)}€\n\nLimit für heute erhöhen:`,
+      [[
+        { text: '+0,50€', callback_data: 'addlimit:0.50' },
+        { text: '+1,00€', callback_data: 'addlimit:1.00' },
+        { text: '+2,00€', callback_data: 'addlimit:2.00' },
+        { text: '+5,00€', callback_data: 'addlimit:5.00' },
+      ]]
+    );
+  } catch (_) {}
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -58,8 +165,6 @@ const TOKEN_COST = {
   'claude-sonnet-4-6':        { in: 0.00000276, out: 0.0000138  },
   'claude-haiku-4-5-20251001':{ in: 0.00000023, out: 0.00000115 },
 };
-const DAILY_LIMIT_EUR = parseFloat(process.env.DAILY_LIMIT_EUR || '1.0');
-
 async function checkDailyLimit() {
   const today = new Date().toISOString().slice(0, 10);
   const { rows } = await pool.query('SELECT cost_eur, calls FROM daily_usage WHERE date=$1', [today]);
@@ -69,7 +174,7 @@ async function checkDailyLimit() {
 async function recordUsage(today, model, inputTokens, outputTokens) {
   const mc = TOKEN_COST[model] || TOKEN_COST['claude-sonnet-4-6'];
   const cost = inputTokens * mc.in + outputTokens * mc.out;
-  await pool.query(`
+  const { rows } = await pool.query(`
     INSERT INTO daily_usage (date, cost_eur, calls, tokens_in, tokens_out)
     VALUES ($1, $2, 1, $3, $4)
     ON CONFLICT (date) DO UPDATE SET
@@ -77,7 +182,9 @@ async function recordUsage(today, model, inputTokens, outputTokens) {
       calls      = daily_usage.calls + 1,
       tokens_in  = daily_usage.tokens_in + $3,
       tokens_out = daily_usage.tokens_out + $4
+    RETURNING cost_eur
   `, [today, cost, inputTokens, outputTokens]);
+  return rows[0]?.cost_eur || 0;
 }
 
 // ── Middleware ─────────────────────────────────────────────────────────────
@@ -134,10 +241,11 @@ app.post('/api/auth/register', async (req, res) => {
     const approved  = isFirst || isAdmin || !TG_TOKEN;
     const approvalToken = approved ? null : require('crypto').randomBytes(24).toString('hex');
 
+    const isAdminUser = isFirst || isAdmin;
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
-      'INSERT INTO users (username, password_hash, approved, approval_token) VALUES ($1,$2,$3,$4) RETURNING id, username, approved',
-      [uname, hash, approved, approvalToken]
+      'INSERT INTO users (username, password_hash, approved, approval_token, is_admin) VALUES ($1,$2,$3,$4,$5) RETURNING id, username, approved, is_admin',
+      [uname, hash, approved, approvalToken, isAdminUser]
     );
 
     if (!approved) {
@@ -149,8 +257,8 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(202).json({ pending: true, message: 'Dein Konto wartet auf Freischaltung durch den Admin.' });
     }
 
-    const token = jwt.sign({ id: rows[0].id, username: rows[0].username }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ token, username: rows[0].username });
+    const token = jwt.sign({ id: rows[0].id, username: rows[0].username, is_admin: rows[0].is_admin || false }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: rows[0].username, is_admin: rows[0].is_admin || false });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Benutzername bereits vergeben' });
     res.status(500).json({ error: e.message });
@@ -182,12 +290,17 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Benutzername oder Passwort falsch' });
     if (!rows[0].approved)
       return res.status(403).json({ error: 'Dein Konto wurde noch nicht freigeschaltet. Bitte warte auf die Bestätigung.' });
-    const token = jwt.sign({ id: rows[0].id, username: rows[0].username }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ token, username: rows[0].username });
+    const token = jwt.sign({ id: rows[0].id, username: rows[0].username, is_admin: rows[0].is_admin || false }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: rows[0].username, is_admin: rows[0].is_admin || false });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/auth/me', authMiddleware, (req, res) => res.json({ username: req.user.username }));
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT is_admin FROM users WHERE id=$1', [req.user.id]);
+    res.json({ username: req.user.username, is_admin: rows[0]?.is_admin || false });
+  } catch { res.json({ username: req.user.username, is_admin: req.user.is_admin || false }); }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SUBJECTS
@@ -395,19 +508,21 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
 
     // Daily limit check
     const { today, cost } = await checkDailyLimit();
-    if (cost >= DAILY_LIMIT_EUR) {
+    const dailyLimit = await getDailyLimit();
+    if (cost >= dailyLimit) {
       return res.status(429).json({
-        error: `Tageslimit erreicht (${cost.toFixed(2)}€ / ${DAILY_LIMIT_EUR}€). Morgen wieder verfügbar.`,
+        error: `Tageslimit erreicht (${cost.toFixed(2)}€ / ${dailyLimit.toFixed(2)}€). Morgen wieder verfügbar.`,
       });
     }
 
     const response = await callClaude(params);
 
-    // Record usage asynchronously (don't block response)
+    // Record usage then check 90% threshold (non-blocking)
     recordUsage(today, params.model,
       response.usage?.input_tokens || 0,
       response.usage?.output_tokens || 0,
-    ).catch(e => console.error('Usage tracking error:', e.message));
+    ).then(newCost => checkAndNotify90pct(today, newCost))
+     .catch(e => console.error('Usage tracking error:', e.message));
 
     res.json(response);
   } catch (e) {
@@ -686,11 +801,31 @@ app.get('/api/health', async (req, res) => {
 
 app.get('/api/usage', authMiddleware, async (req, res) => {
   try {
+    if (!req.user.is_admin) {
+      // Re-check from DB in case token is old
+      const { rows } = await pool.query('SELECT is_admin FROM users WHERE id=$1', [req.user.id]);
+      if (!rows[0]?.is_admin) return res.json({ is_admin: false });
+    }
+    const limit = await getDailyLimit();
     const { cost, calls } = await checkDailyLimit();
     const last7 = (await pool.query(
       'SELECT date, cost_eur, calls FROM daily_usage ORDER BY date DESC LIMIT 7'
     )).rows;
-    res.json({ today: { cost_eur: cost, calls }, limit_eur: DAILY_LIMIT_EUR, last7 });
+    res.json({ today: { cost_eur: cost, calls }, limit_eur: limit, last7, is_admin: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/set-limit', authMiddleware, async (req, res) => {
+  const { rows } = await pool.query('SELECT is_admin FROM users WHERE id=$1', [req.user.id]);
+  if (!rows[0]?.is_admin) return res.status(403).json({ error: 'Nur für Admins' });
+  const val = parseFloat(req.body.limit);
+  if (isNaN(val) || val <= 0) return res.status(400).json({ error: 'Ungültiger Wert' });
+  try {
+    await pool.query(
+      "INSERT INTO settings (key,value) VALUES ('daily_limit_eur',$1) ON CONFLICT (key) DO UPDATE SET value=$1",
+      [val.toString()]
+    );
+    res.json({ ok: true, limit_eur: val });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -704,4 +839,11 @@ app.listen(PORT, () => {
   console.log(`Nachhilfe-Server läuft auf Port ${PORT}`);
   console.log(`Datenbank: ${process.env.DATABASE_URL ? 'konfiguriert' : 'FEHLT'}`);
   console.log(`API-Key: ${process.env.ANTHROPIC_API_KEY ? 'gesetzt' : 'FEHLT'}`);
+  console.log(`Telegram: ${TG_TOKEN ? 'aktiv' : 'nicht konfiguriert'}`);
+
+  // Start Telegram polling
+  if (TG_TOKEN) {
+    setTimeout(() => pollTelegram().catch(() => {}), 3000);
+    setInterval(() => pollTelegram().catch(() => {}), 30000);
+  }
 });

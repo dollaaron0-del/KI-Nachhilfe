@@ -67,8 +67,9 @@ const ICONS  = ['📐','📊','🧪','🔬','🧬','📚','🖥️','⚖️','�
 const COLORS = ['#5856d6','#007aff','#34c759','#ff9500','#ff3b30','#ff2d55','#30b0c7','#a2845e'];
 
 // ── Auth ───────────────────────────────────────────────────────────────────
-let authToken = localStorage.getItem('auth_token') || '';
+let authToken    = localStorage.getItem('auth_token')    || '';
 let authUsername = localStorage.getItem('auth_username') || '';
+let authIsAdmin  = localStorage.getItem('auth_is_admin') === '1';
 let authMode = 'login';
 
 function authHeaders() {
@@ -107,10 +108,12 @@ document.getElementById('auth-submit-btn')?.addEventListener('click', async () =
     }
     errEl.style.color = '';
     if (!r.ok) { errEl.textContent = data.error; errEl.classList.remove('hidden'); switchAuthTab(authMode); return; }
-    authToken = data.token;
+    authToken    = data.token;
     authUsername = data.username;
-    localStorage.setItem('auth_token', authToken);
+    authIsAdmin  = data.is_admin || false;
+    localStorage.setItem('auth_token',    authToken);
     localStorage.setItem('auth_username', authUsername);
+    localStorage.setItem('auth_is_admin', authIsAdmin ? '1' : '0');
     onAuthSuccess();
   } catch (e) { errEl.textContent = 'Verbindungsfehler.'; errEl.classList.remove('hidden'); switchAuthTab(authMode); }
 });
@@ -129,8 +132,10 @@ document.getElementById('btn-logout')?.addEventListener('click', () => {
 
 function onAuthSuccess() {
   document.getElementById('auth-username-badge').textContent = '👤 ' + authUsername;
+  const adminPanel = document.getElementById('admin-panel');
+  if (adminPanel) adminPanel.classList.toggle('hidden', !authIsAdmin);
   showScreen('setup-screen');
-  loadUsage();
+  if (authIsAdmin) loadUsage();
   loadSubjects();
 }
 
@@ -141,7 +146,9 @@ async function checkAuth() {
     if (!r.ok) { authToken = ''; localStorage.removeItem('auth_token'); showScreen('auth-screen'); return; }
     const data = await r.json();
     authUsername = data.username;
+    authIsAdmin  = data.is_admin || false;
     localStorage.setItem('auth_username', authUsername);
+    localStorage.setItem('auth_is_admin', authIsAdmin ? '1' : '0');
     onAuthSuccess();
   } catch { showScreen('auth-screen'); }
 }
@@ -444,6 +451,7 @@ async function saveApiKey() {
 async function loadUsage() {
   try {
     const u = await api('/api/usage');
+    if (!u.is_admin) return;
     const pct = Math.min(100, (u.today.cost_eur / u.limit_eur) * 100);
     const color = pct >= 90 ? 'var(--red)' : pct >= 60 ? 'var(--yellow)' : 'var(--green)';
     document.getElementById('usage-cost').textContent = `${u.today.cost_eur.toFixed(3)}€`;
@@ -451,8 +459,20 @@ async function loadUsage() {
     document.getElementById('usage-limit').textContent = `${u.limit_eur.toFixed(2)}€ / Tag`;
     document.getElementById('usage-bar').style.width = pct + '%';
     document.getElementById('usage-bar').style.background = color;
+    const inp = document.getElementById('admin-limit-input');
+    if (inp && !inp.value) inp.value = u.limit_eur.toFixed(2);
   } catch { /* ignore */ }
 }
+
+document.getElementById('admin-set-limit-btn')?.addEventListener('click', async () => {
+  const val = parseFloat(document.getElementById('admin-limit-input')?.value);
+  if (isNaN(val) || val <= 0) { toast('Ungültiger Betrag', 'error'); return; }
+  try {
+    await api('/api/admin/set-limit', { method: 'POST', body: JSON.stringify({ limit: val }) });
+    toast(`Tageslimit auf ${val.toFixed(2)}€ gesetzt`, 'success');
+    loadUsage();
+  } catch (e) { toast(e.message, 'error'); }
+});
 
 // ══ SUBJECTS SCREEN ════════════════════════════════════════════════════════
 

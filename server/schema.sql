@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS glossar (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Admin flag on users
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- App settings (dynamic daily limit etc.)
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+INSERT INTO settings (key, value) VALUES ('daily_limit_eur', '1.00') ON CONFLICT DO NOTHING;
+
+-- Track whether 90% notification was already sent today
+ALTER TABLE daily_usage ADD COLUMN IF NOT EXISTS notified_90pct BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Grant all permissions to app user (safe to run repeatedly)
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO nachhilfe_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO nachhilfe_user;
