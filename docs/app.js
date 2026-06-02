@@ -1495,6 +1495,7 @@ document.querySelectorAll('.aufg-type-btn').forEach(b => b.addEventListener('cli
 document.getElementById('aufgaben-gen-btn').addEventListener('click', generateAufgaben);
 document.getElementById('aufgaben-back-btn').addEventListener('click', () => {
   showAufgabenState(document.getElementById('aufgaben-topics'));
+  renderSavedAufgaben();
 });
 document.getElementById('aufgaben-ans-btn').addEventListener('click', () => {
   aufgabenAnsVis = !aufgabenAnsVis;
