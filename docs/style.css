@@ -836,6 +836,7 @@ html, body {
   transition: background .12s;
 }
 .btn-canvas-tool:active { background: var(--border); }
+.btn-canvas-tool.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .btn-canvas-check {
   background: #34c759; color: #fff;

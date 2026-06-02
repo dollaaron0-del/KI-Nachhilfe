@@ -29,6 +29,7 @@ let currentAufgabe  = '';
 let rechnenDiff     = 'mittel';
 let mathCtx         = null;
 let isDrawingCanvas = false;
+let isErasing       = false;
 let canvasLastX     = 0, canvasLastY = 0;
 let undoStack       = [];
 let savedCanvasData = null;
@@ -1549,6 +1550,7 @@ function injectSolveButtons(tasksPart) {
 function sendToRechnen(text) {
   currentAufgabe = text;
   savedCanvasData = null;
+  setEraserMode(false);
   switchMode('rechnen');
 }
 
@@ -1619,8 +1621,8 @@ function setupCanvasEvents() {
     }
     const p = canvasPos(e, canvas);
     canvasLastX = p.x; canvasLastY = p.y;
-    // Dot for tap/click
-    if (mathCtx) {
+    // Dot for tap/click (pen mode only)
+    if (mathCtx && !isErasing) {
       mathCtx.beginPath();
       mathCtx.arc(p.x, p.y, Math.max(0.5, (e.pressure || 0.5) * 1.5), 0, Math.PI * 2);
       mathCtx.fillStyle = '#1c1c1e';
@@ -1633,8 +1635,13 @@ function setupCanvasEvents() {
     e.preventDefault();
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
-    mathCtx.lineWidth = Math.max(1, pressure * 3.5);
-    mathCtx.strokeStyle = '#1c1c1e';
+    if (isErasing) {
+      mathCtx.lineWidth   = 24;
+      mathCtx.strokeStyle = '#ffffff';
+    } else {
+      mathCtx.lineWidth   = Math.max(1, pressure * 3.5);
+      mathCtx.strokeStyle = '#1c1c1e';
+    }
     mathCtx.beginPath();
     mathCtx.moveTo(canvasLastX, canvasLastY);
     mathCtx.lineTo(p.x, p.y);
@@ -1661,6 +1668,15 @@ function clearCanvas() {
   undoStack = [];
   mathCtx.fillStyle = '#ffffff';
   mathCtx.fillRect(0, 0, r.width, r.height);
+  setEraserMode(false);
+}
+
+function setEraserMode(on) {
+  isErasing = on;
+  const btn = document.getElementById('canvas-eraser-btn');
+  const cvs = document.getElementById('math-canvas');
+  if (btn) btn.classList.toggle('active', on);
+  if (cvs) cvs.style.cursor = on ? 'cell' : 'crosshair';
 }
 
 function undoCanvas() {
@@ -1679,6 +1695,11 @@ document.getElementById('rechnen-gen-btn').addEventListener('click', generateMat
 document.getElementById('canvas-undo-btn').addEventListener('click', undoCanvas);
 document.getElementById('canvas-clear-btn').addEventListener('click', clearCanvas);
 document.getElementById('canvas-check-btn').addEventListener('click', checkHandwriting);
+document.getElementById('canvas-eraser-btn').addEventListener('click', () => {
+  isErasing = !isErasing;
+  document.getElementById('canvas-eraser-btn').classList.toggle('active', isErasing);
+  document.getElementById('math-canvas').style.cursor = isErasing ? 'cell' : 'crosshair';
+});
 document.getElementById('rechnen-new-btn').addEventListener('click', () => {
   currentAufgabe = ''; savedCanvasData = null;
   showRechnenState(document.getElementById('rechnen-idle'));
