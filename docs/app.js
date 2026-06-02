@@ -414,10 +414,6 @@ async function saveApiKey() {
   loadSubjects();
 }
 
-document.getElementById('settings-btn').addEventListener('click', () => {
-  showScreen('setup-screen');
-  loadUsage();
-});
 
 async function loadUsage() {
   try {
