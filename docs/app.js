@@ -1,5 +1,14 @@
 'use strict';
 
+// ── Global error safety net ───────────────────────────────────────────────
+window.addEventListener('error', e => {
+  console.error('App error:', e.message, e.filename, e.lineno);
+  try { document.getElementById('auth-screen')?.classList.add('active'); } catch(_) {}
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('Unhandled promise:', e.reason);
+});
+
 // ── AI Progress simulation ────────────────────────────────────────────────
 function startProgress(barId, pctId, durationMs = 20000) {
   const bar = document.getElementById(barId);
@@ -72,7 +81,7 @@ function switchAuthTab(mode) {
   document.getElementById('auth-error').classList.add('hidden');
 }
 
-document.getElementById('auth-submit-btn').addEventListener('click', async () => {
+document.getElementById('auth-submit-btn')?.addEventListener('click', async () => {
   const username = document.getElementById('auth-username').value.trim();
   const password = document.getElementById('auth-password').value;
   const errEl = document.getElementById('auth-error');
@@ -96,12 +105,12 @@ document.getElementById('auth-submit-btn').addEventListener('click', async () =>
 });
 
 ['auth-username','auth-password'].forEach(id =>
-  document.getElementById(id).addEventListener('keydown', e => {
-    if (e.key === 'Enter') document.getElementById('auth-submit-btn').click();
+  document.getElementById(id)?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('auth-submit-btn')?.click();
   })
 );
 
-document.getElementById('btn-logout').addEventListener('click', () => {
+document.getElementById('btn-logout')?.addEventListener('click', () => {
   authToken = ''; authUsername = '';
   localStorage.removeItem('auth_token'); localStorage.removeItem('auth_username');
   showScreen('auth-screen');
@@ -392,7 +401,7 @@ function applyDarkMode(dark) {
   if (btn) btn.textContent = dark ? '☀️' : '🌙';
 }
 
-document.getElementById('btn-dark-toggle').addEventListener('click', async () => {
+document.getElementById('btn-dark-toggle')?.addEventListener('click', async () => {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   applyDarkMode(!isDark);
   await DB.setDarkMode(!isDark);
@@ -401,12 +410,14 @@ document.getElementById('btn-dark-toggle').addEventListener('click', async () =>
 // ── Screens ────────────────────────────────────────────────────────────────
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
+  else document.querySelector('.screen')?.classList.add('active');
 }
 
 // ══ SETUP SCREEN ══════════════════════════════════════════════════════════
 
-document.getElementById('save-key-btn').addEventListener('click', saveApiKey);
+document.getElementById('save-key-btn')?.addEventListener('click', saveApiKey);
 
 async function saveApiKey() {
   // Legacy: kept for compatibility, but no API key needed when using server
@@ -469,8 +480,8 @@ function makeCard(s) {
   return div;
 }
 
-document.getElementById('btn-new-subject').addEventListener('click', showSubjModal);
-document.getElementById('btn-first-subject').addEventListener('click', showSubjModal);
+document.getElementById('btn-new-subject')?.addEventListener('click', showSubjModal);
+document.getElementById('btn-first-subject')?.addEventListener('click', showSubjModal);
 
 function scoreColor(p) {
   return p >= 70 ? 'var(--green)' : p >= 40 ? 'var(--yellow)' : 'var(--red)';
@@ -518,11 +529,11 @@ function showSubjModal() {
   setTimeout(() => document.getElementById('subj-name').focus(), 350);
 }
 
-document.getElementById('subj-modal-bg').addEventListener('click', () =>
+document.getElementById('subj-modal-bg')?.addEventListener('click', () =>
   document.getElementById('subj-modal').classList.add('hidden'));
 
-document.getElementById('subj-create-btn').addEventListener('click', createSubject);
-document.getElementById('subj-name').addEventListener('keydown', e => {
+document.getElementById('subj-create-btn')?.addEventListener('click', createSubject);
+document.getElementById('subj-name')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') createSubject();
 });
 
@@ -662,15 +673,15 @@ function showWeakTopicsNote() {
 
 // ══ SETTINGS SHEET ═════════════════════════════════════════════════════════
 
-document.getElementById('btn-settings').addEventListener('click', () => {
+document.getElementById('btn-settings')?.addEventListener('click', () => {
   document.getElementById('custom-prompt-ta').value = customPrompt;
   document.getElementById('settings-sheet').classList.remove('hidden');
 });
-document.getElementById('settings-bg').addEventListener('click', () =>
+document.getElementById('settings-bg')?.addEventListener('click', () =>
   document.getElementById('settings-sheet').classList.add('hidden'));
-document.getElementById('settings-close-btn').addEventListener('click', () =>
+document.getElementById('settings-close-btn')?.addEventListener('click', () =>
   document.getElementById('settings-sheet').classList.add('hidden'));
-document.getElementById('settings-save-btn').addEventListener('click', async () => {
+document.getElementById('settings-save-btn')?.addEventListener('click', async () => {
   const val = document.getElementById('custom-prompt-ta').value.trim();
   try {
     await fetch(`/api/subjects/${sessionId}`, {
@@ -701,13 +712,13 @@ function updateSettingsBadge() {
 
 // ══ UPLOAD SHEET ═══════════════════════════════════════════════════════════
 
-document.getElementById('back-btn').addEventListener('click', () => {
+document.getElementById('back-btn')?.addEventListener('click', () => {
   sessionId = null; sessionMeta = null; sessionTxt = ''; customPrompt = '';
   showScreen('subjects-screen'); loadSubjects();
 });
-document.getElementById('btn-add-docs').addEventListener('click', showUploadSheet);
-document.getElementById('no-docs-btn').addEventListener('click', showUploadSheet);
-document.getElementById('upload-bg').addEventListener('click', hideUploadSheet);
+document.getElementById('btn-add-docs')?.addEventListener('click', showUploadSheet);
+document.getElementById('no-docs-btn')?.addEventListener('click', showUploadSheet);
+document.getElementById('upload-bg')?.addEventListener('click', hideUploadSheet);
 
 function showUploadSheet() {
   document.getElementById('upload-status').classList.add('hidden');
@@ -756,16 +767,16 @@ async function renderDocList() {
   });
 }
 
-document.getElementById('upload-input').addEventListener('change', e => {
+document.getElementById('upload-input')?.addEventListener('change', e => {
   const files = Array.from(e.target.files);
   if (files.length) handleUpload(files);
   e.target.value = '';
 });
 
 const dropZone = document.getElementById('drop-zone');
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-dropZone.addEventListener('drop', e => {
+dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone?.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone?.addEventListener('drop', e => {
   e.preventDefault(); dropZone.classList.remove('drag-over');
   const pdfs = Array.from(e.dataTransfer.files).filter(f => f.type === 'application/pdf');
   if (pdfs.length) handleUpload(pdfs);
@@ -881,7 +892,7 @@ function updateScoreChip() {
 const chatMessages = document.getElementById('chat-messages');
 const chatInput    = document.getElementById('chat-input');
 
-document.getElementById('chat-send').addEventListener('click', sendChat);
+document.getElementById('chat-send')?.addEventListener('click', sendChat);
 chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } });
 chatInput.addEventListener('input', () => autoResize(chatInput));
 
@@ -931,25 +942,25 @@ async function rephraseReply(originalReply) {
   }
 }
 
-document.getElementById('btn-diagram').addEventListener('click', () => {
+document.getElementById('btn-diagram')?.addEventListener('click', () => {
   chatInput.value = 'Erkläre den aktuellen Sachverhalt als Mermaid-Diagramm (flowchart TD). Zeige Zusammenhänge, Abläufe oder Strukturen visuell.';
   autoResize(chatInput);
   sendChat();
 });
 
-document.getElementById('btn-mindmap').addEventListener('click', () => {
+document.getElementById('btn-mindmap')?.addEventListener('click', () => {
   chatInput.value = 'Erstelle eine Mermaid-Mind-Map (mindmap) zu dem Thema, das wir gerade besprochen haben. Zeige Hauptkonzept und alle wichtigen Unterthemen.';
   autoResize(chatInput);
   sendChat();
 });
 
-document.getElementById('btn-formula').addEventListener('click', () => {
+document.getElementById('btn-formula')?.addEventListener('click', () => {
   chatInput.value = 'Liste die wichtigsten Formeln zu dem Thema, das wir gerade besprochen haben. Schreibe jede Formel in LaTeX-Notation ($$...$$) und erkläre kurz was jede Variable bedeutet.';
   autoResize(chatInput);
   sendChat();
 });
 
-document.getElementById('chat-reset').addEventListener('click', async () => {
+document.getElementById('chat-reset')?.addEventListener('click', async () => {
   sessionMeta.chatHistory = [];
   await DB.setMeta(sessionId, sessionMeta);
   chatMessages.innerHTML = `<div class="welcome"><div class="welcome-icon">🔄</div><p>Chat gelöscht.</p></div>`;
@@ -957,12 +968,12 @@ document.getElementById('chat-reset').addEventListener('click', async () => {
 
 // ══ QUIZ ══════════════════════════════════════════════════════════════════
 
-document.getElementById('quiz-start-btn').addEventListener('click', fetchQuestion);
-document.getElementById('quiz-submit').addEventListener('click',    submitAnswer);
-document.getElementById('quiz-next').addEventListener('click',      fetchQuestion);
-document.getElementById('quiz-stop').addEventListener('click',      () => switchMode('analysis'));
-document.getElementById('quiz-answer').addEventListener('keydown',  e => { if (e.key === 'Enter' && e.ctrlKey) submitAnswer(); });
-document.getElementById('quiz-reset-btn').addEventListener('click', async () => {
+document.getElementById('quiz-start-btn')?.addEventListener('click', fetchQuestion);
+document.getElementById('quiz-submit')?.addEventListener('click',    submitAnswer);
+document.getElementById('quiz-next')?.addEventListener('click',      fetchQuestion);
+document.getElementById('quiz-stop')?.addEventListener('click',      () => switchMode('analysis'));
+document.getElementById('quiz-answer')?.addEventListener('keydown',  e => { if (e.key === 'Enter' && e.ctrlKey) submitAnswer(); });
+document.getElementById('quiz-reset-btn')?.addEventListener('click', async () => {
   if (!confirm('Quiz-Fortschritt zurücksetzen?')) return;
   sessionMeta.quizStats = { questions: [] };
   sessionMeta.currentQuestion = null;
@@ -973,7 +984,7 @@ document.getElementById('quiz-reset-btn').addEventListener('click', async () => 
   showQuizState(document.getElementById('quiz-idle'));
   refreshAnalysisState();
 });
-document.getElementById('quiz-blitz-btn').addEventListener('click', startBlitz);
+document.getElementById('quiz-blitz-btn')?.addEventListener('click', startBlitz);
 
 function showQuizState(el) {
   document.querySelectorAll('#panel-quiz .cx-state').forEach(s => s.classList.add('hidden'));
@@ -1169,9 +1180,9 @@ function endBlitz() {
   showQuizState(document.getElementById('quiz-blitz-done'));
 }
 
-document.getElementById('blitz-again-btn').addEventListener('click', startBlitz);
-document.getElementById('blitz-stop-btn').addEventListener('click', () => switchMode('analysis'));
-document.getElementById('blitz-stop-btn2').addEventListener('click', () => switchMode('analysis'));
+document.getElementById('blitz-again-btn')?.addEventListener('click', startBlitz);
+document.getElementById('blitz-stop-btn')?.addEventListener('click', () => switchMode('analysis'));
+document.getElementById('blitz-stop-btn2')?.addEventListener('click', () => switchMode('analysis'));
 
 // ══ EXAM ══════════════════════════════════════════════════════════════════
 
@@ -1180,12 +1191,12 @@ document.querySelectorAll('.diff-btn').forEach(b => b.addEventListener('click', 
   document.querySelectorAll('.diff-btn').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
 }));
-document.getElementById('exam-gen-btn').addEventListener('click', generateExam);
-document.getElementById('exam-new-btn').addEventListener('click', () => {
+document.getElementById('exam-gen-btn')?.addEventListener('click', generateExam);
+document.getElementById('exam-new-btn')?.addEventListener('click', () => {
   document.getElementById('exam-idle').classList.remove('hidden');
   document.getElementById('exam-result').classList.add('hidden');
 });
-document.getElementById('exam-ans-btn').addEventListener('click', toggleExamAns);
+document.getElementById('exam-ans-btn')?.addEventListener('click', toggleExamAns);
 
 async function generateExam() {
   ['exam-idle','exam-result'].forEach(id => document.getElementById(id).classList.add('hidden'));
@@ -1244,10 +1255,10 @@ function toggleExamAns() {
 
 // ══ ANALYSIS ══════════════════════════════════════════════════════════════
 
-document.getElementById('analysis-btn').addEventListener('click', runAnalysis);
-document.getElementById('analysis-refresh').addEventListener('click', runAnalysis);
+document.getElementById('analysis-btn')?.addEventListener('click', runAnalysis);
+document.getElementById('analysis-refresh')?.addEventListener('click', runAnalysis);
 
-document.getElementById('lernziel-slider').addEventListener('input', async e => {
+document.getElementById('lernziel-slider')?.addEventListener('input', async e => {
   const val = parseInt(e.target.value, 10);
   document.getElementById('lernziel-val').textContent = val + '%';
   if (sessionMeta) {
@@ -1607,8 +1618,8 @@ function restoreAufgabe(entry) {
   showAufgabenState(document.getElementById('aufgaben-result'));
 }
 
-document.getElementById('aufgaben-scan-btn').addEventListener('click', scanTopics);
-document.getElementById('aufgaben-rescan-btn').addEventListener('click', scanTopics);
+document.getElementById('aufgaben-scan-btn')?.addEventListener('click', scanTopics);
+document.getElementById('aufgaben-rescan-btn')?.addEventListener('click', scanTopics);
 
 async function scanTopics() {
   if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
@@ -1665,12 +1676,12 @@ document.querySelectorAll('.aufg-type-btn').forEach(b => b.addEventListener('cli
   b.classList.add('active');
 }));
 
-document.getElementById('aufgaben-gen-btn').addEventListener('click', generateAufgaben);
-document.getElementById('aufgaben-back-btn').addEventListener('click', () => {
+document.getElementById('aufgaben-gen-btn')?.addEventListener('click', generateAufgaben);
+document.getElementById('aufgaben-back-btn')?.addEventListener('click', () => {
   showAufgabenState(document.getElementById('aufgaben-topics'));
   renderSavedAufgaben();
 });
-document.getElementById('aufgaben-ans-btn').addEventListener('click', () => {
+document.getElementById('aufgaben-ans-btn')?.addEventListener('click', () => {
   aufgabenAnsVis = !aufgabenAnsVis;
   document.getElementById('aufgaben-body').closest('.aufgaben-content')
     .classList.toggle('answers-hidden', !aufgabenAnsVis);
@@ -1935,24 +1946,24 @@ document.querySelectorAll('.diff-btn-r').forEach(b => b.addEventListener('click'
   b.classList.add('active');
 }));
 
-document.getElementById('rechnen-gen-btn').addEventListener('click', generateMathAufgabe);
-document.getElementById('canvas-undo-btn').addEventListener('click', undoCanvas);
-document.getElementById('canvas-clear-btn').addEventListener('click', clearCanvas);
-document.getElementById('canvas-check-btn').addEventListener('click', checkHandwriting);
-document.getElementById('canvas-eraser-btn').addEventListener('click', () => {
+document.getElementById('rechnen-gen-btn')?.addEventListener('click', generateMathAufgabe);
+document.getElementById('canvas-undo-btn')?.addEventListener('click', undoCanvas);
+document.getElementById('canvas-clear-btn')?.addEventListener('click', clearCanvas);
+document.getElementById('canvas-check-btn')?.addEventListener('click', checkHandwriting);
+document.getElementById('canvas-eraser-btn')?.addEventListener('click', () => {
   isErasing = !isErasing;
   document.getElementById('canvas-eraser-btn').classList.toggle('active', isErasing);
   document.getElementById('math-canvas').style.cursor = isErasing ? 'cell' : 'crosshair';
 });
-document.getElementById('rechnen-new-btn').addEventListener('click', () => {
+document.getElementById('rechnen-new-btn')?.addEventListener('click', () => {
   currentAufgabe = ''; savedCanvasData = null;
   showRechnenState(document.getElementById('rechnen-idle'));
 });
-document.getElementById('rechnen-retry-btn').addEventListener('click', () => {
+document.getElementById('rechnen-retry-btn')?.addEventListener('click', () => {
   savedCanvasData = null;
   showRechnenState(document.getElementById('rechnen-solve'));
 });
-document.getElementById('rechnen-next-btn').addEventListener('click', generateMathAufgabe);
+document.getElementById('rechnen-next-btn')?.addEventListener('click', generateMathAufgabe);
 
 setupCanvasEvents();
 
@@ -2068,9 +2079,9 @@ async function importBackup(file) {
   toast(`${data.subjects.length} Fach/Fächer erfolgreich importiert.`, 'success');
 }
 
-document.getElementById('btn-export').addEventListener('click', exportBackup);
-document.getElementById('btn-import').addEventListener('click', () => document.getElementById('import-input').click());
-document.getElementById('import-input').addEventListener('change', async e => {
+document.getElementById('btn-export')?.addEventListener('click', exportBackup);
+document.getElementById('btn-import')?.addEventListener('click', () => document.getElementById('import-input').click());
+document.getElementById('import-input')?.addEventListener('change', async e => {
   const f = e.target.files[0];
   if (!f) return;
   try { await importBackup(f); } catch(err) { toast('Import-Fehler: ' + err.message, 'error'); }
@@ -2078,8 +2089,8 @@ document.getElementById('import-input').addEventListener('change', async e => {
 });
 
 // ══ CHEAT SHEET ═══════════════════════════════════════════════════════════
-document.getElementById('cheat-gen-btn').addEventListener('click', generateCheatSheet);
-document.getElementById('cheat-new-btn').addEventListener('click', () => {
+document.getElementById('cheat-gen-btn')?.addEventListener('click', generateCheatSheet);
+document.getElementById('cheat-new-btn')?.addEventListener('click', () => {
   localforage.removeItem(`cheat_${sessionId}`).catch(() => {});
   document.getElementById('cheat-result').classList.add('hidden');
   document.getElementById('cheat-idle').classList.remove('hidden');
@@ -2138,13 +2149,13 @@ Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
 // ══ GLOSSAR ════════════════════════════════════════════════════════════════
 let glossarTerms = [];
 
-document.getElementById('glossar-gen-btn').addEventListener('click', generateGlossar);
-document.getElementById('glossar-new-btn').addEventListener('click', () => {
+document.getElementById('glossar-gen-btn')?.addEventListener('click', generateGlossar);
+document.getElementById('glossar-new-btn')?.addEventListener('click', () => {
   glossarTerms = [];
   document.getElementById('glossar-result').classList.add('hidden');
   document.getElementById('glossar-idle').classList.remove('hidden');
 });
-document.getElementById('glossar-search').addEventListener('input', e => {
+document.getElementById('glossar-search')?.addEventListener('input', e => {
   renderGlossarList(e.target.value.toLowerCase());
 });
 
@@ -2387,7 +2398,7 @@ function showCard() {
   document.getElementById('card-grade-row').classList.add('hidden');
 }
 
-document.getElementById('card-flip-btn').addEventListener('click', () => {
+document.getElementById('card-flip-btn')?.addEventListener('click', () => {
   document.getElementById('card-flip').classList.add('flipped');
   document.getElementById('card-flip-btn').classList.add('hidden');
   document.getElementById('card-grade-row').classList.remove('hidden');
@@ -2436,9 +2447,9 @@ function endReview() {
   showKartenState(document.getElementById('karten-done'));
 }
 
-document.getElementById('karten-gen-btn').addEventListener('click', generateKarten);
-document.getElementById('karten-review-btn').addEventListener('click', startReview);
-document.getElementById('karten-done-btn').addEventListener('click', initKarten);
+document.getElementById('karten-gen-btn')?.addEventListener('click', generateKarten);
+document.getElementById('karten-review-btn')?.addEventListener('click', startReview);
+document.getElementById('karten-done-btn')?.addEventListener('click', initKarten);
 
 // ══ DASHBOARD ════════════════════════════════════════════════════════════
 
