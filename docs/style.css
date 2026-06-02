@@ -738,6 +738,21 @@ html, body {
 }
 .aufgaben-content.answers-hidden .ans-section { display: none; }
 
+#saved-aufgaben-list { width: 100%; margin-top: 20px; text-align: left; }
+.saved-aufg-title { font-size: 13px; font-weight: 600; color: var(--label-secondary); margin-bottom: 8px; }
+.saved-aufg-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 8px; gap: 8px;
+}
+.saved-aufg-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.saved-aufg-type { font-size: 11px; color: var(--label-secondary); }
+.saved-aufg-topic { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.saved-aufg-date { font-size: 11px; color: var(--label-secondary); }
+.saved-aufg-btns { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.btn-icon-sm { background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px; opacity: .6; }
+.btn-icon-sm:active { opacity: 1; }
+
 .solve-inline-btn {
   display: inline-flex; align-items: center; gap: 4px;
   margin-left: 10px; padding: 2px 10px;

@@ -85,11 +85,24 @@ const DB = {
   content:     id => localforage.getItem(`cnt_${id}`).then(v => v || ''),
   setContent:  (id, v) => localforage.setItem(`cnt_${id}`, v),
 
+  savedAufgaben: id => localforage.getItem(`aufg_${id}`).then(v => v || []),
+  async saveAufgabe(id, entry) {
+    const list = await localforage.getItem(`aufg_${id}`) || [];
+    list.unshift(entry);
+    if (list.length > 10) list.splice(10);
+    return localforage.setItem(`aufg_${id}`, list);
+  },
+  async delAufgabe(id, entryId) {
+    const list = await localforage.getItem(`aufg_${id}`) || [];
+    return localforage.setItem(`aufg_${id}`, list.filter(e => e.id !== entryId));
+  },
+
   async del(id) {
     await Promise.all([
       this.delSubject(id),
       localforage.removeItem(`meta_${id}`),
       localforage.removeItem(`cnt_${id}`),
+      localforage.removeItem(`aufg_${id}`),
     ]);
   },
 };
@@ -1297,6 +1310,57 @@ function initAufgaben() {
   } else {
     showAufgabenState(document.getElementById('aufgaben-idle'));
   }
+  renderSavedAufgaben();
+}
+
+async function renderSavedAufgaben() {
+  const wrap = document.getElementById('saved-aufgaben-list');
+  if (!wrap) return;
+  const list = await DB.savedAufgaben(sessionId);
+  if (!list.length) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML = '<div class="saved-aufg-title">📂 Gespeicherte Aufgaben</div>';
+  list.forEach(entry => {
+    const typeLabel = entry.type === 'klausur' ? '📋 Klausur' : '📝 Übung';
+    const date = new Date(entry.createdAt).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    const row = document.createElement('div');
+    row.className = 'saved-aufg-row';
+    row.innerHTML = `
+      <div class="saved-aufg-info">
+        <span class="saved-aufg-type">${typeLabel}</span>
+        <span class="saved-aufg-topic">${esc(entry.topic)}</span>
+        <span class="saved-aufg-date">${date}</span>
+      </div>
+      <div class="saved-aufg-btns">
+        <button class="btn-secondary btn-sm">Öffnen</button>
+        <button class="btn-icon-sm saved-del-btn">🗑</button>
+      </div>`;
+    row.querySelector('.btn-secondary').addEventListener('click', () => restoreAufgabe(entry));
+    row.querySelector('.saved-del-btn').addEventListener('click', async () => {
+      await DB.delAufgabe(sessionId, entry.id);
+      renderSavedAufgaben();
+    });
+    wrap.appendChild(row);
+  });
+}
+
+function restoreAufgabe(entry) {
+  aufgabenAnsVis = false;
+  selTopic = entry.topic;
+  selAufgabenType = entry.type;
+  const body = document.getElementById('aufgaben-body');
+  const sepIdx = entry.fullResult.search(/---\s*\n+##\s*(Lösungsschlüssel|Musterlösungen)/i);
+  if (sepIdx > -1) {
+    body.innerHTML = safeHtml(md(entry.tasksPart) +
+      `<div class="ans-section">${md(entry.fullResult.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`);
+  } else {
+    body.innerHTML = safeHtml(md(entry.fullResult));
+  }
+  injectSolveButtons(entry.tasksPart);
+  document.getElementById('aufgaben-rechnen-btn').onclick = () => sendToRechnen(entry.tasksPart.trim());
+  body.closest('.aufgaben-content').classList.add('answers-hidden');
+  document.getElementById('aufgaben-ans-btn').textContent = 'Lösungen anzeigen';
+  showAufgabenState(document.getElementById('aufgaben-result'));
 }
 
 document.getElementById('aufgaben-scan-btn').addEventListener('click', scanTopics);
@@ -1433,6 +1497,16 @@ Format:
 
     // Wire "Im Rechnen lösen" toolbar button to send all tasks
     document.getElementById('aufgaben-rechnen-btn').onclick = () => sendToRechnen(tasksPart.trim());
+
+    // Auto-save
+    DB.saveAufgabe(sessionId, {
+      id: Date.now(),
+      topic: selTopic,
+      type: selAufgabenType,
+      tasksPart,
+      fullResult: result,
+      createdAt: new Date().toISOString(),
+    }).catch(() => {});
 
     document.getElementById('aufgaben-body').closest('.aufgaben-content').classList.add('answers-hidden');
     document.getElementById('aufgaben-ans-btn').textContent = 'Lösungen anzeigen';
