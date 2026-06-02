@@ -551,10 +551,45 @@ function showUploadSheet() {
   document.getElementById('upload-title').textContent =
     sessionMeta ? `Dokumente für "${sessionMeta.name}"` : 'Dokumente hochladen';
   document.getElementById('upload-sheet').classList.remove('hidden');
+  renderDocList();
 }
 
 function hideUploadSheet() {
   document.getElementById('upload-sheet').classList.add('hidden');
+}
+
+async function renderDocList() {
+  const wrap = document.getElementById('doc-list-wrap');
+  const list = document.getElementById('doc-list');
+  if (!sessionId) return;
+
+  const docs = await api(`/api/subjects/${sessionId}/documents`).catch(() => []);
+  if (!docs.length) { wrap.classList.add('hidden'); return; }
+
+  wrap.classList.remove('hidden');
+  list.innerHTML = '';
+  docs.forEach(doc => {
+    const date = new Date(doc.uploaded_at).toLocaleDateString('de-DE', {
+      day: '2-digit', month: '2-digit', year: '2-digit',
+    });
+    const row = document.createElement('div');
+    row.className = 'doc-row';
+    row.innerHTML = `
+      <div class="doc-row-info">
+        <span class="doc-row-icon">📄</span>
+        <div>
+          <div class="doc-row-name">${esc(doc.filename)}</div>
+          <div class="doc-row-date">${date}</div>
+        </div>
+      </div>
+      <button class="doc-del-btn" title="Löschen">🗑</button>`;
+    row.querySelector('.doc-del-btn').addEventListener('click', async () => {
+      if (!confirm(`"${doc.filename}" löschen?`)) return;
+      await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE' });
+      renderDocList();
+    });
+    list.appendChild(row);
+  });
 }
 
 document.getElementById('upload-input').addEventListener('change', e => {
@@ -602,6 +637,7 @@ async function handleUpload(files) {
     status.classList.remove('hidden');
     updateHeaderPages();
     document.getElementById('no-docs-banner').classList.add('hidden');
+    renderDocList();
     setTimeout(hideUploadSheet, 2000);
   } catch (err) {
     prog.classList.add('hidden');
