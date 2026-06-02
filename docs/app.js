@@ -7,6 +7,9 @@ window.addEventListener('error', e => {
 });
 window.addEventListener('unhandledrejection', e => {
   console.error('Unhandled promise:', e.reason);
+  try {
+    if (!document.querySelector('.screen.active')) showScreen('auth-screen');
+  } catch (_) {}
 });
 
 // ── AI Progress simulation ────────────────────────────────────────────────
@@ -391,8 +394,12 @@ Antworte immer auf Deutsch.${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DE
 
 // ── Dark Mode ──────────────────────────────────────────────────────────────
 async function initDarkMode() {
-  const dark = await DB.darkMode();
-  applyDarkMode(dark === true);
+  try {
+    const dark = await DB.darkMode();
+    applyDarkMode(dark === true);
+  } catch (_) {
+    applyDarkMode(false);
+  }
 }
 
 function applyDarkMode(dark) {
@@ -2536,9 +2543,13 @@ async function initDashboard() {
 
 // ══ INIT ══════════════════════════════════════════════════════════════════
 (async () => {
-  await initDarkMode();
-  renderStreak();
-  await checkAuth();
+  try { await initDarkMode(); } catch (_) { applyDarkMode(false); }
+  try { renderStreak(); } catch (_) {}
+  try {
+    await checkAuth();
+  } catch (_) {
+    showScreen('auth-screen');
+  }
 })();
 
 // ── Service Worker ─────────────────────────────────────────────────────────
