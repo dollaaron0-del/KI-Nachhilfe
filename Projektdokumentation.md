@@ -30,9 +30,7 @@ Man legt pro Fach ein eigenes „Fach" an (mit Emoji und Farbe, damit es nicht s
 
 ## Wie das Ganze entstanden ist
 
-Das Projekt hab ich mit Hilfe von **Claude Code** gebaut – einem KI-Assistenten von Anthropic, der direkt im Terminal läuft und beim Programmieren hilft. Man beschreibt was man will, und er schreibt den Code, erklärt was er tut, und findet Fehler.
-
-Das klingt nach „die KI hat das gemacht" – aber so funktioniert es nicht wirklich. Man muss genau wissen was man will, Entscheidungen treffen, Fehler erkennen und das Ergebnis testen. Claude Code ist eher wie ein sehr schneller Entwickler, dem man trotzdem erklären muss was das Ziel ist.
+Das Projekt hab ich mit Hilfe von **Claude Code** gebaut.
 
 **Zeitraum:** ca. 3 Wochen (Mitte Mai bis Anfang Juni 2026)  
 **Entwicklungsschritte (Commits):** 64  
