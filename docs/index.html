@@ -79,6 +79,7 @@
             <button id="admin-set-limit-btn" class="btn-secondary" style="padding:7px 14px;font-size:14px;">Setzen</button>
           </div>
           <p style="margin:6px 0 0;font-size:11px;color:var(--label-secondary);">Auch via Telegram: <code>/setlimit 2.00</code> · <code>/status</code></p>
+          <button id="admin-users-btn" class="btn-secondary" style="width:100%;margin-top:10px;font-size:14px;">👥 Benutzer verwalten</button>
         </div>
       </div>
       <div id="setup-error" class="sheet-status error hidden"></div>
@@ -601,6 +602,18 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="app.js"></script>
 <div id="toast-container"></div>
+
+<!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
+<div id="admin-users-sheet" class="sheet-overlay hidden">
+  <div class="sheet-bg" id="admin-users-bg"></div>
+  <div class="sheet" style="max-height:80vh;overflow-y:auto;">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">👥 Benutzer verwalten</h2>
+    <div id="admin-users-list" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+      <p style="color:var(--label-secondary);text-align:center;">Lädt…</p>
+    </div>
+  </div>
+</div>
 
 <div id="settings-sheet" class="sheet-overlay hidden">
   <div class="sheet-bg" id="settings-bg"></div>

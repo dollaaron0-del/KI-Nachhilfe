@@ -815,6 +815,58 @@ app.get('/api/usage', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Admin: user management ─────────────────────────────────────────────────
+async function requireAdmin(req, res) {
+  const { rows } = await pool.query('SELECT is_admin FROM users WHERE id=$1', [req.user.id]);
+  if (!rows[0]?.is_admin) { res.status(403).json({ error: 'Nur für Admins' }); return false; }
+  return true;
+}
+
+app.get('/api/admin/users', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, approved, is_admin, approval_token IS NOT NULL AS pending, created_at FROM users ORDER BY created_at ASC'
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/users/:id/approve', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const { rows } = await pool.query(
+      'UPDATE users SET approved=true, approval_token=NULL WHERE id=$1 RETURNING username',
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    res.json({ ok: true, username: rows[0].username });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/admin/users/:id/admin', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: 'Eigenen Admin-Status nicht änderbar' });
+  try {
+    const { rows } = await pool.query(
+      'UPDATE users SET is_admin=$1 WHERE id=$2 RETURNING username, is_admin',
+      [req.body.is_admin, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    res.json({ ok: true, username: rows[0].username, is_admin: rows[0].is_admin });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  if (parseInt(req.params.id) === req.user.id) return res.status(400).json({ error: 'Eigenen Account nicht löschbar' });
+  try {
+    const { rows } = await pool.query('DELETE FROM users WHERE id=$1 RETURNING username', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/admin/set-limit', authMiddleware, async (req, res) => {
   const { rows } = await pool.query('SELECT is_admin FROM users WHERE id=$1', [req.user.id]);
   if (!rows[0]?.is_admin) return res.status(403).json({ error: 'Nur für Admins' });

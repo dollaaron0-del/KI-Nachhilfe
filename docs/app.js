@@ -474,6 +474,80 @@ document.getElementById('admin-set-limit-btn')?.addEventListener('click', async 
   } catch (e) { toast(e.message, 'error'); }
 });
 
+// ── Admin user management ──────────────────────────────────────────────────
+document.getElementById('admin-users-btn')?.addEventListener('click', () => {
+  document.getElementById('admin-users-sheet').classList.remove('hidden');
+  loadAdminUsers();
+});
+document.getElementById('admin-users-bg')?.addEventListener('click', () => {
+  document.getElementById('admin-users-sheet').classList.add('hidden');
+});
+
+async function loadAdminUsers() {
+  const list = document.getElementById('admin-users-list');
+  list.innerHTML = '<p style="color:var(--label-secondary);text-align:center;">Lädt…</p>';
+  try {
+    const users = await api('/api/admin/users');
+    list.innerHTML = '';
+    users.forEach(u => list.appendChild(buildUserRow(u)));
+  } catch (e) {
+    list.innerHTML = `<p style="color:var(--red);">${e.message}</p>`;
+  }
+}
+
+function buildUserRow(u) {
+  const isSelf = u.username === authUsername;
+  const div = document.createElement('div');
+  div.id = `user-row-${u.id}`;
+  div.style.cssText = 'background:var(--surface);border-radius:12px;padding:12px 14px;';
+
+  const statusColor = u.approved ? 'var(--green)' : 'var(--yellow)';
+  const statusText  = u.approved ? '✅ Aktiv' : '⏳ Ausstehend';
+  const adminBadge  = u.is_admin ? '<span style="font-size:11px;background:var(--purple);color:#fff;border-radius:6px;padding:2px 7px;margin-left:6px;">Admin</span>' : '';
+  const selfBadge   = isSelf    ? '<span style="font-size:11px;background:var(--blue);color:#fff;border-radius:6px;padding:2px 7px;margin-left:6px;">Du</span>' : '';
+
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <span style="font-weight:700;font-size:15px;">👤 ${u.username}</span>${adminBadge}${selfBadge}
+      </div>
+      <span style="font-size:12px;color:${statusColor};font-weight:600;">${statusText}</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      ${!u.approved ? `<button class="btn-secondary" style="font-size:13px;padding:5px 12px;" onclick="adminApprove(${u.id})">✅ Freischalten</button>` : ''}
+      ${!isSelf ? `<button class="btn-secondary" style="font-size:13px;padding:5px 12px;" onclick="adminToggleAdmin(${u.id},${!u.is_admin})">${u.is_admin ? '⬇️ Admin entfernen' : '⬆️ Admin machen'}</button>` : ''}
+      ${!isSelf ? `<button class="btn-secondary" style="font-size:13px;padding:5px 12px;color:var(--red);" onclick="adminDeleteUser(${u.id},'${u.username}')">🗑 Löschen</button>` : ''}
+    </div>`;
+  return div;
+}
+
+async function adminApprove(id) {
+  try {
+    const r = await api(`/api/admin/users/${id}/approve`, { method: 'POST' });
+    toast(`${r.username} wurde freigeschaltet`, 'success');
+    loadAdminUsers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function adminToggleAdmin(id, makeAdmin) {
+  try {
+    const r = await api(`/api/admin/users/${id}/admin`, {
+      method: 'PATCH', body: JSON.stringify({ is_admin: makeAdmin }),
+    });
+    toast(`${r.username} ist jetzt ${r.is_admin ? 'Admin' : 'kein Admin mehr'}`, 'success');
+    loadAdminUsers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function adminDeleteUser(id, username) {
+  if (!confirm(`Benutzer "${username}" wirklich löschen? Alle Daten werden entfernt.`)) return;
+  try {
+    await api(`/api/admin/users/${id}`, { method: 'DELETE' });
+    toast(`${username} gelöscht`, 'success');
+    loadAdminUsers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 // ══ SUBJECTS SCREEN ════════════════════════════════════════════════════════
 
 async function loadSubjects() {
