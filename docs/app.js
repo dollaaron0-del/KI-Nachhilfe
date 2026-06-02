@@ -1,5 +1,32 @@
 'use strict';
 
+// ── AI Progress simulation ────────────────────────────────────────────────
+function startProgress(barId, pctId, durationMs = 20000) {
+  const bar = document.getElementById(barId);
+  const pct = document.getElementById(pctId);
+  if (!bar || !pct) return () => {};
+  let current = 0;
+  bar.style.width = '0%'; pct.textContent = '0%';
+  // Easing: fast at start, slows near 90%
+  const interval = setInterval(() => {
+    const remaining = 90 - current;
+    current += remaining * (100 / durationMs) * 0.25;
+    if (current > 89) current = 89;
+    bar.style.width = current.toFixed(1) + '%';
+    pct.textContent = Math.round(current) + '%';
+  }, 250);
+  return () => {
+    clearInterval(interval);
+    bar.style.width = '100%'; pct.textContent = '100%';
+  };
+}
+
+function setUploadProgress(barEl, pctEl, value) {
+  if (!barEl || !pctEl) return;
+  barEl.style.width = value + '%';
+  pctEl.textContent = value + '%';
+}
+
 // ── Toast notifications ────────────────────────────────────────────────────
 function toast(msg, type = 'info', duration = 3500) {
   const icons = { error: '⚠️', success: '✅', info: 'ℹ️', warn: '⚠️' };
@@ -222,7 +249,7 @@ async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) 
 }
 
 // ── PDF Extraction ─────────────────────────────────────────────────────────
-async function extractPDF(file) {
+async function extractPDF(file, onProgress) {
   const ab  = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
   let text  = `\n\n=== ${file.name} ===\n`;
@@ -230,6 +257,7 @@ async function extractPDF(file) {
     const page    = await pdf.getPage(i);
     const content = await page.getTextContent();
     text += content.items.map(it => it.str).join(' ') + '\n';
+    if (onProgress) onProgress(i, pdf.numPages);
   }
   return { text: text.trim(), pages: pdf.numPages, name: file.name };
 }
@@ -632,15 +660,23 @@ dropZone.addEventListener('drop', e => {
 });
 
 async function handleUpload(files) {
-  const prog   = document.getElementById('upload-progress');
-  const status = document.getElementById('upload-status');
+  const prog    = document.getElementById('upload-progress');
+  const status  = document.getElementById('upload-status');
+  const label   = document.getElementById('upload-prog-label');
+  const bar     = document.getElementById('upload-prog-bar');
+  const pct     = document.getElementById('upload-prog-pct');
   prog.classList.remove('hidden'); status.classList.add('hidden');
 
   try {
     let added = ''; const newFiles = [];
     for (let i = 0; i < files.length; i++) {
-      prog.textContent = `Verarbeite ${files[i].name} (${i + 1}/${files.length})…`;
-      const { text, pages, name } = await extractPDF(files[i]);
+      const fileLabel = files.length > 1 ? `${files[i].name} (${i + 1}/${files.length})` : files[i].name;
+      label.textContent = `Verarbeite ${fileLabel}…`;
+      bar.style.width = '0%'; pct.textContent = '0%';
+      const { text, pages, name } = await extractPDF(files[i], (done, total) => {
+        const p = Math.round((done / total) * 100);
+        bar.style.width = p + '%'; pct.textContent = p + '%';
+      });
       added += '\n\n' + text;
       newFiles.push({ name, pages, uploadedAt: new Date().toISOString() });
       // Save to server for RAG + auto-card generation
@@ -1042,6 +1078,7 @@ document.getElementById('exam-ans-btn').addEventListener('click', toggleExamAns)
 async function generateExam() {
   ['exam-idle','exam-result'].forEach(id => document.getElementById(id).classList.add('hidden'));
   document.getElementById('exam-loading').classList.remove('hidden');
+  const examDone = startProgress('exam-progress-bar', 'exam-progress-pct', 25000);
   examAnsVis = false;
 
   const examPrompt = `Erstelle eine anspruchsvolle Probeklausur für "${sessionMeta.name}" (Schwierigkeit: ${selDiff}).
@@ -1074,9 +1111,11 @@ async function generateExam() {
     }
     body.closest('.exam-content').classList.add('answers-hidden');
     document.getElementById('exam-ans-btn').textContent = 'Lösungen anzeigen';
+    examDone();
     document.getElementById('exam-loading').classList.add('hidden');
     document.getElementById('exam-result').classList.remove('hidden');
   } catch (e) {
+    examDone();
     document.getElementById('exam-loading').classList.add('hidden');
     document.getElementById('exam-idle').classList.remove('hidden');
     toast('Fehler: ' + e.message, 'error');
@@ -1133,6 +1172,7 @@ async function runAnalysis() {
   if (!sessionMeta) return;
   ['analysis-idle','analysis-result'].forEach(id => document.getElementById(id).classList.add('hidden'));
   document.getElementById('analysis-loading').classList.remove('hidden');
+  const analysisDone = startProgress('analysis-progress-bar', 'analysis-progress-pct', 20000);
 
   const questions = sessionMeta.quizStats.questions;
   const statsText = questions.map((q, i) =>
@@ -1196,9 +1236,11 @@ Format:
     document.getElementById('analysis-body').innerHTML = safeHtml(md(analysis));
     renderSparkline();
     renderProgressChart();
+    analysisDone();
     document.getElementById('analysis-loading').classList.add('hidden');
     document.getElementById('analysis-result').classList.remove('hidden');
   } catch (e) {
+    analysisDone();
     document.getElementById('analysis-loading').classList.add('hidden');
     document.getElementById('analysis-idle').classList.remove('hidden');
     toast('Fehler: ' + e.message, 'error');
@@ -1460,6 +1502,7 @@ async function scanTopics() {
   if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   document.getElementById('aufgaben-loading-txt').textContent = 'Themen werden erkannt…';
   showAufgabenState(document.getElementById('aufgaben-loading'));
+  const aufgabenScanDone = startProgress('aufgaben-progress-bar', 'aufgaben-progress-pct', 15000);
   selTopic = null;
   document.getElementById('aufgaben-gen-btn').disabled = true;
 
@@ -1477,9 +1520,11 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
     scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     await localforage.setItem(`topics_${sessionId}`, scannedTopics);
+    aufgabenScanDone();
     renderTopicChips();
     showAufgabenState(document.getElementById('aufgaben-topics'));
   } catch (e) {
+    aufgabenScanDone();
     showAufgabenState(document.getElementById('aufgaben-idle'));
     toast('Fehler beim Erkennen: ' + e.message, 'error');
   }
@@ -1526,6 +1571,7 @@ async function generateAufgaben() {
   aufgabenAnsVis = false;
   document.getElementById('aufgaben-loading-txt').textContent = 'Aufgaben werden erstellt…';
   showAufgabenState(document.getElementById('aufgaben-loading'));
+  const aufgabenGenDone = startProgress('aufgaben-progress-bar', 'aufgaben-progress-pct', 20000);
 
   const isKlausur = selAufgabenType === 'klausur';
 
@@ -1599,10 +1645,12 @@ Format:
       createdAt: new Date().toISOString(),
     }).catch(() => {});
 
+    aufgabenGenDone();
     document.getElementById('aufgaben-body').closest('.aufgaben-content').classList.add('answers-hidden');
     document.getElementById('aufgaben-ans-btn').textContent = 'Lösungen anzeigen';
     showAufgabenState(document.getElementById('aufgaben-result'));
   } catch (e) {
+    aufgabenGenDone();
     showAufgabenState(document.getElementById('aufgaben-topics'));
     toast('Fehler: ' + e.message, 'error');
   }
@@ -1800,6 +1848,7 @@ async function generateMathAufgabe() {
   if (!sessionMeta) { toast('Bitte zuerst ein Fach öffnen.', 'warn'); return; }
   document.getElementById('rechnen-loading-txt').textContent = 'Aufgabe wird erstellt…';
   showRechnenState(document.getElementById('rechnen-loading'));
+  const rechnenGenDone = startProgress('rechnen-progress-bar', 'rechnen-progress-pct', 12000);
 
   const prompt = `Erstelle EINE einzelne Rechenaufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
 
@@ -1819,10 +1868,12 @@ Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
     );
     currentAufgabe  = aufgabe.trim();
     savedCanvasData = null;
+    rechnenGenDone();
     undoStack       = [];
     document.getElementById('aufgabe-display').innerHTML = safeHtml(md(currentAufgabe));
     showRechnenState(document.getElementById('rechnen-solve'));
   } catch (e) {
+    rechnenGenDone();
     showRechnenState(document.getElementById('rechnen-idle'));
     toast('Fehler: ' + e.message, 'error');
   }
@@ -1842,6 +1893,7 @@ async function checkHandwriting() {
 
   document.getElementById('rechnen-loading-txt').textContent = 'Lösung wird geprüft…';
   showRechnenState(document.getElementById('rechnen-loading'));
+  const checkDone = startProgress('rechnen-progress-bar', 'rechnen-progress-pct', 15000);
 
   const dataURL = canvas.toDataURL('image/png');
   const base64  = dataURL.split(',')[1];
@@ -1870,9 +1922,11 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
     const feedback = await claudeVision(base64, checkPrompt, sysBlocks(), 1800);
     document.getElementById('result-aufgabe-txt').innerHTML = safeHtml(md(currentAufgabe));
     document.getElementById('result-preview').src = dataURL;
+    checkDone();
     document.getElementById('rechnen-feedback').innerHTML = safeHtml(md(feedback));
     showRechnenState(document.getElementById('rechnen-result'));
   } catch (e) {
+    checkDone();
     showRechnenState(document.getElementById('rechnen-solve'));
     requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
     toast('Fehler beim Prüfen: ' + e.message, 'error');
@@ -1922,6 +1976,7 @@ document.getElementById('cheat-new-btn').addEventListener('click', () => {
 async function generateCheatSheet() {
   document.getElementById('cheat-idle').classList.add('hidden');
   document.getElementById('cheat-loading').classList.remove('hidden');
+  const cheatDone = startProgress('cheat-progress-bar', 'cheat-progress-pct', 22000);
 
   const prompt = `Erstelle eine präzise, kompakte Zusammenfassung für "${sessionMeta.name}" als Cheat Sheet / Spickzettel.
 
@@ -1955,11 +2010,13 @@ Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
       [{ role: 'user', content: 'Zusammenfassung erstellen.' }],
       sysBlocks(prompt), 3000,
     );
+    cheatDone();
     document.getElementById('cheat-body').innerHTML = safeHtml(md(result));
     localforage.setItem(`cheat_${sessionId}`, result).catch(() => {});
     document.getElementById('cheat-loading').classList.add('hidden');
     document.getElementById('cheat-result').classList.remove('hidden');
   } catch (e) {
+    cheatDone();
     document.getElementById('cheat-loading').classList.add('hidden');
     document.getElementById('cheat-idle').classList.remove('hidden');
     toast('Fehler: ' + e.message, 'error');
@@ -1982,6 +2039,7 @@ document.getElementById('glossar-search').addEventListener('input', e => {
 async function generateGlossar() {
   document.getElementById('glossar-idle').classList.add('hidden');
   document.getElementById('glossar-loading').classList.remove('hidden');
+  const glossarDone = startProgress('glossar-progress-bar', 'glossar-progress-pct', 18000);
 
   const prompt = `Extrahiere alle wichtigen Fachbegriffe aus dem Lernstoff für "${sessionMeta.name}".
 Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
@@ -1997,10 +2055,12 @@ Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
     glossarTerms = JSON.parse(m[0]).filter(t => t.term && t.def);
     glossarTerms.sort((a, b) => a.term.localeCompare(b.term, 'de'));
     DB.setGlossar(sessionId, glossarTerms.map(t => ({ term: t.term, definition: t.def }))).catch(() => {});
+    glossarDone();
     renderGlossarList('');
     document.getElementById('glossar-loading').classList.add('hidden');
     document.getElementById('glossar-result').classList.remove('hidden');
   } catch (e) {
+    glossarDone();
     document.getElementById('glossar-loading').classList.add('hidden');
     document.getElementById('glossar-idle').classList.remove('hidden');
     toast('Fehler: ' + e.message, 'error');
@@ -2152,6 +2212,7 @@ async function initKarten() {
 async function generateKarten() {
   if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   showKartenState(document.getElementById('karten-loading'));
+  const kartenDone = startProgress('karten-progress-bar', 'karten-progress-pct', 18000);
 
   const prompt = `Erstelle 15 hochwertige Karteikarten aus dem Lernstoff für "${sessionMeta.name}".
 
@@ -2179,8 +2240,10 @@ Antworte NUR als JSON-Array:
       interval: 1, ef: 2.5, repetitions: 0, due: Date.now(),
     }));
     await DB.setCards(sessionId, [...existing, ...newCards]);
+    kartenDone();
     await initKarten();
   } catch (e) {
+    kartenDone();
     showKartenState(document.getElementById('karten-idle'));
     toast('Fehler: ' + e.message, 'error');
   }

@@ -219,6 +219,8 @@
       <div id="exam-loading" class="cx-state hidden">
         <div class="big-icon spin">⚙️</div>
         <p>Klausur wird erstellt…</p>
+        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="exam-progress-bar"></div></div>
+        <p class="ai-progress-pct" id="exam-progress-pct">0%</p>
       </div>
       <div id="exam-result" class="cx-state hidden">
         <div class="exam-toolbar">
@@ -249,6 +251,8 @@
       <div id="analysis-loading" class="cx-state hidden">
         <div class="big-icon spin">🔍</div>
         <p>Analysiere deinen Lernstand…</p>
+        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="analysis-progress-bar"></div></div>
+        <p class="ai-progress-pct" id="analysis-progress-pct">0%</p>
       </div>
       <div id="analysis-result" class="cx-state hidden">
         <div class="gauge" id="gauge"></div>
@@ -288,6 +292,8 @@
       <div id="aufgaben-loading" class="cx-state hidden">
         <div class="big-icon spin">⚙️</div>
         <p id="aufgaben-loading-txt">Themen werden erkannt…</p>
+        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="aufgaben-progress-bar"></div></div>
+        <p class="ai-progress-pct" id="aufgaben-progress-pct">0%</p>
       </div>
       <div id="aufgaben-result" class="cx-state hidden">
         <div class="aufgaben-toolbar">
@@ -323,6 +329,8 @@
       <div id="rechnen-loading" class="cx-state hidden">
         <div class="big-icon spin">⚙️</div>
         <p id="rechnen-loading-txt">Aufgabe wird erstellt…</p>
+        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="rechnen-progress-bar"></div></div>
+        <p class="ai-progress-pct" id="rechnen-progress-pct">0%</p>
       </div>
 
       <div id="rechnen-solve" class="cx-state hidden">
@@ -375,6 +383,8 @@
       <div id="karten-loading" class="cx-state hidden">
         <div class="big-icon spin">🃏</div>
         <p>Karteikarten werden erstellt…</p>
+        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="karten-progress-bar"></div></div>
+        <p class="ai-progress-pct" id="karten-progress-pct">0%</p>
       </div>
 
       <div id="karten-review" class="cx-state hidden">
@@ -424,6 +434,8 @@
         <div id="cheat-loading" class="cx-state hidden">
           <div class="big-icon spin">📝</div>
           <p>Zusammenfassung wird erstellt…</p>
+          <div class="ai-progress-wrap"><div class="ai-progress-bar" id="cheat-progress-bar"></div></div>
+          <p class="ai-progress-pct" id="cheat-progress-pct">0%</p>
         </div>
         <div id="cheat-result" class="cx-state hidden">
           <div class="cheat-toolbar">
@@ -445,6 +457,8 @@
         <div id="glossar-loading" class="cx-state hidden">
           <div class="big-icon spin">📖</div>
           <p>Fachbegriffe werden extrahiert…</p>
+          <div class="ai-progress-wrap"><div class="ai-progress-bar" id="glossar-progress-bar"></div></div>
+          <p class="ai-progress-pct" id="glossar-progress-pct">0%</p>
         </div>
         <div id="glossar-result" class="cx-state hidden">
           <div class="glossar-toolbar">
@@ -517,7 +531,11 @@
       <button class="btn-secondary"
               onclick="document.getElementById('upload-input').click()">PDFs auswählen</button>
     </div>
-    <div id="upload-progress" class="upload-prog hidden"></div>
+    <div id="upload-progress" class="upload-prog hidden">
+      <div class="upload-prog-label" id="upload-prog-label">Verarbeite…</div>
+      <div class="ai-progress-wrap" style="width:100%;margin:6px 0 2px"><div class="ai-progress-bar" id="upload-prog-bar"></div></div>
+      <div class="ai-progress-pct" id="upload-prog-pct">0%</div>
+    </div>
     <div id="upload-status" class="sheet-status hidden"></div>
     <div id="doc-list-wrap" class="doc-list-wrap hidden">
       <div class="doc-list-title">Hochgeladene Dokumente</div>
