@@ -608,7 +608,11 @@
   <div class="sheet-bg" id="admin-users-bg"></div>
   <div class="sheet" style="max-height:80vh;overflow-y:auto;">
     <div class="sheet-handle"></div>
-    <h2 class="sheet-title">👥 Benutzer verwalten</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2 class="sheet-title">👥 Benutzer verwalten</h2>
+      <button onclick="document.getElementById('admin-users-sheet').classList.add('hidden')"
+              style="background:none;border:none;font-size:24px;color:var(--label-secondary);padding:4px 8px;cursor:pointer;">✕</button>
+    </div>
     <div id="admin-users-list" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
       <p style="color:var(--label-secondary);text-align:center;">Lädt…</p>
     </div>
