@@ -3,8 +3,10 @@ CREATE TABLE IF NOT EXISTS subjects (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   emoji       TEXT NOT NULL DEFAULT '📚',
+  color       TEXT NOT NULL DEFAULT '#5856d6',
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#5856d6';
 
 -- Documents (uploaded PDFs / text)
 CREATE TABLE IF NOT EXISTS documents (
@@ -72,3 +74,7 @@ CREATE TABLE IF NOT EXISTS glossar (
   definition  TEXT NOT NULL,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Grant all permissions to app user (safe to run repeatedly)
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO nachhilfe_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO nachhilfe_user;

@@ -138,7 +138,8 @@ html, body {
 .app-header {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px; padding-top: calc(10px + var(--safe-t));
-  background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  border-top: 3px solid #5856d6; flex-shrink: 0;
 }
 .header-center { flex: 1; min-width: 0; }
 .header-title  { display: block; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

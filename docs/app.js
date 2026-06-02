@@ -41,7 +41,7 @@ const api = (url, opts = {}) =>
 const DB = {
   // ── Server ──────────────────────────────────────────────────────────────
   subjects:     () => api('/api/subjects').catch(() => []),
-  addSubject:   s  => api('/api/subjects', { method: 'POST', body: JSON.stringify({ id: s.id, name: s.name, emoji: s.icon || s.emoji || '📚' }) }),
+  addSubject:   s  => api('/api/subjects', { method: 'POST', body: JSON.stringify({ id: s.id, name: s.name, emoji: s.icon || s.emoji || '📚', color: s.color || '#5856d6' }) }),
   delSubject:   id => fetch(`/api/subjects/${id}`, { method: 'DELETE' }),
 
   messages:     id => api(`/api/subjects/${id}/messages`).catch(() => []),
@@ -320,11 +320,15 @@ function makeCard(s) {
   const div = document.createElement('div');
   div.className = 'subj-card';
   div.style.borderTopColor = s.color || '#5856d6';
-  const meta = s.fileCount
-    ? `${s.fileCount} Dok. · ${s.quizCount ? s.quizCount + ' Fragen' : 'kein Quiz'}`
+  // Use server-side counts (doc_count/quiz_count) with fallback to local fields
+  const docCount  = s.doc_count  ?? s.fileCount  ?? 0;
+  const quizCount = s.quiz_count ?? s.quizCount  ?? 0;
+  const avgScore  = s.avg_score  ?? s.lastScore  ?? null;
+  const meta = docCount
+    ? `${docCount} Dok. · ${quizCount ? quizCount + ' Fragen' : 'kein Quiz'}`
     : 'Noch keine Dokumente';
-  const scoreHtml = s.lastScore !== null && s.lastScore !== undefined
-    ? `<span class="card-score" style="background:${scoreColor(s.lastScore)}">${s.lastScore}%</span>` : '';
+  const scoreHtml = avgScore !== null
+    ? `<span class="card-score" style="background:${scoreColor(avgScore)}">${avgScore}%</span>` : '';
   div.innerHTML = `
     <button class="card-del" data-id="${s.id}">×</button>
     <div class="card-icon">${s.emoji || s.icon || '📚'}</div>
@@ -450,6 +454,8 @@ async function openSubject(subj) {
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
   document.getElementById('header-label').textContent = `${subj.emoji || subj.icon || '📚'}  ${subj.name}`;
+  const appHeader = document.querySelector('.app-header');
+  if (appHeader && subj.color) appHeader.style.borderTopColor = subj.color;
   updateHeaderPages();
 
   const q = sessionMeta.quizStats.questions;

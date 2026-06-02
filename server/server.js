@@ -78,18 +78,29 @@ app.use(express.static(path.join(__dirname, '../docs')));
 // ═══════════════════════════════════════════════════════════════════════════
 app.get('/api/subjects', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM subjects ORDER BY created_at ASC');
+    const { rows } = await pool.query(`
+      SELECT s.id, s.name, s.emoji, s.color, s.created_at,
+        COUNT(DISTINCT d.id)::int        AS doc_count,
+        COUNT(DISTINCT qr.id)::int       AS quiz_count,
+        ROUND(AVG(qr.score::float / NULLIF(qr.total,0) * 100))::int AS avg_score
+      FROM subjects s
+      LEFT JOIN documents   d  ON d.subject_id  = s.id
+      LEFT JOIN quiz_results qr ON qr.subject_id = s.id
+      GROUP BY s.id
+      ORDER BY s.created_at ASC
+    `);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/subjects', async (req, res) => {
-  const { id, name, emoji } = req.body;
+  const { id, name, emoji, color } = req.body;
   if (!id || !name) return res.status(400).json({ error: 'id und name erforderlich' });
   try {
     const { rows } = await pool.query(
-      'INSERT INTO subjects (id,name,emoji) VALUES ($1,$2,$3) ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3 RETURNING *',
-      [id, name, emoji || '📚']
+      `INSERT INTO subjects (id,name,emoji,color) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3,color=$4 RETURNING *`,
+      [id, name, emoji || '📚', color || '#5856d6']
     );
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
