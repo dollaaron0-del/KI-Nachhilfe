@@ -1072,8 +1072,8 @@ html, body {
 .dash-chart-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text2); }
 
 /* ── Auth Screen ─────────────────────────────────────────────────────────── */
-.auth-screen { display: flex; align-items: center; justify-content: center; background: var(--bg); }
-.auth-screen.active { position: fixed; inset: 0; z-index: 9000; }
+.auth-screen { align-items: center; justify-content: center; background: var(--bg); }
+.auth-screen.active { display: flex; position: fixed; inset: 0; z-index: 9000; }
 .auth-wrap { width: 100%; max-width: 380px; padding: 24px 20px; }
 .auth-wrap .logo { font-size: 52px; text-align: center; margin-bottom: 8px; }
 .auth-wrap h1 { text-align: center; font-size: 24px; font-weight: 700; margin-bottom: 4px; }
