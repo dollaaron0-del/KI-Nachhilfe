@@ -624,13 +624,33 @@ function switchMode(mode) {
   }
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${mode}`));
-  if (mode === 'analysis') refreshAnalysisState();
-  if (mode === 'fehler') renderFehlerkatalog();
-  if (mode === 'aufgaben') initAufgaben();
-  if (mode === 'rechnen') initRechnen();
-  if (mode === 'karten') initKarten();
-  if (mode === 'dashboard') initDashboard();
+  if (mode === 'analysis')    refreshAnalysisState();
+  if (mode === 'aufgaben')    initAufgaben();
+  if (mode === 'rechnen')     initRechnen();
+  if (mode === 'karten')      initKarten();
+  if (mode === 'fortschritt') { activateSubpanel('panel-fortschritt', 'dashboard'); initDashboard(); }
+  if (mode === 'materialien') activateSubpanel('panel-materialien', 'cheat');
 }
+
+function activateSubpanel(panelId, subId) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  panel.querySelectorAll('.subpanel-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === subId));
+  panel.querySelectorAll('.subpanel').forEach(p => p.classList.toggle('hidden', p.dataset.subid !== subId));
+}
+
+// Sub-panel tab switching
+document.querySelectorAll('.subpanel-nav').forEach(nav => {
+  nav.addEventListener('click', e => {
+    const btn = e.target.closest('.subpanel-btn');
+    if (!btn) return;
+    const panelId = btn.closest('.panel').id;
+    const sub = btn.dataset.sub;
+    activateSubpanel(panelId, sub);
+    if (sub === 'dashboard') initDashboard();
+    if (sub === 'fehler') renderFehlerkatalog();
+  });
+});
 
 // ══ SCORE CHIP ════════════════════════════════════════════════════════════
 

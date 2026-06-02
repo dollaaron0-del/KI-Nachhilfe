@@ -103,16 +103,14 @@
 
   <nav class="mode-tabs">
     <button class="tab active" data-mode="chat">💬 Chat</button>
-    <button class="tab" data-mode="quiz">❓ Quiz</button>
+    <button class="tab tab-sep" data-mode="quiz">❓ Quiz</button>
     <button class="tab" data-mode="exam">📝 Klausur</button>
-    <button class="tab" data-mode="analysis">📊 Analyse</button>
-    <button class="tab" data-mode="fehler">📋 Fehler</button>
     <button class="tab" data-mode="aufgaben">🎯 Aufgaben</button>
     <button class="tab" data-mode="rechnen">✏️ Rechnen</button>
+    <button class="tab tab-sep" data-mode="analysis">📊 Analyse</button>
     <button class="tab" data-mode="karten">🃏 Karten</button>
-    <button class="tab" data-mode="cheat">📄 Cheat</button>
-    <button class="tab" data-mode="glossar">📖 Glossar</button>
-    <button class="tab" data-mode="dashboard">📊 Stats</button>
+    <button class="tab tab-sep" data-mode="materialien">📋 Materialien</button>
+    <button class="tab tab-sep" data-mode="fortschritt">📈 Fortschritt</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -265,17 +263,7 @@
     </div>
   </div>
 
-  <!-- ── FEHLER ── -->
-  <div id="panel-fehler" class="panel">
-    <div class="fehler-content" id="fehler-content">
-      <div class="cx-state" id="fehler-empty">
-        <div class="big-icon">📋</div>
-        <h2>Fehlerkatalog</h2>
-        <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
-      </div>
-      <div class="fehler-list" id="fehler-list"></div>
-    </div>
-  </div>
+  <!-- panel-fehler merged into panel-fortschritt below -->
 
   <!-- ── AUFGABEN ── -->
   <div id="panel-aufgaben" class="panel">
@@ -419,55 +407,75 @@
     </div>
   </div>
 
-  <!-- ── CHEAT SHEET ── -->
-  <div id="panel-cheat" class="panel">
-    <div class="cheat-content">
-      <div id="cheat-idle" class="cx-state">
-        <div class="big-icon">📄</div>
-        <h2>Zusammenfassung</h2>
-        <p>Ich erstelle eine kompakte Zusammenfassung mit allen wichtigen Konzepten, Formeln und Definitionen – ideal zum Ausdrucken vor der Prüfung.</p>
-        <button class="btn-primary" id="cheat-gen-btn">Zusammenfassung erstellen</button>
-      </div>
-      <div id="cheat-loading" class="cx-state hidden">
-        <div class="big-icon spin">📝</div>
-        <p>Zusammenfassung wird erstellt…</p>
-      </div>
-      <div id="cheat-result" class="cx-state hidden">
-        <div class="cheat-toolbar">
-          <button class="btn-secondary btn-sm" id="cheat-new-btn">Neu erstellen</button>
-          <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
+  <!-- ── MATERIALIEN (Zusammenfassung + Glossar) ── -->
+  <div id="panel-materialien" class="panel">
+    <div class="subpanel-nav">
+      <button class="subpanel-btn active" data-sub="cheat">📄 Zusammenfassung</button>
+      <button class="subpanel-btn" data-sub="glossar">📖 Glossar</button>
+    </div>
+    <div class="subpanel" data-subid="cheat">
+      <div class="cheat-content">
+        <div id="cheat-idle" class="cx-state">
+          <div class="big-icon">📄</div>
+          <h2>Zusammenfassung</h2>
+          <p>Ich erstelle eine kompakte Zusammenfassung mit allen wichtigen Konzepten, Formeln und Definitionen – ideal zum Ausdrucken vor der Prüfung.</p>
+          <button class="btn-primary" id="cheat-gen-btn">Zusammenfassung erstellen</button>
         </div>
-        <div class="cheat-body" id="cheat-body"></div>
+        <div id="cheat-loading" class="cx-state hidden">
+          <div class="big-icon spin">📝</div>
+          <p>Zusammenfassung wird erstellt…</p>
+        </div>
+        <div id="cheat-result" class="cx-state hidden">
+          <div class="cheat-toolbar">
+            <button class="btn-secondary btn-sm" id="cheat-new-btn">Neu erstellen</button>
+            <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
+          </div>
+          <div class="cheat-body" id="cheat-body"></div>
+        </div>
+      </div>
+    </div>
+    <div class="subpanel hidden" data-subid="glossar">
+      <div class="glossar-content">
+        <div id="glossar-idle" class="cx-state">
+          <div class="big-icon">📖</div>
+          <h2>Fachbegriffs-Glossar</h2>
+          <p>Ich extrahiere alle Fachbegriffe aus deinen Dokumenten und erkläre sie präzise.</p>
+          <button class="btn-primary" id="glossar-gen-btn">Glossar erstellen</button>
+        </div>
+        <div id="glossar-loading" class="cx-state hidden">
+          <div class="big-icon spin">📖</div>
+          <p>Fachbegriffe werden extrahiert…</p>
+        </div>
+        <div id="glossar-result" class="cx-state hidden">
+          <div class="glossar-toolbar">
+            <input class="glossar-search" id="glossar-search" type="search" placeholder="Begriff suchen…" />
+            <button class="btn-secondary btn-sm" id="glossar-new-btn">Neu</button>
+          </div>
+          <div class="glossar-list" id="glossar-list"></div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- ── GLOSSAR ── -->
-  <div id="panel-glossar" class="panel">
-    <div class="glossar-content">
-      <div id="glossar-idle" class="cx-state">
-        <div class="big-icon">📖</div>
-        <h2>Fachbegriffs-Glossar</h2>
-        <p>Ich extrahiere alle Fachbegriffe aus deinen Dokumenten und erkläre sie präzise.</p>
-        <button class="btn-primary" id="glossar-gen-btn">Glossar erstellen</button>
-      </div>
-      <div id="glossar-loading" class="cx-state hidden">
-        <div class="big-icon spin">📖</div>
-        <p>Fachbegriffe werden extrahiert…</p>
-      </div>
-      <div id="glossar-result" class="cx-state hidden">
-        <div class="glossar-toolbar">
-          <input class="glossar-search" id="glossar-search" type="search" placeholder="Begriff suchen…" />
-          <button class="btn-secondary btn-sm" id="glossar-new-btn">Neu</button>
+  <!-- ── FORTSCHRITT (Dashboard + Fehler) ── -->
+  <div id="panel-fortschritt" class="panel">
+    <div class="subpanel-nav">
+      <button class="subpanel-btn active" data-sub="dashboard">📈 Dashboard</button>
+      <button class="subpanel-btn" data-sub="fehler">📋 Fehler</button>
+    </div>
+    <div id="panel-dashboard" class="subpanel" data-subid="dashboard">
+      <div class="dash-loading">Lädt…</div>
+    </div>
+    <div class="subpanel hidden" data-subid="fehler">
+      <div class="fehler-content" id="fehler-content">
+        <div class="cx-state" id="fehler-empty">
+          <div class="big-icon">📋</div>
+          <h2>Fehlerkatalog</h2>
+          <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
         </div>
-        <div class="glossar-list" id="glossar-list"></div>
+        <div class="fehler-list" id="fehler-list"></div>
       </div>
     </div>
-  </div>
-
-  <!-- ── DASHBOARD ── -->
-  <div id="panel-dashboard" class="panel">
-    <div class="dash-loading">Wähle diesen Tab um Statistiken zu laden.</div>
   </div>
 
 </div>
