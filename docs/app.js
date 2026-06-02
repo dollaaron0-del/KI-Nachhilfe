@@ -1371,6 +1371,7 @@ function showAufgabenState(el) {
 
 function initAufgaben() {
   if (scannedTopics.length) {
+    renderTopicChips();
     showAufgabenState(document.getElementById('aufgaben-topics'));
   } else {
     showAufgabenState(document.getElementById('aufgaben-idle'));
