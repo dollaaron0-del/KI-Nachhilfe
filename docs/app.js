@@ -3,10 +3,10 @@
 // ── Global error safety net ───────────────────────────────────────────────
 window.addEventListener('error', e => {
   console.error('App error:', e.message, e.filename, e.lineno);
-  try { showScreen('auth-screen'); } catch(_) {
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById('auth-screen')?.classList.add('active');
-  }
+  // Only show auth if no screen is visible (blank screen), not on every JS error
+  try {
+    if (!document.querySelector('.screen.active')) showScreen('auth-screen');
+  } catch (_) {}
 });
 window.addEventListener('unhandledrejection', e => {
   console.error('Unhandled promise:', e.reason);
