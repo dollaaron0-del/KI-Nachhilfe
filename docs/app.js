@@ -135,6 +135,14 @@ async function renderStreak(count) {
 }
 
 // ── Anthropic API (via server proxy) ──────────────────────────────────────
+function friendlyApiError(errStr, status) {
+  if (status === 529 || (errStr && errStr.includes('overloaded')))
+    return 'Claude ist gerade überlastet – bitte kurz warten und erneut versuchen.';
+  if (status === 429 || (errStr && errStr.includes('Tageslimit')))
+    return errStr || 'Tageslimit erreicht.';
+  return errStr || `Serverfehler ${status}`;
+}
+
 async function claude(messages, systemBlocks, maxTokens = 1500) {
   const r = await fetch('/api/claude', {
     method: 'POST',
@@ -143,7 +151,7 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
-    throw new Error(e.error || `Serverfehler ${r.status}`);
+    throw new Error(friendlyApiError(e.error, r.status));
   }
   return (await r.json()).content[0].text;
 }
@@ -158,7 +166,7 @@ async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
       model: 'claude-haiku-4-5-20251001', subject_id: sessionId,
     }),
   });
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Serverfehler ${r.status}`); }
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(friendlyApiError(e.error, r.status)); }
   return (await r.json()).content[0].text;
 }
 

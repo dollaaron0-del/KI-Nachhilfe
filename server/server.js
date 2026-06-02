@@ -18,6 +18,22 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // ── Anthropic ──────────────────────────────────────────────────────────────
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+async function callClaude(params, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await anthropic.messages.create(params);
+    } catch (e) {
+      const retryable = e.status === 529 || e.status === 529 ||
+        (e.message && (e.message.includes('overloaded') || e.message.includes('529')));
+      if (retryable && attempt < maxRetries) {
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 2000));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 // Cost per token in EUR (approximate, based on USD/EUR 0.92)
 const TOKEN_COST = {
   'claude-sonnet-4-6':        { in: 0.00000276, out: 0.0000138  },
@@ -273,7 +289,7 @@ app.post('/api/claude', claudeLimit, async (req, res) => {
       });
     }
 
-    const response = await anthropic.messages.create(params);
+    const response = await callClaude(params);
 
     // Record usage asynchronously (don't block response)
     recordUsage(today, params.model,
@@ -323,7 +339,7 @@ app.post('/api/local', async (req, res) => {
     try {
       const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
       if (system) params.system = system;
-      const response = await anthropic.messages.create(params);
+      const response = await callClaude(params);
       res.json(response);
     } catch (e2) {
       res.status(500).json({ error: e.message });
