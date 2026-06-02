@@ -1419,12 +1419,21 @@ Format:
     );
     const body = document.getElementById('aufgaben-body');
     const sepIdx = result.search(/---\s*\n+##\s*(Lösungsschlüssel|Musterlösungen)/i);
+    const tasksPart = sepIdx > -1 ? result.slice(0, sepIdx) : result;
+
     if (sepIdx > -1) {
-      body.innerHTML = safeHtml(md(result.slice(0, sepIdx)) +
+      body.innerHTML = safeHtml(md(tasksPart) +
         `<div class="ans-section">${md(result.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`);
     } else {
       body.innerHTML = safeHtml(md(result));
     }
+
+    // Inject per-task "✏️ Lösen" buttons
+    injectSolveButtons(tasksPart);
+
+    // Wire "Im Rechnen lösen" toolbar button to send all tasks
+    document.getElementById('aufgaben-rechnen-btn').onclick = () => sendToRechnen(tasksPart.trim());
+
     document.getElementById('aufgaben-body').closest('.aufgaben-content').classList.add('answers-hidden');
     document.getElementById('aufgaben-ans-btn').textContent = 'Lösungen anzeigen';
     showAufgabenState(document.getElementById('aufgaben-result'));
@@ -1432,6 +1441,35 @@ Format:
     showAufgabenState(document.getElementById('aufgaben-topics'));
     alert('Fehler: ' + e.message);
   }
+}
+
+function injectSolveButtons(tasksPart) {
+  const body = document.getElementById('aufgaben-body');
+  // Find individual tasks by splitting on "**Aufgabe N" pattern
+  const taskMatches = [...tasksPart.matchAll(/\*\*Aufgabe\s+\d+[^*]*\*\*:?([^\n]*(?:\n(?!\n\*\*Aufgabe)[^\n]*)*)/gi)];
+
+  if (!taskMatches.length) return; // Klausur format — no per-task buttons needed
+
+  // Find all <p> containing bold "Aufgabe N" text in rendered HTML
+  body.querySelectorAll('p').forEach((p, i) => {
+    const strong = p.querySelector('strong');
+    if (!strong || !/^Aufgabe\s+\d+/i.test(strong.textContent.trim())) return;
+
+    // Get this task's raw text from the parsed matches
+    const taskText = taskMatches[i] ? taskMatches[i][0] : p.textContent;
+
+    const btn = document.createElement('button');
+    btn.className = 'solve-inline-btn';
+    btn.innerHTML = '✏️ Lösen';
+    btn.addEventListener('click', () => sendToRechnen(taskText.trim()));
+    p.appendChild(btn);
+  });
+}
+
+function sendToRechnen(text) {
+  currentAufgabe = text;
+  savedCanvasData = null;
+  switchMode('rechnen');
 }
 
 // ══ RECHNEN (Apple Pencil) ════════════════════════════════════════════════
