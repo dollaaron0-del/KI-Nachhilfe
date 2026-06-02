@@ -55,9 +55,10 @@ const ICONS  = ['📐','📊','🧪','🔬','🧬','📚','🖥️','⚖️','�
 const COLORS = ['#5856d6','#007aff','#34c759','#ff9500','#ff3b30','#ff2d55','#30b0c7','#a2845e'];
 
 // ── State ──────────────────────────────────────────────────────────────────
-let sessionId    = null;
-let sessionMeta  = null;
-let sessionTxt   = '';
+let sessionId      = null;
+let sessionMeta    = null;
+let sessionTxt     = '';
+let customPrompt   = '';
 let selIcon      = ICONS[0];
 let selColor     = COLORS[0];
 let selDiff      = 'mittel';
@@ -299,7 +300,7 @@ MATHEMATIK: Für mathematische Formeln und Gleichungen verwende LaTeX-Notation.
 Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$
 Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
 
-Antworte immer auf Deutsch.${extra ? '\n\n' + extra : ''}`,
+Antworte immer auf Deutsch.${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}${extra ? '\n\n' + extra : ''}`,
       cache_control: { type: 'ephemeral' },
     },
   ];
@@ -502,6 +503,7 @@ async function openSubject(subj) {
     sessionMeta.files = serverDocs.map(d => ({ name: d.filename, uploadedAt: d.uploaded_at }));
   }
   sessionTxt = await DB.content(subj.id);
+  customPrompt = subj.custom_prompt || '';
   scannedTopics = (await localforage.getItem(`topics_${subj.id}`)) || [];
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
@@ -542,6 +544,7 @@ async function openSubject(subj) {
   refreshAnalysisState();
   switchMode('chat');
   showScreen('main-screen');
+  updateSettingsBadge();
 
   if (noFiles) {
     showUploadSheet();
@@ -587,10 +590,49 @@ function showWeakTopicsNote() {
   msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
 }
 
+// ══ SETTINGS SHEET ═════════════════════════════════════════════════════════
+
+document.getElementById('btn-settings').addEventListener('click', () => {
+  document.getElementById('custom-prompt-ta').value = customPrompt;
+  document.getElementById('settings-sheet').classList.remove('hidden');
+});
+document.getElementById('settings-bg').addEventListener('click', () =>
+  document.getElementById('settings-sheet').classList.add('hidden'));
+document.getElementById('settings-close-btn').addEventListener('click', () =>
+  document.getElementById('settings-sheet').classList.add('hidden'));
+document.getElementById('settings-save-btn').addEventListener('click', async () => {
+  const val = document.getElementById('custom-prompt-ta').value.trim();
+  try {
+    await fetch(`/api/subjects/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ custom_prompt: val }),
+    });
+    customPrompt = val;
+    document.getElementById('settings-sheet').classList.add('hidden');
+    toast('Anweisungen gespeichert.', 'success');
+    updateSettingsBadge();
+  } catch (e) {
+    toast('Fehler beim Speichern: ' + e.message, 'error');
+  }
+});
+
+function updateSettingsBadge() {
+  const btn = document.getElementById('btn-settings');
+  let badge = btn.querySelector('.settings-active-badge');
+  if (customPrompt && !badge) {
+    badge = document.createElement('span');
+    badge.className = 'settings-active-badge';
+    btn.appendChild(badge);
+  } else if (!customPrompt && badge) {
+    badge.remove();
+  }
+}
+
 // ══ UPLOAD SHEET ═══════════════════════════════════════════════════════════
 
 document.getElementById('back-btn').addEventListener('click', () => {
-  sessionId = null; sessionMeta = null; sessionTxt = '';
+  sessionId = null; sessionMeta = null; sessionTxt = ''; customPrompt = '';
   showScreen('subjects-screen'); loadSubjects();
 });
 document.getElementById('btn-add-docs').addEventListener('click', showUploadSheet);

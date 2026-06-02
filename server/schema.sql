@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS subjects (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE subjects ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#5856d6';
+ALTER TABLE subjects ADD COLUMN IF NOT EXISTS custom_prompt TEXT NOT NULL DEFAULT '';
 
 -- Documents (uploaded PDFs / text)
 CREATE TABLE IF NOT EXISTS documents (

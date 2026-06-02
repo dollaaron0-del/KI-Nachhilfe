@@ -123,6 +123,17 @@ app.post('/api/subjects', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.patch('/api/subjects/:id', async (req, res) => {
+  const { custom_prompt } = req.body;
+  try {
+    const { rows } = await pool.query(
+      'UPDATE subjects SET custom_prompt=$1 WHERE id=$2 RETURNING *',
+      [custom_prompt || '', req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.delete('/api/subjects/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM subjects WHERE id=$1', [req.params.id]);

@@ -92,6 +92,11 @@
     </div>
     <div class="header-right">
       <span class="score-chip hidden" id="score-chip"></span>
+      <button class="btn-icon" id="btn-settings" title="Fach-Einstellungen">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
       <button class="btn-icon" id="btn-add-docs" title="Dokumente hinzufügen">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -553,5 +558,27 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script src="app.js"></script>
 <div id="toast-container"></div>
+
+<div id="settings-sheet" class="sheet-overlay hidden">
+  <div class="sheet-bg" id="settings-bg"></div>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">⚙️ Fach-Einstellungen</h2>
+    <div class="settings-section">
+      <label class="settings-label" for="custom-prompt-ta">
+        Persönliche Anweisungen für die KI
+        <span class="settings-label-sub">Was der Bot aus den Dokumenten nicht wissen kann — z.B. Prüfungseinschränkungen, Bewertungsschwerpunkte, Lernziele.</span>
+      </label>
+      <textarea id="custom-prompt-ta" class="settings-ta"
+        placeholder="Beispiel: Der Professor bewertet besonders das formale Vorgehen beim Beweisführen. Taschenrechner sind in der Prüfung nicht erlaubt. Fokus liegt auf Kapitel 3–6 des Skripts. Prüfungsdauer: 90 Minuten…"
+        rows="7"></textarea>
+    </div>
+    <div class="settings-actions">
+      <button class="btn-primary" id="settings-save-btn">Speichern</button>
+      <button class="btn-secondary" id="settings-close-btn">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
