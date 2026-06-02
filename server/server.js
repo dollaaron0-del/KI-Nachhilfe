@@ -53,6 +53,14 @@ async function getDailyLimit() {
 // ── Telegram polling (handle bot commands & inline button presses) ─────────
 let tgOffset = 0;
 
+async function answerCallback(id, text) {
+  await fetch(`https://api.telegram.org/bot${TG_TOKEN}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: id, text }),
+  }).catch(() => {});
+}
+
 async function pollTelegram() {
   if (!TG_TOKEN) return;
   try {
@@ -63,12 +71,16 @@ async function pollTelegram() {
     const data = await r.json();
     for (const upd of data.result || []) {
       tgOffset = upd.update_id + 1;
-      // Inline button press
+
+      // ── Inline button press ─────────────────────────────────────────────
       if (upd.callback_query) {
         const cb = upd.callback_query;
         const chatId = cb.message?.chat?.id?.toString();
-        if (chatId === TG_CHAT_ID && cb.data?.startsWith('addlimit:')) {
-          const add = parseFloat(cb.data.split(':')[1]);
+        if (chatId !== TG_CHAT_ID) continue;
+        const cbData = cb.data || '';
+
+        if (cbData.startsWith('addlimit:')) {
+          const add = parseFloat(cbData.split(':')[1]);
           if (!isNaN(add) && add > 0) {
             const current = await getDailyLimit();
             const newLimit = +(current + add).toFixed(2);
@@ -76,38 +88,110 @@ async function pollTelegram() {
               "INSERT INTO settings (key,value) VALUES ('daily_limit_eur',$1) ON CONFLICT (key) DO UPDATE SET value=$1",
               [newLimit.toString()]
             );
-            await fetch(`https://api.telegram.org/bot${TG_TOKEN}/answerCallbackQuery`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ callback_query_id: cb.id, text: `✅ Limit → ${newLimit.toFixed(2)}€` }),
-            }).catch(() => {});
-            await sendTelegram(`✅ Tageslimit auf *${newLimit.toFixed(2)}€* erhöht (war ${current.toFixed(2)}€)`);
+            await answerCallback(cb.id, `✅ Limit → ${newLimit.toFixed(2)}€`);
+            await sendTelegram(`✅ Tageslimit auf <b>${newLimit.toFixed(2)}€</b> erhöht (war ${current.toFixed(2)}€)`);
           }
-        }
-      }
-      // Text commands
-      const msg = upd.message;
-      if (msg && msg.chat?.id?.toString() === TG_CHAT_ID) {
-        const text = msg.text?.trim() || '';
-        if (text.startsWith('/setlimit ')) {
-          const val = parseFloat(text.split(' ')[1]);
-          if (!isNaN(val) && val > 0) {
-            await pool.query(
-              "INSERT INTO settings (key,value) VALUES ('daily_limit_eur',$1) ON CONFLICT (key) DO UPDATE SET value=$1",
-              [val.toString()]
-            );
-            await sendTelegram(`✅ Tageslimit auf *${val.toFixed(2)}€* gesetzt`);
-          } else {
-            await sendTelegram('❌ Ungültiger Betrag. Beispiel: `/setlimit 2.00`');
-          }
-        } else if (text === '/status') {
-          const { cost, calls } = await checkDailyLimit();
-          const limit = await getDailyLimit();
-          const pct = limit > 0 ? Math.round(cost / limit * 100) : 0;
-          await sendTelegram(
-            `📊 *Tagesstatus*\n\nVerbraucht: ${cost.toFixed(3)}€\nLimit: ${limit.toFixed(2)}€\nAuslastung: ${pct}%\nAPI-Calls: ${calls}`
+
+        } else if (cbData.startsWith('approve:')) {
+          const userId = parseInt(cbData.split(':')[1]);
+          const { rows } = await pool.query(
+            'UPDATE users SET approved=true, approval_token=NULL WHERE id=$1 AND approved=false RETURNING username',
+            [userId]
           );
+          if (rows.length) {
+            await answerCallback(cb.id, `✅ ${rows[0].username} freigeschaltet`);
+            await sendTelegram(`✅ <b>${rows[0].username}</b> wurde freigeschaltet.`);
+          } else {
+            await answerCallback(cb.id, 'Bereits verarbeitet');
+          }
+
+        } else if (cbData.startsWith('reject:')) {
+          const userId = parseInt(cbData.split(':')[1]);
+          const { rows } = await pool.query(
+            'DELETE FROM users WHERE id=$1 AND approved=false RETURNING username',
+            [userId]
+          );
+          if (rows.length) {
+            await answerCallback(cb.id, `🗑 ${rows[0].username} abgelehnt`);
+            await sendTelegram(`🗑 <b>${rows[0].username}</b> wurde abgelehnt und gelöscht.`);
+          } else {
+            await answerCallback(cb.id, 'Bereits verarbeitet');
+          }
         }
+        continue;
+      }
+
+      // ── Text commands ───────────────────────────────────────────────────
+      const msg = upd.message;
+      if (!msg || msg.chat?.id?.toString() !== TG_CHAT_ID) continue;
+      const text = msg.text?.trim() || '';
+
+      if (text.startsWith('/setlimit ')) {
+        const val = parseFloat(text.split(' ')[1]);
+        if (!isNaN(val) && val > 0) {
+          await pool.query(
+            "INSERT INTO settings (key,value) VALUES ('daily_limit_eur',$1) ON CONFLICT (key) DO UPDATE SET value=$1",
+            [val.toString()]
+          );
+          await sendTelegram(`✅ Tageslimit auf <b>${val.toFixed(2)}€</b> gesetzt`);
+        } else {
+          await sendTelegram('❌ Ungültiger Betrag. Beispiel: <code>/setlimit 2.00</code>');
+        }
+
+      } else if (text === '/status') {
+        const { cost, calls } = await checkDailyLimit();
+        const limit = await getDailyLimit();
+        const pct = limit > 0 ? Math.round(cost / limit * 100) : 0;
+        await sendTelegram(
+          `📊 <b>Tagesstatus</b>\n\nVerbraucht: ${cost.toFixed(3)}€\nLimit: ${limit.toFixed(2)}€\nAuslastung: ${pct}%\nAPI-Calls: ${calls}`
+        );
+
+      } else if (text === '/users') {
+        const { rows } = await pool.query(
+          "SELECT id, username, approved, is_admin, created_at FROM users ORDER BY created_at DESC LIMIT 20"
+        );
+        if (!rows.length) {
+          await sendTelegram('Keine Benutzer vorhanden.');
+        } else {
+          const lines = rows.map(u => {
+            const status = !u.approved ? '⏳ ausstehend' : u.is_admin ? '👑 Admin' : '✅ aktiv';
+            return `${status} — <b>${u.username}</b>`;
+          });
+          await sendTelegram(`👥 <b>Benutzer (${rows.length})</b>\n\n${lines.join('\n')}`);
+        }
+
+      } else if (text.startsWith('/approve ')) {
+        const uname = text.split(' ')[1]?.toLowerCase();
+        if (!uname) { await sendTelegram('Beispiel: <code>/approve benutzername</code>'); continue; }
+        const { rows } = await pool.query(
+          'UPDATE users SET approved=true, approval_token=NULL WHERE LOWER(username)=$1 AND approved=false RETURNING username',
+          [uname]
+        );
+        if (rows.length) await sendTelegram(`✅ <b>${rows[0].username}</b> wurde freigeschaltet.`);
+        else await sendTelegram(`❌ Kein ausstehender Benutzer mit dem Namen <b>${uname}</b> gefunden.`);
+
+      } else if (text.startsWith('/reject ')) {
+        const uname = text.split(' ')[1]?.toLowerCase();
+        if (!uname) { await sendTelegram('Beispiel: <code>/reject benutzername</code>'); continue; }
+        const { rows } = await pool.query(
+          'DELETE FROM users WHERE LOWER(username)=$1 AND approved=false RETURNING username',
+          [uname]
+        );
+        if (rows.length) await sendTelegram(`🗑 <b>${rows[0].username}</b> wurde abgelehnt und gelöscht.`);
+        else await sendTelegram(`❌ Kein ausstehender Benutzer mit dem Namen <b>${uname}</b> gefunden.`);
+
+      } else if (text === '/help') {
+        await sendTelegram(
+          `🤖 <b>Admin-Befehle</b>\n\n` +
+          `👥 <b>Benutzer</b>\n` +
+          `/users — alle Benutzer auflisten\n` +
+          `/approve &lt;name&gt; — Benutzer freischalten\n` +
+          `/reject &lt;name&gt; — Benutzer ablehnen\n\n` +
+          `💰 <b>Limit</b>\n` +
+          `/setlimit 2.00 — Tageslimit setzen\n` +
+          `/status — API-Verbrauch heute\n\n` +
+          `Registrierungsanfragen erscheinen automatisch mit ✅/❌-Buttons.`
+        );
       }
     }
   } catch (_) {}
@@ -249,10 +333,13 @@ app.post('/api/auth/register', async (req, res) => {
     );
 
     if (!approved) {
-      const host = process.env.APP_URL || `http://161.97.166.88:8080`;
-      const link = `${host}/api/auth/approve?token=${approvalToken}`;
-      await sendTelegram(
-        `🆕 <b>Neuer Registrierungsantrag</b>\n\n👤 Benutzername: <code>${uname}</code>\n📅 ${new Date().toLocaleString('de-DE')}\n\n<a href="${link}">✅ Jetzt freischalten</a>`
+      const userId = rows[0].id;
+      await sendTelegramButtons(
+        `🆕 <b>Neuer Registrierungsantrag</b>\n\n👤 Benutzername: <code>${uname}</code>\n📅 ${new Date().toLocaleString('de-DE')}`,
+        [[
+          { text: '✅ Freischalten', callback_data: `approve:${userId}` },
+          { text: '❌ Ablehnen',    callback_data: `reject:${userId}` },
+        ]]
       );
       return res.status(202).json({ pending: true, message: 'Dein Konto wartet auf Freischaltung durch den Admin.' });
     }
