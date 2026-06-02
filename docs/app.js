@@ -665,7 +665,7 @@ function switchMode(mode) {
   if (mode === 'rechnen')     initRechnen();
   if (mode === 'karten')      initKarten();
   if (mode === 'fortschritt') { activateSubpanel('panel-fortschritt', 'dashboard'); initDashboard(); }
-  if (mode === 'materialien') activateSubpanel('panel-materialien', 'cheat');
+  if (mode === 'materialien') { activateSubpanel('panel-materialien', 'cheat'); loadSavedCheat(); }
 }
 
 function activateSubpanel(panelId, subId) {
@@ -685,6 +685,8 @@ document.querySelectorAll('.subpanel-nav').forEach(nav => {
     activateSubpanel(panelId, sub);
     if (sub === 'dashboard') initDashboard();
     if (sub === 'fehler') renderFehlerkatalog();
+    if (sub === 'cheat') loadSavedCheat();
+    if (sub === 'glossar') loadSavedGlossar();
   });
 });
 
@@ -1886,6 +1888,7 @@ document.getElementById('import-input').addEventListener('change', async e => {
 // ══ CHEAT SHEET ═══════════════════════════════════════════════════════════
 document.getElementById('cheat-gen-btn').addEventListener('click', generateCheatSheet);
 document.getElementById('cheat-new-btn').addEventListener('click', () => {
+  localforage.removeItem(`cheat_${sessionId}`).catch(() => {});
   document.getElementById('cheat-result').classList.add('hidden');
   document.getElementById('cheat-idle').classList.remove('hidden');
 });
@@ -1927,6 +1930,7 @@ Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
       sysBlocks(prompt), 3000,
     );
     document.getElementById('cheat-body').innerHTML = safeHtml(md(result));
+    localforage.setItem(`cheat_${sessionId}`, result).catch(() => {});
     document.getElementById('cheat-loading').classList.add('hidden');
     document.getElementById('cheat-result').classList.remove('hidden');
   } catch (e) {
@@ -1987,6 +1991,27 @@ function renderGlossarList(filter) {
       <div class="glossar-term">${esc(t.term)}</div>
       <div class="glossar-def">${esc(t.def)}</div>
     </div>`).join('');
+}
+
+async function loadSavedCheat() {
+  const saved = await localforage.getItem(`cheat_${sessionId}`).catch(() => null);
+  if (!saved) return;
+  document.getElementById('cheat-body').innerHTML = safeHtml(md(saved));
+  document.getElementById('cheat-idle').classList.add('hidden');
+  document.getElementById('cheat-loading').classList.add('hidden');
+  document.getElementById('cheat-result').classList.remove('hidden');
+}
+
+async function loadSavedGlossar() {
+  if (glossarTerms.length) { renderGlossarList(''); document.getElementById('glossar-idle').classList.add('hidden'); document.getElementById('glossar-result').classList.remove('hidden'); return; }
+  try {
+    const terms = await api(`/api/subjects/${sessionId}/glossar`);
+    if (!terms || !terms.length) return;
+    glossarTerms = terms.map(t => ({ term: t.term, def: t.definition }));
+    renderGlossarList('');
+    document.getElementById('glossar-idle').classList.add('hidden');
+    document.getElementById('glossar-result').classList.remove('hidden');
+  } catch (e) {}
 }
 
 // ══ CHART.JS FORTSCHRITTSDIAGRAMM ═════════════════════════════════════════
