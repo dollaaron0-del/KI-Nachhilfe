@@ -3,7 +3,10 @@
 // ── Global error safety net ───────────────────────────────────────────────
 window.addEventListener('error', e => {
   console.error('App error:', e.message, e.filename, e.lineno);
-  try { document.getElementById('auth-screen')?.classList.add('active'); } catch(_) {}
+  try { showScreen('auth-screen'); } catch(_) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('auth-screen')?.classList.add('active');
+  }
 });
 window.addEventListener('unhandledrejection', e => {
   console.error('Unhandled promise:', e.reason);
