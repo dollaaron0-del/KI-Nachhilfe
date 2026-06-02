@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'ki-tutor-v1';
+const CACHE = 'ki-tutor-v3';
 const STATIC = ['./', './index.html', './app.js', './style.css', './icon.svg', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -15,14 +15,15 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.url.includes('api.anthropic.com') || e.request.url.includes('cdn.jsdelivr.net') || e.request.url.includes('cdnjs.cloudflare.com')) return;
+  // Never cache API calls or CDN resources
+  const url = e.request.url;
+  if (url.includes('/api/') || url.includes('cdn.') || url.includes('cdnjs.') || url.includes('anthropic.com')) return;
+
+  // Network-first for app files: always try fresh, fall back to cache
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      const fresh = fetch(e.request).then(r => {
-        if (r.ok) caches.open(CACHE).then(c => c.put(e.request, r.clone()));
-        return r;
-      }).catch(() => cached);
-      return cached || fresh;
-    })
+    fetch(e.request).then(r => {
+      if (r.ok) caches.open(CACHE).then(c => c.put(e.request, r.clone()));
+      return r;
+    }).catch(() => caches.match(e.request))
   );
 });
