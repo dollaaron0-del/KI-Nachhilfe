@@ -1,5 +1,21 @@
 'use strict';
 
+// ── Toast notifications ────────────────────────────────────────────────────
+function toast(msg, type = 'info', duration = 3500) {
+  const icons = { error: '⚠️', success: '✅', info: 'ℹ️', warn: '⚠️' };
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="toast-icon">${icons[type]}</span><span>${msg}</span>`;
+  container.appendChild(el);
+  const remove = () => {
+    el.classList.add('hiding');
+    el.addEventListener('animationend', () => el.remove(), { once: true });
+  };
+  const timer = setTimeout(remove, duration);
+  el.addEventListener('click', () => { clearTimeout(timer); remove(); });
+}
+
 // ── PDF.js worker ──────────────────────────────────────────────────────────
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -431,7 +447,7 @@ async function createSubject() {
     document.getElementById('subj-modal').classList.add('hidden');
     openSubject(subj);
   } catch (e) {
-    alert('Fehler beim Erstellen: ' + e.message);
+    toast('Fehler beim Erstellen: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = 'Fach erstellen';
   }
@@ -1063,7 +1079,7 @@ async function generateExam() {
   } catch (e) {
     document.getElementById('exam-loading').classList.add('hidden');
     document.getElementById('exam-idle').classList.remove('hidden');
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
@@ -1185,7 +1201,7 @@ Format:
   } catch (e) {
     document.getElementById('analysis-loading').classList.add('hidden');
     document.getElementById('analysis-idle').classList.remove('hidden');
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
@@ -1441,7 +1457,7 @@ document.getElementById('aufgaben-scan-btn').addEventListener('click', scanTopic
 document.getElementById('aufgaben-rescan-btn').addEventListener('click', scanTopics);
 
 async function scanTopics() {
-  if (!sessionTxt) { alert('Bitte zuerst Dokumente hochladen.'); return; }
+  if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   document.getElementById('aufgaben-loading-txt').textContent = 'Themen werden erkannt…';
   showAufgabenState(document.getElementById('aufgaben-loading'));
   selTopic = null;
@@ -1465,7 +1481,7 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
     showAufgabenState(document.getElementById('aufgaben-topics'));
   } catch (e) {
     showAufgabenState(document.getElementById('aufgaben-idle'));
-    alert('Fehler beim Erkennen: ' + e.message);
+    toast('Fehler beim Erkennen: ' + e.message, 'error');
   }
 }
 
@@ -1588,7 +1604,7 @@ Format:
     showAufgabenState(document.getElementById('aufgaben-result'));
   } catch (e) {
     showAufgabenState(document.getElementById('aufgaben-topics'));
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
@@ -1781,7 +1797,7 @@ document.getElementById('rechnen-next-btn').addEventListener('click', generateMa
 setupCanvasEvents();
 
 async function generateMathAufgabe() {
-  if (!sessionMeta) { alert('Bitte zuerst ein Fach öffnen.'); return; }
+  if (!sessionMeta) { toast('Bitte zuerst ein Fach öffnen.', 'warn'); return; }
   document.getElementById('rechnen-loading-txt').textContent = 'Aufgabe wird erstellt…';
   showRechnenState(document.getElementById('rechnen-loading'));
 
@@ -1808,7 +1824,7 @@ Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
     showRechnenState(document.getElementById('rechnen-solve'));
   } catch (e) {
     showRechnenState(document.getElementById('rechnen-idle'));
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
@@ -1822,7 +1838,7 @@ async function checkHandwriting() {
   for (let i = 0; i < px.length; i += 4) {
     if (px[i] < 200 || px[i + 1] < 200 || px[i + 2] < 200) { hasInk = true; break; }
   }
-  if (!hasInk) { alert('Bitte schreibe zuerst deine Lösung auf die Zeichenfläche.'); return; }
+  if (!hasInk) { toast('Bitte zuerst eine Lösung auf die Zeichenfläche schreiben.', 'warn'); return; }
 
   document.getElementById('rechnen-loading-txt').textContent = 'Lösung wird geprüft…';
   showRechnenState(document.getElementById('rechnen-loading'));
@@ -1859,7 +1875,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
   } catch (e) {
     showRechnenState(document.getElementById('rechnen-solve'));
     requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
-    alert('Fehler beim Prüfen: ' + e.message);
+    toast('Fehler beim Prüfen: ' + e.message, 'error');
   }
 }
 
@@ -1883,7 +1899,7 @@ async function importBackup(file) {
     body: JSON.stringify(data),
   });
   await loadSubjects();
-  alert(`✅ ${data.subjects.length} Fach/Fächer importiert.`);
+  toast(`${data.subjects.length} Fach/Fächer erfolgreich importiert.`, 'success');
 }
 
 document.getElementById('btn-export').addEventListener('click', exportBackup);
@@ -1891,7 +1907,7 @@ document.getElementById('btn-import').addEventListener('click', () => document.g
 document.getElementById('import-input').addEventListener('change', async e => {
   const f = e.target.files[0];
   if (!f) return;
-  try { await importBackup(f); } catch(err) { alert('Import-Fehler: ' + err.message); }
+  try { await importBackup(f); } catch(err) { toast('Import-Fehler: ' + err.message, 'error'); }
   e.target.value = '';
 });
 
@@ -1946,7 +1962,7 @@ Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
   } catch (e) {
     document.getElementById('cheat-loading').classList.add('hidden');
     document.getElementById('cheat-idle').classList.remove('hidden');
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
@@ -1987,7 +2003,7 @@ Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
   } catch (e) {
     document.getElementById('glossar-loading').classList.add('hidden');
     document.getElementById('glossar-idle').classList.remove('hidden');
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
@@ -2134,7 +2150,7 @@ async function initKarten() {
 }
 
 async function generateKarten() {
-  if (!sessionTxt) { alert('Bitte zuerst Dokumente hochladen.'); return; }
+  if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   showKartenState(document.getElementById('karten-loading'));
 
   const prompt = `Erstelle 15 hochwertige Karteikarten aus dem Lernstoff für "${sessionMeta.name}".
@@ -2166,7 +2182,7 @@ Antworte NUR als JSON-Array:
     await initKarten();
   } catch (e) {
     showKartenState(document.getElementById('karten-idle'));
-    alert('Fehler: ' + e.message);
+    toast('Fehler: ' + e.message, 'error');
   }
 }
 
