@@ -1041,22 +1041,33 @@ document.querySelectorAll('.tab').forEach(b =>
   b.addEventListener('click', () => switchMode(b.dataset.mode)));
 
 function switchMode(mode) {
-  // Save canvas drawing before leaving rechnen
-  const rechnenSolve = document.getElementById('rechnen-solve');
-  if (mathCtx && rechnenSolve && !rechnenSolve.classList.contains('hidden')) {
-    savedCanvasData = document.getElementById('math-canvas').toDataURL('image/png');
-    localforage.setItem(`canvas_${sessionId}`, savedCanvasData).catch(() => {});
+  // Save canvas if it's been initialized
+  if (mathCtx) {
+    const canvas = document.getElementById('math-canvas');
+    if (canvas) {
+      savedCanvasData = canvas.toDataURL('image/png');
+      localforage.setItem(`canvas_${sessionId}`, savedCanvasData).catch(() => {});
+    }
   }
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${mode}`));
-  if (mode === 'analysis')    refreshAnalysisState();
-  if (mode === 'aufgaben')    initAufgaben();
-  if (mode === 'rechnen')     initRechnen();
-  if (mode === 'karten')      initKarten();
-  if (mode === 'exam')        { loadSavedKlausuren(); updateExamRecBanner(); }
-  if (mode === 'fortschritt') { activateSubpanel('panel-fortschritt', 'dashboard'); initDashboard(); }
-  if (mode === 'materialien') { activateSubpanel('panel-materialien', 'cheat'); loadSavedCheat(); }
-  if (mode === 'lernen')      initLernen();
+  if (mode === 'ueben')    { activateSubpanel('panel-ueben', 'aufgaben-content'); initAufgaben(); }
+  if (mode === 'karten')   initKarten();
+  if (mode === 'exam')     { loadSavedKlausuren(); updateExamRecBanner(); }
+  if (mode === 'material') { activateSubpanel('panel-material', 'cheat'); loadSavedCheat(); }
+  if (mode === 'lernen')   initLernen();
+}
+
+function switchToAnalysis() {
+  switchMode('quiz');
+  activateSubpanel('panel-quiz', 'analyse-content');
+  refreshAnalysisState();
+}
+
+function switchToLoesen() {
+  switchMode('ueben');
+  activateSubpanel('panel-ueben', 'loesen-content');
+  initRechnen();
 }
 
 function activateSubpanel(panelId, subId) {
@@ -1074,10 +1085,13 @@ document.querySelectorAll('.subpanel-nav').forEach(nav => {
     const panelId = btn.closest('.panel').id;
     const sub = btn.dataset.sub;
     activateSubpanel(panelId, sub);
-    if (sub === 'dashboard') initDashboard();
-    if (sub === 'fehler') renderFehlerkatalog();
-    if (sub === 'cheat') loadSavedCheat();
-    if (sub === 'glossar') loadSavedGlossar();
+    if (sub === 'dashboard')       initDashboard();
+    if (sub === 'fehler')          renderFehlerkatalog();
+    if (sub === 'cheat')           loadSavedCheat();
+    if (sub === 'glossar')         loadSavedGlossar();
+    if (sub === 'aufgaben-content') initAufgaben();
+    if (sub === 'loesen-content')   initRechnen();
+    if (sub === 'analyse-content')  refreshAnalysisState();
   });
 });
 
@@ -1179,7 +1193,7 @@ document.getElementById('chat-reset')?.addEventListener('click', async () => {
 document.getElementById('quiz-start-btn')?.addEventListener('click', fetchQuestion);
 document.getElementById('quiz-submit')?.addEventListener('click',    submitAnswer);
 document.getElementById('quiz-next')?.addEventListener('click',      fetchQuestion);
-document.getElementById('quiz-stop')?.addEventListener('click',      () => switchMode('analysis'));
+document.getElementById('quiz-stop')?.addEventListener('click',      () => switchToAnalysis());
 document.getElementById('quiz-answer')?.addEventListener('keydown',  e => { if (e.key === 'Enter' && e.ctrlKey) submitAnswer(); });
 document.getElementById('quiz-reset-btn')?.addEventListener('click', async () => {
   if (!confirm('Quiz-Fortschritt zurücksetzen?')) return;
@@ -1389,8 +1403,8 @@ function endBlitz() {
 }
 
 document.getElementById('blitz-again-btn')?.addEventListener('click', startBlitz);
-document.getElementById('blitz-stop-btn')?.addEventListener('click', () => switchMode('analysis'));
-document.getElementById('blitz-stop-btn2')?.addEventListener('click', () => switchMode('analysis'));
+document.getElementById('blitz-stop-btn')?.addEventListener('click', () => switchToAnalysis());
+document.getElementById('blitz-stop-btn2')?.addEventListener('click', () => switchToAnalysis());
 
 // ══ EXAM ══════════════════════════════════════════════════════════════════
 
@@ -1853,7 +1867,7 @@ function md(text) {
 // ══ AUFGABEN ══════════════════════════════════════════════════════════════
 
 function showAufgabenState(el) {
-  document.querySelectorAll('#panel-aufgaben .cx-state').forEach(s => s.classList.add('hidden'));
+  document.querySelectorAll('#panel-ueben .cx-state').forEach(s => s.classList.add('hidden'));
   el.classList.remove('hidden');
 }
 
@@ -2122,7 +2136,7 @@ function sendToRechnen(text) {
   savedCanvasData = null;
   const input = document.getElementById('rechnen-task-input');
   if (input) input.value = text;
-  switchMode('rechnen');
+  switchToLoesen();
 }
 
 // ══ RECHNEN (Freies Lösen mit Pencil) ═════════════════════════════════════

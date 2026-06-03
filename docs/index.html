@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=27" />
+  <link rel="stylesheet" href="style.css?v=28" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -151,16 +151,13 @@
   </header>
 
   <nav class="mode-tabs">
-    <button class="tab active" data-mode="chat">💬 Chat</button>
-    <button class="tab tab-sep" data-mode="quiz">❓ Quiz</button>
-    <button class="tab" data-mode="exam">📝 Klausur</button>
-    <button class="tab" data-mode="aufgaben">🎯 Aufgaben</button>
-    <button class="tab" data-mode="rechnen">✏️ Lösen</button>
-    <button class="tab tab-sep" data-mode="analysis">📊 Analyse</button>
+    <button class="tab active" data-mode="lernen">🎓 Lernen</button>
+    <button class="tab tab-sep" data-mode="chat">💬 Chat</button>
+    <button class="tab" data-mode="quiz">❓ Quiz</button>
+    <button class="tab" data-mode="ueben">🎯 Üben</button>
+    <button class="tab tab-sep" data-mode="exam">📝 Klausur</button>
     <button class="tab" data-mode="karten">🃏 Karten</button>
-    <button class="tab tab-sep" data-mode="materialien">📋 Materialien</button>
-    <button class="tab tab-sep" data-mode="fortschritt">📈 Fortschritt</button>
-    <button class="tab tab-sep" data-mode="lernen">🎓 Lernen</button>
+    <button class="tab tab-sep" data-mode="material">📚 Material</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -169,7 +166,7 @@
   </div>
 
   <!-- ── CHAT ── -->
-  <div id="panel-chat" class="panel active">
+  <div id="panel-chat" class="panel">
     <div class="messages" id="chat-messages">
       <div class="welcome">
         <div class="welcome-icon">💬</div>
@@ -196,6 +193,11 @@
 
   <!-- ── QUIZ ── -->
   <div id="panel-quiz" class="panel">
+    <div class="subpanel-nav">
+      <button class="subpanel-btn active" data-sub="quiz-content">❓ Quiz</button>
+      <button class="subpanel-btn" data-sub="analyse-content">📊 Analyse</button>
+    </div>
+    <div class="subpanel" data-subid="quiz-content">
     <div class="quiz-content">
       <div id="quiz-idle" class="cx-state">
         <div class="big-icon">🧠</div>
@@ -247,6 +249,39 @@
         </div>
       </div>
     </div>
+    </div><!-- end subpanel quiz-content -->
+    <div class="subpanel hidden" data-subid="analyse-content">
+      <div class="analysis-content">
+        <div id="analysis-idle" class="cx-state">
+          <div class="big-icon">📊</div>
+          <h2>Lernstandsanalyse</h2>
+          <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen für eine Analyse.</p>
+          <div class="lernziel-row">
+            <span>🎯 Lernziel:</span>
+            <input type="range" id="lernziel-slider" min="50" max="100" value="75" step="5" />
+            <strong id="lernziel-val">75%</strong>
+          </div>
+          <div class="pessimism-note">⚠️ Bewusst pessimistische Einschätzung – um falsche Sicherheit zu vermeiden.</div>
+          <button class="btn-primary" id="analysis-btn" disabled>Analyse erstellen</button>
+        </div>
+        <div id="analysis-loading" class="cx-state hidden">
+          <div class="big-icon spin">🔍</div>
+          <p>Analysiere deinen Lernstand…</p>
+          <div class="ai-progress-wrap"><div class="ai-progress-bar" id="analysis-progress-bar"></div></div>
+          <p class="ai-progress-pct" id="analysis-progress-pct">0%</p>
+        </div>
+        <div id="analysis-result" class="cx-state hidden">
+          <div class="gauge" id="gauge"></div>
+          <div class="spark-wrap" id="spark-wrap"></div>
+          <div class="chart-wrap hidden" id="chart-wrap">
+            <canvas id="progress-chart" height="160"></canvas>
+          </div>
+          <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
+          <div class="analysis-body" id="analysis-body"></div>
+          <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
+        </div>
+      </div>
+    </div><!-- end subpanel analyse-content -->
   </div>
 
   <!-- ── EXAM ── -->
@@ -291,44 +326,13 @@
     </div>
   </div>
 
-  <!-- ── ANALYSIS ── -->
-  <div id="panel-analysis" class="panel">
-    <div class="analysis-content">
-      <div id="analysis-idle" class="cx-state">
-        <div class="big-icon">📊</div>
-        <h2>Lernstandsanalyse</h2>
-        <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen für eine Analyse.</p>
-        <div class="lernziel-row">
-          <span>🎯 Lernziel:</span>
-          <input type="range" id="lernziel-slider" min="50" max="100" value="75" step="5" />
-          <strong id="lernziel-val">75%</strong>
-        </div>
-        <div class="pessimism-note">⚠️ Bewusst pessimistische Einschätzung – um falsche Sicherheit zu vermeiden.</div>
-        <button class="btn-primary" id="analysis-btn" disabled>Analyse erstellen</button>
-      </div>
-      <div id="analysis-loading" class="cx-state hidden">
-        <div class="big-icon spin">🔍</div>
-        <p>Analysiere deinen Lernstand…</p>
-        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="analysis-progress-bar"></div></div>
-        <p class="ai-progress-pct" id="analysis-progress-pct">0%</p>
-      </div>
-      <div id="analysis-result" class="cx-state hidden">
-        <div class="gauge" id="gauge"></div>
-        <div class="spark-wrap" id="spark-wrap"></div>
-        <div class="chart-wrap hidden" id="chart-wrap">
-          <canvas id="progress-chart" height="160"></canvas>
-        </div>
-        <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
-        <div class="analysis-body" id="analysis-body"></div>
-        <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
-      </div>
+  <!-- ── ÜBEN (Aufgaben + Lösen) ── -->
+  <div id="panel-ueben" class="panel">
+    <div class="subpanel-nav">
+      <button class="subpanel-btn active" data-sub="aufgaben-content">🎯 Aufgaben</button>
+      <button class="subpanel-btn" data-sub="loesen-content">✏️ Lösen</button>
     </div>
-  </div>
-
-  <!-- panel-fehler merged into panel-fortschritt below -->
-
-  <!-- ── AUFGABEN ── -->
-  <div id="panel-aufgaben" class="panel">
+    <div class="subpanel" data-subid="aufgaben-content">
     <div class="aufgaben-content">
       <div id="aufgaben-idle" class="cx-state">
         <div class="big-icon">🎯</div>
@@ -374,10 +378,8 @@
         <div class="aufgaben-body exam-body" id="aufgaben-body"></div>
       </div>
     </div>
-  </div>
-
-  <!-- ── RECHNEN (Freies Lösen mit Pencil) ── -->
-  <div id="panel-rechnen" class="panel">
+    </div><!-- end subpanel aufgaben-content -->
+    <div class="subpanel hidden" data-subid="loesen-content">
     <div class="rechnen-wrap">
 
       <!-- Document bar -->
@@ -440,7 +442,8 @@
       </div>
 
     </div>
-  </div>
+    </div><!-- end subpanel loesen-content -->
+  </div><!-- end panel-ueben -->
 
   <!-- ── RECHNEN: Feedback Sheet ── -->
   <div id="rechnen-feedback-overlay" class="sheet-overlay hidden">
@@ -530,11 +533,13 @@
     </div>
   </div>
 
-  <!-- ── MATERIALIEN (Zusammenfassung + Glossar) ── -->
-  <div id="panel-materialien" class="panel">
+  <!-- ── MATERIAL (Zusammenfassung + Glossar + Fortschritt + Fehler) ── -->
+  <div id="panel-material" class="panel">
     <div class="subpanel-nav">
       <button class="subpanel-btn active" data-sub="cheat">📄 Zusammenfassung</button>
       <button class="subpanel-btn" data-sub="glossar">📖 Glossar</button>
+      <button class="subpanel-btn" data-sub="dashboard">📈 Fortschritt</button>
+      <button class="subpanel-btn" data-sub="fehler">📋 Fehler</button>
     </div>
     <div class="subpanel" data-subid="cheat">
       <div class="cheat-content">
@@ -582,6 +587,18 @@
           <div class="glossar-list" id="glossar-list"></div>
         </div>
       </div>
+    <div id="panel-dashboard" class="subpanel hidden" data-subid="dashboard">
+      <div class="dash-loading">Lädt…</div>
+    </div>
+    <div class="subpanel hidden" data-subid="fehler">
+      <div class="fehler-content" id="fehler-content">
+        <div class="cx-state" id="fehler-empty">
+          <div class="big-icon">📋</div>
+          <h2>Fehlerkatalog</h2>
+          <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
+        </div>
+        <div class="fehler-list" id="fehler-list"></div>
+      </div>
     </div>
   </div>
 
@@ -597,27 +614,6 @@
         <button class="btn-primary" id="lernpfad-scan-btn">Themen erkennen</button>
       </div>
       <div id="lernpfad-list" class="lernpfad-list hidden"></div>
-    </div>
-  </div>
-
-  <!-- ── FORTSCHRITT (Dashboard + Fehler) ── -->
-  <div id="panel-fortschritt" class="panel">
-    <div class="subpanel-nav">
-      <button class="subpanel-btn active" data-sub="dashboard">📈 Dashboard</button>
-      <button class="subpanel-btn" data-sub="fehler">📋 Fehler</button>
-    </div>
-    <div id="panel-dashboard" class="subpanel" data-subid="dashboard">
-      <div class="dash-loading">Lädt…</div>
-    </div>
-    <div class="subpanel hidden" data-subid="fehler">
-      <div class="fehler-content" id="fehler-content">
-        <div class="cx-state" id="fehler-empty">
-          <div class="big-icon">📋</div>
-          <h2>Fehlerkatalog</h2>
-          <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
-        </div>
-        <div class="fehler-list" id="fehler-list"></div>
-      </div>
     </div>
   </div>
 
@@ -699,7 +695,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=27"></script>
+<script src="app.js?v=28"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
