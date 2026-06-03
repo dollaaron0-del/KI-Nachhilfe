@@ -2041,29 +2041,18 @@ function injectSolveButtons(tasksPart) {
 function sendToRechnen(text) {
   currentAufgabe = text;
   savedCanvasData = null;
-  setEraserMode(false);
+  const input = document.getElementById('rechnen-task-input');
+  if (input) input.value = text;
   switchMode('rechnen');
 }
 
-// ══ RECHNEN (Apple Pencil) ════════════════════════════════════════════════
-
-function showRechnenState(el) {
-  document.querySelectorAll('#panel-rechnen .cx-state').forEach(s => s.classList.add('hidden'));
-  el.classList.remove('hidden');
-  if (el.id === 'rechnen-solve') {
-    // Two rAF frames ensure layout is complete before sizing canvas
-    requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
-  }
-}
+// ══ RECHNEN (Freies Lösen mit Pencil) ═════════════════════════════════════
 
 function initRechnen() {
-  if (currentAufgabe) {
-    const display = document.getElementById('aufgabe-display');
-    display.innerHTML = safeHtml(md(currentAufgabe));
-    showRechnenState(document.getElementById('rechnen-solve'));
-  } else {
-    showRechnenState(document.getElementById('rechnen-idle'));
-  }
+  // Sync textarea with currentAufgabe if set (e.g. from sendToRechnen)
+  const input = document.getElementById('rechnen-task-input');
+  if (input && currentAufgabe && !input.value) input.value = currentAufgabe;
+  requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
 }
 
 const CANVAS_HEIGHT = 2000;
@@ -2252,13 +2241,13 @@ function redoCanvas() {
   mathCtx.putImageData(redoStack.pop(), 0, 0);
 }
 
-// Difficulty buttons
-document.querySelectorAll('.diff-btn-r').forEach(b => b.addEventListener('click', () => {
-  rechnenDiff = b.dataset.rdiff;
-  document.querySelectorAll('.diff-btn-r').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-}));
+// ── Rechnen difficulty select ──────────────────────────────────────────────
+document.getElementById('rechnen-diff-sel')?.addEventListener('change', e => {
+  rechnenDiff = e.target.value;
+});
 
+// ── Rechnen generate ───────────────────────────────────────────────────────
+document.getElementById('rechnen-gen-btn')?.addEventListener('click', generateMathAufgabe);
 // Color picker
 document.querySelectorAll('.canvas-color').forEach(btn => btn.addEventListener('click', () => {
   penColor = btn.dataset.color;
@@ -2274,7 +2263,6 @@ document.querySelectorAll('.canvas-size').forEach(btn => btn.addEventListener('c
   btn.classList.add('active');
 }));
 
-document.getElementById('rechnen-gen-btn')?.addEventListener('click', generateMathAufgabe);
 document.getElementById('canvas-pen-btn')?.addEventListener('click',       () => setActiveTool('pen'));
 document.getElementById('canvas-highlight-btn')?.addEventListener('click', () => setActiveTool('highlighter'));
 document.getElementById('canvas-line-btn')?.addEventListener('click',      () => setActiveTool('line'));
@@ -2283,25 +2271,80 @@ document.getElementById('canvas-undo-btn')?.addEventListener('click',  undoCanva
 document.getElementById('canvas-redo-btn')?.addEventListener('click',  redoCanvas);
 document.getElementById('canvas-clear-btn')?.addEventListener('click', clearCanvas);
 document.getElementById('canvas-check-btn')?.addEventListener('click', checkHandwriting);
-document.getElementById('rechnen-new-btn')?.addEventListener('click', () => {
-  currentAufgabe = ''; savedCanvasData = null;
-  showRechnenState(document.getElementById('rechnen-idle'));
+
+// Feedback sheet buttons
+document.getElementById('rechnen-sheet-close-btn')?.addEventListener('click', () => {
+  document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
 });
-document.getElementById('rechnen-retry-btn')?.addEventListener('click', () => {
-  savedCanvasData = null;
-  showRechnenState(document.getElementById('rechnen-solve'));
+document.getElementById('rechnen-sheet-retry-btn')?.addEventListener('click', () => {
+  document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
+  clearCanvas();
 });
-document.getElementById('rechnen-next-btn')?.addEventListener('click', generateMathAufgabe);
+document.getElementById('rechnen-feedback-bg')?.addEventListener('click', () => {
+  document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
+});
+
+// Ask sheet buttons
+document.getElementById('rechnen-ask-btn')?.addEventListener('click', openAskSheet);
+document.getElementById('rechnen-ask-close-btn')?.addEventListener('click', () => {
+  document.getElementById('rechnen-ask-overlay').classList.add('hidden');
+});
+document.getElementById('rechnen-ask-bg')?.addEventListener('click', () => {
+  document.getElementById('rechnen-ask-overlay').classList.add('hidden');
+});
+document.getElementById('rechnen-ask-send-btn')?.addEventListener('click', sendAskQuestion);
+document.getElementById('rechnen-ask-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendAskQuestion();
+});
 
 setupCanvasEvents();
 
+function openAskSheet() {
+  document.getElementById('rechnen-ask-overlay').classList.remove('hidden');
+  document.getElementById('rechnen-ask-input').focus();
+}
+
+async function sendAskQuestion() {
+  const input = document.getElementById('rechnen-ask-input');
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = '';
+
+  const msgs = document.getElementById('rechnen-ask-msgs');
+  const userBubble = document.createElement('div');
+  userBubble.className = 'ask-msg-user';
+  userBubble.textContent = question;
+  msgs.appendChild(userBubble);
+
+  const aiBubble = document.createElement('div');
+  aiBubble.className = 'ask-msg-ai';
+  aiBubble.textContent = '…';
+  msgs.appendChild(aiBubble);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  const taskText = document.getElementById('rechnen-task-input')?.value.trim() || '';
+  const taskContext = taskText ? `\nAktuelle Aufgabe:\n${taskText}` : '';
+  const extra = `Der Student arbeitet gerade handschriftlich an einer Aufgabe und hat eine Frage.${taskContext}
+
+Beantworte kurz und präzise. Gib einen hilfreichen Hinweis – keine vollständige Lösung.`;
+
+  try {
+    const answer = await claudeLocal([{ role: 'user', content: question }], sysBlocks(extra), 400);
+    aiBubble.innerHTML = safeHtml(md(answer));
+  } catch (e) {
+    aiBubble.textContent = '⚠️ ' + e.message;
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
 async function generateMathAufgabe() {
   if (!sessionMeta) { toast('Bitte zuerst ein Fach öffnen.', 'warn'); return; }
-  document.getElementById('rechnen-loading-txt').textContent = 'Aufgabe wird erstellt…';
-  showRechnenState(document.getElementById('rechnen-loading'));
-  const rechnenGenDone = startProgress('rechnen-progress-bar', 'rechnen-progress-pct', 12000);
+  const spinner = document.getElementById('rechnen-gen-spinner');
+  const btn = document.getElementById('rechnen-gen-btn');
+  spinner.classList.remove('hidden');
+  btn.disabled = true;
 
-  const prompt = `Erstelle EINE einzelne Rechenaufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
+  const prompt = `Erstelle EINE einzelne Aufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
 
 Regeln:
 - Genau eine Aufgabe, klar und präzise formuliert
@@ -2314,19 +2357,20 @@ Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
 
   try {
     const aufgabe = await claudeLocal(
-      [{ role: 'user', content: 'Rechenaufgabe erstellen.' }],
+      [{ role: 'user', content: 'Aufgabe erstellen.' }],
       sysBlocks(prompt), 500,
     );
+    const taskInput = document.getElementById('rechnen-task-input');
+    taskInput.value = aufgabe.trim();
     currentAufgabe  = aufgabe.trim();
     savedCanvasData = null;
-    rechnenGenDone();
     undoStack       = [];
-    document.getElementById('aufgabe-display').innerHTML = safeHtml(md(currentAufgabe));
-    showRechnenState(document.getElementById('rechnen-solve'));
+    clearCanvas();
   } catch (e) {
-    rechnenGenDone();
-    showRechnenState(document.getElementById('rechnen-idle'));
     toast('Fehler: ' + e.message, 'error');
+  } finally {
+    spinner.classList.add('hidden');
+    btn.disabled = false;
   }
 }
 
@@ -2334,7 +2378,6 @@ async function checkHandwriting() {
   if (!mathCtx) return;
   const canvas = document.getElementById('math-canvas');
 
-  // Detect whether anything was drawn (any non-white pixel)
   const px = mathCtx.getImageData(0, 0, canvas.width, canvas.height).data;
   let hasInk = false;
   for (let i = 0; i < px.length; i += 4) {
@@ -2342,16 +2385,20 @@ async function checkHandwriting() {
   }
   if (!hasInk) { toast('Bitte zuerst eine Lösung auf die Zeichenfläche schreiben.', 'warn'); return; }
 
-  document.getElementById('rechnen-loading-txt').textContent = 'Lösung wird geprüft…';
-  showRechnenState(document.getElementById('rechnen-loading'));
-  const checkDone = startProgress('rechnen-progress-bar', 'rechnen-progress-pct', 15000);
+  // Show feedback sheet in loading state
+  const overlay = document.getElementById('rechnen-feedback-overlay');
+  document.getElementById('rechnen-sheet-loading').classList.remove('hidden');
+  document.getElementById('rechnen-sheet-result').classList.add('hidden');
+  overlay.classList.remove('hidden');
+  const checkDone = startProgress('rechnen-check-bar', 'rechnen-check-pct', 15000);
 
-  const dataURL = canvas.toDataURL('image/png');
-  const base64  = dataURL.split(',')[1];
+  const taskText = document.getElementById('rechnen-task-input')?.value.trim() || currentAufgabe;
+  const dataURL  = canvas.toDataURL('image/png');
+  const base64   = dataURL.split(',')[1];
 
   const checkPrompt = `Ein Schüler hat die folgende Aufgabe handschriftlich auf dem beigefügten Bild gelöst.
 
-**Aufgabe:** ${currentAufgabe}
+**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}
 
 Analysiere die handgeschriebene Lösung im Bild und antworte auf Deutsch:
 
@@ -2371,14 +2418,13 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
 
   try {
     const feedback = await claudeVision(base64, checkPrompt, sysBlocks(), 1800);
-    document.getElementById('result-aufgabe-txt').innerHTML = safeHtml(md(currentAufgabe));
-    document.getElementById('result-preview').src = dataURL;
     checkDone();
-    document.getElementById('rechnen-feedback').innerHTML = safeHtml(md(feedback));
-    showRechnenState(document.getElementById('rechnen-result'));
+    document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(feedback));
+    document.getElementById('rechnen-sheet-loading').classList.add('hidden');
+    document.getElementById('rechnen-sheet-result').classList.remove('hidden');
   } catch (e) {
     checkDone();
-    showRechnenState(document.getElementById('rechnen-solve'));
+    overlay.classList.add('hidden');
     requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
     toast('Fehler beim Prüfen: ' + e.message, 'error');
   }

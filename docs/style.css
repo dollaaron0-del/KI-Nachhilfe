@@ -838,24 +838,48 @@ html, body {
   display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;
 }
 
-/* Idle / Loading / Result: normal scrollable cx-states */
-#rechnen-idle, #rechnen-loading {
-  padding: 32px 24px;
-  display: flex; flex-direction: column; align-items: center;
-  text-align: center; gap: 14px; overflow-y: auto;
-}
-
-/* Solve state must flex-fill available height */
-#rechnen-solve { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-#rechnen-solve.hidden { display: none !important; }
-
-.aufgabe-display {
-  flex-shrink: 0; max-height: 28%;
-  overflow-y: auto; -webkit-overflow-scrolling: touch;
-  padding: 14px 16px;
+/* Task input area */
+.rechnen-task-area {
+  flex-shrink: 0; padding: 10px 12px 6px;
   background: var(--surface); border-bottom: 1px solid var(--border);
-  font-size: 15px; line-height: 1.6;
+  display: flex; flex-direction: column; gap: 6px;
 }
+.rechnen-task-input {
+  width: 100%; min-height: 72px; max-height: 180px;
+  border: 1.5px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font-size: 15px; font-family: inherit;
+  color: var(--text); background: var(--bg); outline: none;
+  resize: vertical; -webkit-appearance: none; box-sizing: border-box;
+  transition: border-color .2s;
+}
+.rechnen-task-input:focus { border-color: var(--accent); }
+.rechnen-task-input::placeholder { color: var(--text2); }
+.rechnen-gen-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rechnen-diff-sel {
+  padding: 5px 10px; border-radius: 8px; font-size: 13px;
+  border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
+  -webkit-appearance: none;
+}
+.rechnen-spinner { font-size: 13px; color: var(--text2); font-style: italic; }
+
+/* Ask sheet messages */
+.rechnen-ask-msgs {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 38dvh; overflow-y: auto; min-height: 40px;
+}
+.ask-msg-user {
+  background: var(--accent); color: #fff;
+  border-radius: 14px 14px 4px 14px;
+  padding: 9px 13px; font-size: 15px; align-self: flex-end; max-width: 85%;
+}
+.ask-msg-ai {
+  background: var(--surface); border-radius: 14px 14px 14px 4px;
+  padding: 9px 13px; font-size: 15px; align-self: flex-start; max-width: 90%;
+}
+.rechnen-ask-input-row { display: flex; gap: 8px; align-items: flex-start; }
+.rechnen-ask-input-row .field-inp { flex: 1; }
+
+.rechnen-feedback { font-size: 15px; line-height: 1.65; }
 
 .canvas-bar {
   flex-shrink: 0;
