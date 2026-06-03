@@ -1304,12 +1304,13 @@ html, body {
 
 /* Lernpfad */
 .lernen-content {
-  display: flex;
-  flex-direction: column;
   flex: 1;
   overflow-y: auto;
-  padding-bottom: 32px;
-  min-height: 0;
+  padding: 12px 0 32px;
+  -webkit-overflow-scrolling: touch;
+}
+#lernpfad-empty {
+  padding: 48px 24px 24px;
 }
 .lernpfad-section-title {
   font-size: 13px;
