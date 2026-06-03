@@ -201,6 +201,7 @@ let customPrompt   = '';
 let selIcon      = ICONS[0];
 let selColor     = COLORS[0];
 let selDiff      = 'mittel';
+let selAufgabenDiff = 'mittel';
 let examAnsVis   = false;
 let blitzIdx       = 0;
 let blitzResults   = [];
@@ -795,6 +796,7 @@ async function openSubject(subj) {
 
   const noFiles = !sessionMeta.files.length;
   document.getElementById('no-docs-banner').classList.toggle('hidden', !noFiles);
+  updatePruefungsnahBtns();
 
   showQuizState(document.getElementById('quiz-idle'));
   if (q.length) {
@@ -998,6 +1000,7 @@ async function handleUpload(files) {
     sessionTxt = (sessionTxt || '') + added;
     sessionMeta.files = [...(sessionMeta.files || []), ...newFiles];
     sessionMeta.updatedAt = new Date().toISOString();
+    updatePruefungsnahBtns();
 
     await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
 
@@ -1373,9 +1376,31 @@ document.getElementById('blitz-stop-btn2')?.addEventListener('click', () => swit
 
 // ══ EXAM ══════════════════════════════════════════════════════════════════
 
+function hasExamDocs() {
+  if (!sessionMeta?.files?.length) return false;
+  const kw = ['klausur', 'altklausur', 'probeklausur', 'prüfung', 'exam'];
+  return sessionMeta.files.some(f => kw.some(k => f.name.toLowerCase().includes(k)));
+}
+
+function updatePruefungsnahBtns() {
+  const has = hasExamDocs();
+  ['diff-pruefungsnah', 'adiff-pruefungsnah'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = !has;
+    btn.title = has ? '' : 'Lade zuerst Probe- oder Altklausuren hoch';
+  });
+}
+
 document.querySelectorAll('.diff-btn').forEach(b => b.addEventListener('click', () => {
   selDiff = b.dataset.diff;
   document.querySelectorAll('.diff-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+}));
+
+document.querySelectorAll('.diff-btn-a').forEach(b => b.addEventListener('click', () => {
+  selAufgabenDiff = b.dataset.adiff;
+  document.querySelectorAll('.diff-btn-a').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
 }));
 document.getElementById('exam-gen-btn')?.addEventListener('click', generateExam);
@@ -1391,7 +1416,19 @@ async function generateExam() {
   const examDone = startProgress('exam-progress-bar', 'exam-progress-pct', 25000);
   examAnsVis = false;
 
-  const examPrompt = `Erstelle eine anspruchsvolle Probeklausur für "${sessionMeta.name}" (Schwierigkeit: ${selDiff}).
+  const diffInstructions = {
+    leicht:       'Schwierigkeit: Leicht – Grundbegriffe, einfache Definitionen, direkte Fragen.',
+    mittel:       'Schwierigkeit: Mittel – Verständnisfragen, einfache Anwendungen.',
+    schwer:       'Schwierigkeit: Schwer – komplexe Anwendungen, Zusammenhänge erklären.',
+    pruefungsnah: `Schwierigkeit: Prüfungsnah – orientiere dich STRIKT an den hochgeladenen Probe-/Altklausuren.
+Analysiere deren Format, Aufgabentypen, Punkteverteilung und Formulierungsstil und bilde das so genau wie möglich nach.`,
+    experte:      `Schwierigkeit: EXPERTE – bewusst schwerer als die echte Prüfung, um maximale Sicherheit aufzubauen.
+Kombiniere mehrere Konzepte pro Aufgabe, teste Grenzfälle und Ausnahmen, verlange Transferdenken in ungewohnten Kontexten.
+Zeitdruck: kompakter und dichter als normal.`,
+  };
+
+  const examPrompt = `Erstelle eine Probeklausur für "${sessionMeta.name}".
+${diffInstructions[selDiff] || diffInstructions.mittel}
 
 # Probeklausur – ${sessionMeta.name}
 **Bearbeitungszeit:** XX Min | **Punkte:** XX
@@ -1885,8 +1922,19 @@ async function generateAufgaben() {
 
   const isKlausur = selAufgabenType === 'klausur';
 
+  const aufgDiffText = {
+    leicht:       'Niveau: Leicht – einfache Definitionen und direkte Fragen.',
+    mittel:       'Niveau: Mittel – Verständnis und einfache Anwendung.',
+    schwer:       'Niveau: Schwer – komplexe Zusammenhänge und Anwendungen.',
+    pruefungsnah: `Niveau: Prüfungsnah – orientiere dich an den hochgeladenen Probe-/Altklausuren.
+Übernimm Fragetypen, Formulierungsstil und Punktegewichtung daraus.`,
+    experte:      `Niveau: EXPERTE – schwerer als die echte Prüfung.
+Kombiniere Konzepte, teste Grenzfälle, verlange Transferdenken. Baut Konfidenz auf.`,
+  }[selAufgabenDiff] || '';
+
   const prompt = isKlausur
     ? `Erstelle eine kompakte Mini-Klausur NUR zum Thema "${selTopic}" aus dem Fach "${sessionMeta.name}".
+${aufgDiffText}
 
 # Mini-Klausur: ${selTopic}
 **Punkte:** XX | **Zeit:** ca. XX Min
@@ -1904,6 +1952,7 @@ async function generateAufgaben() {
 ## Lösungsschlüssel
 [Vollständige Lösungen mit Erklärungen]`
     : `Erstelle 5 abwechslungsreiche Übungsaufgaben NUR zum Thema "${selTopic}" aus dem Fach "${sessionMeta.name}".
+${aufgDiffText}
 
 Aufgaben sollen echtes Verständnis testen – nicht reines Auswendiglernen:
 - Mix aus: Erklären, Anwenden, Vergleichen, Beispiele nennen, Zusammenhänge erläutern

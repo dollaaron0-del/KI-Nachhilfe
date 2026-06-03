@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=19" />
+  <link rel="stylesheet" href="style.css?v=20" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -261,6 +261,8 @@
             <button class="diff-btn active" data-diff="leicht">Leicht</button>
             <button class="diff-btn" data-diff="mittel">Mittel</button>
             <button class="diff-btn" data-diff="schwer">Schwer</button>
+            <button class="diff-btn" data-diff="pruefungsnah" id="diff-pruefungsnah" disabled title="Lade zuerst Probe- oder Altklausuren hoch">📋 Prüfungsnah</button>
+            <button class="diff-btn" data-diff="experte">💪 Experte</button>
           </div>
         </div>
         <button class="btn-primary" id="exam-gen-btn">Klausur generieren</button>
@@ -333,6 +335,16 @@
         <div class="aufg-type-row">
           <button class="aufg-type-btn active" data-type="uebung">📝 Übungsaufgaben</button>
           <button class="aufg-type-btn" data-type="klausur">📋 Klausur lite</button>
+        </div>
+        <div class="diff-row" style="margin-top:10px">
+          <span>Niveau:</span>
+          <div class="diff-group">
+            <button class="diff-btn-a" data-adiff="leicht">Leicht</button>
+            <button class="diff-btn-a active" data-adiff="mittel">Mittel</button>
+            <button class="diff-btn-a" data-adiff="schwer">Schwer</button>
+            <button class="diff-btn-a" data-adiff="pruefungsnah" id="adiff-pruefungsnah" disabled title="Lade zuerst Probe- oder Altklausuren hoch">📋 Prüfungsnah</button>
+            <button class="diff-btn-a" data-adiff="experte">💪 Experte</button>
+          </div>
         </div>
         <button class="btn-primary" id="aufgaben-gen-btn" disabled>Aufgaben generieren</button>
         <button class="btn-secondary btn-sm" id="aufgaben-rescan-btn">Themen neu erkennen</button>
@@ -630,7 +642,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=19"></script>
+<script src="app.js?v=20"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
