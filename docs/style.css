@@ -879,12 +879,13 @@ html, body {
 /* Size buttons */
 .canvas-size {
   width: 34px; height: 34px; flex-shrink: 0;
-  background: var(--surface); border: 2px solid transparent;
+  background: var(--surface); border: 2px solid var(--border);
   border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  -webkit-tap-highlight-color: transparent; transition: border-color .12s;
+  -webkit-tap-highlight-color: transparent; transition: border-color .12s, background .12s;
 }
-.canvas-size.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
-.size-dot { border-radius: 50%; background: var(--label); display: block; flex-shrink: 0; }
+.canvas-size.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--surface)); }
+.size-dot { border-radius: 50%; display: block; flex-shrink: 0; }
+.canvas-sep { width: 10px; flex-shrink: 0; }
 
 .btn-canvas-tool {
   min-width: 42px; min-height: 42px;
