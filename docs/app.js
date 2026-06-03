@@ -2035,9 +2035,14 @@ function applyCtxStyle() {
 
 function setupCanvasEvents() {
   const canvas = document.getElementById('math-canvas');
+  let fingerStartY = 0, wrapScrollStart = 0;
 
   canvas.addEventListener('pointerdown', e => {
-    if (e.pointerType === 'touch') return; // finger → scroll
+    if (e.pointerType === 'touch') {
+      fingerStartY   = e.clientY;
+      wrapScrollStart = document.getElementById('canvas-scroll-wrap').scrollTop;
+      return;
+    }
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     isDrawingCanvas = true;
@@ -2063,8 +2068,12 @@ function setupCanvasEvents() {
   }, { passive: false });
 
   canvas.addEventListener('pointermove', e => {
+    if (e.pointerType === 'touch') {
+      const wrap = document.getElementById('canvas-scroll-wrap');
+      wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
+      return;
+    }
     if (!isDrawingCanvas || !mathCtx) return;
-    if (e.pointerType === 'touch') return;
     e.preventDefault();
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
