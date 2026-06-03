@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=23" />
+  <link rel="stylesheet" href="style.css?v=24" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -277,6 +277,7 @@
         <div class="exam-toolbar">
           <button class="btn-secondary btn-sm" id="exam-new-btn">Neue Klausur</button>
           <button class="btn-secondary btn-sm" id="exam-ans-btn">Lösungen anzeigen</button>
+          <button class="btn-secondary btn-sm" id="exam-download-btn">⬇️ Herunterladen</button>
           <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
         </div>
         <div class="exam-body" id="exam-body"></div>
@@ -361,6 +362,7 @@
           <button class="btn-secondary btn-sm" id="aufgaben-back-btn">← Anderes Thema</button>
           <button class="btn-secondary btn-sm" id="aufgaben-ans-btn">Lösungen anzeigen</button>
           <button class="btn-secondary btn-sm" id="aufgaben-rechnen-btn">✏️ Im Rechnen lösen</button>
+          <button class="btn-secondary btn-sm" id="aufgaben-download-btn">⬇️ Herunterladen</button>
           <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
         </div>
         <div class="aufgaben-body exam-body" id="aufgaben-body"></div>
@@ -545,6 +547,7 @@
         <div id="cheat-result" class="cx-state hidden">
           <div class="cheat-toolbar">
             <button class="btn-secondary btn-sm" id="cheat-new-btn">Neu erstellen</button>
+            <button class="btn-secondary btn-sm" id="cheat-download-btn">⬇️ Herunterladen</button>
             <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Drucken</button>
           </div>
           <div class="cheat-body" id="cheat-body"></div>
@@ -656,7 +659,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

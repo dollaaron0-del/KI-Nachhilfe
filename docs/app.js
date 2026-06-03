@@ -210,6 +210,9 @@ let selTopic       = null;
 let selAufgabenType = 'uebung';
 let aufgabenAnsVis  = false;
 let currentAufgabe  = '';
+let currentCheatText     = '';
+let currentAufgabenResult = '';
+let currentExamText      = '';
 let rechnenDiff     = 'mittel';
 let mathCtx         = null;
 let isDrawingCanvas = false;
@@ -277,24 +280,22 @@ const DB = {
   content:     id => localforage.getItem(`cnt_${id}`).then(v => v || ''),
   setContent:  (id, v) => localforage.setItem(`cnt_${id}`, v),
 
-  savedAufgaben: id => localforage.getItem(`aufg_${id}`).then(v => v || []),
-  async saveAufgabe(id, entry) {
-    const list = await localforage.getItem(`aufg_${id}`) || [];
-    list.unshift(entry);
-    if (list.length > 10) list.splice(10);
-    return localforage.setItem(`aufg_${id}`, list);
-  },
-  async delAufgabe(id, entryId) {
-    const list = await localforage.getItem(`aufg_${id}`) || [];
-    return localforage.setItem(`aufg_${id}`, list.filter(e => e.id !== entryId));
-  },
+  savedAufgaben: id => api(`/api/subjects/${id}/aufgaben`).catch(() => []),
+  saveAufgabe: (id, entry) => fetch(`/api/subjects/${id}/aufgaben`, {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify(entry),
+  }).catch(() => {}),
+  delAufgabe: (id, entryId) => fetch(`/api/subjects/${id}/aufgaben/${entryId}`, {
+    method: 'DELETE', headers: authHeaders(),
+  }).catch(() => {}),
 
   async del(id) {
     await Promise.all([
       this.delSubject(id),
       localforage.removeItem(`meta_${id}`),
       localforage.removeItem(`cnt_${id}`),
-      localforage.removeItem(`aufg_${id}`),
+      fetch(`/api/subjects/${id}/cheat`,  { method: 'DELETE', headers: authHeaders() }).catch(() => {}),
+      fetch(`/api/subjects/${id}/topics`, { method: 'DELETE', headers: authHeaders() }).catch(() => {}),
     ]);
   },
 };
@@ -773,7 +774,7 @@ async function openSubject(subj) {
   }
   sessionTxt = await DB.content(subj.id);
   customPrompt = subj.custom_prompt || '';
-  scannedTopics = (await localforage.getItem(`topics_${subj.id}`)) || [];
+  scannedTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => []);
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
@@ -1449,6 +1450,7 @@ ${diffInstructions[selDiff] || diffInstructions.mittel}
 
   try {
     const exam = await claudeLocal([{ role: 'user', content: 'Klausur erstellen.' }], sysBlocks(examPrompt), 3000);
+    currentExamText = exam;
     const body = document.getElementById('exam-body');
     const sepIdx = exam.search(/---\s*\n+##\s*Lösungsschlüssel/i);
     if (sepIdx > -1) {
@@ -1867,7 +1869,10 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
     if (!m) throw new Error('Keine Themen erkannt');
     scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
-    await localforage.setItem(`topics_${sessionId}`, scannedTopics);
+    fetch(`/api/subjects/${sessionId}/topics`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ topics: scannedTopics }),
+    }).catch(() => {});
     aufgabenScanDone();
     renderTopicChips();
     showAufgabenState(document.getElementById('aufgaben-topics'));
@@ -1978,6 +1983,7 @@ Format:
       [{ role: 'user', content: 'Aufgaben erstellen.' }],
       sysBlocks(prompt), 2500,
     );
+    currentAufgabenResult = result;
     const body = document.getElementById('aufgaben-body');
     const sepIdx = result.search(/---\s*\n+##\s*(Lösungsschlüssel|Musterlösungen)/i);
     const tasksPart = sepIdx > -1 ? result.slice(0, sepIdx) : result;
@@ -2475,6 +2481,34 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
   }
 }
 
+// ══ DOWNLOADS ═════════════════════════════════════════════════════════════
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: 'text/plain; charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function safeName(s) {
+  return (s || 'datei').replace(/[^a-z0-9äöüÄÖÜß]/gi, '_').toLowerCase().slice(0, 40);
+}
+
+document.getElementById('cheat-download-btn')?.addEventListener('click', () => {
+  if (currentCheatText) downloadText(`zusammenfassung_${safeName(sessionMeta?.name)}.md`, currentCheatText);
+});
+
+document.getElementById('aufgaben-download-btn')?.addEventListener('click', () => {
+  if (currentAufgabenResult) downloadText(`aufgaben_${safeName(selTopic)}.md`, currentAufgabenResult);
+});
+
+document.getElementById('exam-download-btn')?.addEventListener('click', () => {
+  if (currentExamText) downloadText(`klausur_${safeName(sessionMeta?.name)}.md`, currentExamText);
+});
+
 // ══ BACKUP / RESTORE ══════════════════════════════════════════════════════
 async function exportBackup() {
   const r = await fetch('/api/backup', { headers: authHeaders() });
@@ -2510,7 +2544,8 @@ document.getElementById('import-input')?.addEventListener('change', async e => {
 // ══ CHEAT SHEET ═══════════════════════════════════════════════════════════
 document.getElementById('cheat-gen-btn')?.addEventListener('click', generateCheatSheet);
 document.getElementById('cheat-new-btn')?.addEventListener('click', () => {
-  localforage.removeItem(`cheat_${sessionId}`).catch(() => {});
+  currentCheatText = '';
+  fetch(`/api/subjects/${sessionId}/cheat`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
   document.getElementById('cheat-result').classList.add('hidden');
   document.getElementById('cheat-idle').classList.remove('hidden');
 });
@@ -2558,7 +2593,11 @@ Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
       (text) => { body.innerHTML = safeHtml(md(text)); },
     );
     cheatDone();
-    localforage.setItem(`cheat_${sessionId}`, result).catch(() => {});
+    currentCheatText = result;
+    fetch(`/api/subjects/${sessionId}/cheat`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ content: result }),
+    }).catch(() => {});
   } catch (e) {
     cheatDone();
     document.getElementById('cheat-result').classList.add('hidden');
@@ -2624,12 +2663,15 @@ function renderGlossarList(filter) {
 }
 
 async function loadSavedCheat() {
-  const saved = await localforage.getItem(`cheat_${sessionId}`).catch(() => null);
-  if (!saved) return;
-  document.getElementById('cheat-body').innerHTML = safeHtml(md(saved));
-  document.getElementById('cheat-idle').classList.add('hidden');
-  document.getElementById('cheat-loading').classList.add('hidden');
-  document.getElementById('cheat-result').classList.remove('hidden');
+  try {
+    const data = await api(`/api/subjects/${sessionId}/cheat`);
+    if (!data?.content) return;
+    currentCheatText = data.content;
+    document.getElementById('cheat-body').innerHTML = safeHtml(md(data.content));
+    document.getElementById('cheat-idle').classList.add('hidden');
+    document.getElementById('cheat-loading').classList.add('hidden');
+    document.getElementById('cheat-result').classList.remove('hidden');
+  } catch (_) {}
 }
 
 async function loadSavedGlossar() {

@@ -1026,10 +1026,138 @@ app.post('/api/admin/set-limit', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CHEAT SHEETS (Zusammenfassungen)
+// ═══════════════════════════════════════════════════════════════════════════
+app.get('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT content FROM cheat_sheets WHERE subject_id=$1', [req.params.id]);
+    res.json({ content: rows[0]?.content || null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
+  const { content } = req.body;
+  if (!content) return res.status(400).json({ error: 'content erforderlich' });
+  try {
+    await pool.query(
+      `INSERT INTO cheat_sheets (subject_id, content, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (subject_id) DO UPDATE SET content=$2, updated_at=now()`,
+      [req.params.id, content]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM cheat_sheets WHERE subject_id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCANNED TOPICS
+// ═══════════════════════════════════════════════════════════════════════════
+app.get('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT topics FROM scanned_topics WHERE subject_id=$1', [req.params.id]);
+    res.json(rows[0]?.topics || []);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
+  const { topics } = req.body;
+  if (!Array.isArray(topics)) return res.status(400).json({ error: 'topics array erforderlich' });
+  try {
+    await pool.query(
+      `INSERT INTO scanned_topics (subject_id, topics, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (subject_id) DO UPDATE SET topics=$2, updated_at=now()`,
+      [req.params.id, JSON.stringify(topics)]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM scanned_topics WHERE subject_id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SAVED AUFGABEN
+// ═══════════════════════════════════════════════════════════════════════════
+app.get('/api/subjects/:id/aufgaben', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, topic, type, tasks_part, full_result, created_at FROM saved_aufgaben WHERE subject_id=$1 ORDER BY created_at DESC LIMIT 20',
+      [req.params.id]
+    );
+    res.json(rows.map(r => ({
+      id: r.id, topic: r.topic, type: r.type,
+      tasksPart: r.tasks_part, fullResult: r.full_result, createdAt: r.created_at,
+    })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/subjects/:id/aufgaben', authMiddleware, async (req, res) => {
+  const { id, topic, type, tasksPart, fullResult, createdAt } = req.body;
+  if (!id || !fullResult) return res.status(400).json({ error: 'id und fullResult erforderlich' });
+  try {
+    await pool.query(
+      `INSERT INTO saved_aufgaben (id, subject_id, topic, type, tasks_part, full_result, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+      [id.toString(), req.params.id, topic || '', type || 'uebung', tasksPart || '', fullResult, createdAt || new Date().toISOString()]
+    );
+    await pool.query(
+      `DELETE FROM saved_aufgaben WHERE subject_id=$1 AND id NOT IN (
+        SELECT id FROM saved_aufgaben WHERE subject_id=$1 ORDER BY created_at DESC LIMIT 20
+      )`, [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/subjects/:id/aufgaben/:aufgId', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM saved_aufgaben WHERE id=$1 AND subject_id=$2', [req.params.aufgId, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SPA fallback ───────────────────────────────────────────────────────────
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../docs/index.html'));
 });
+
+// ── DB Table Init ──────────────────────────────────────────────────────────
+async function initTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cheat_sheets (
+      subject_id TEXT PRIMARY KEY,
+      content    TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS scanned_topics (
+      subject_id TEXT PRIMARY KEY,
+      topics     JSONB NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS saved_aufgaben (
+      id          TEXT PRIMARY KEY,
+      subject_id  TEXT NOT NULL,
+      topic       TEXT,
+      type        TEXT,
+      tasks_part  TEXT,
+      full_result TEXT,
+      created_at  TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_saved_aufgaben_subject ON saved_aufgaben(subject_id);
+  `);
+}
+initTables().catch(e => console.error('Table init error:', e.message));
 
 // ── Start ──────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
