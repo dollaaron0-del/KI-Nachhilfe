@@ -2075,7 +2075,27 @@ function initRechnen() {
   renderRechnenDocs();
   const input = document.getElementById('rechnen-task-input');
   if (input && currentAufgabe && !input.value) input.value = currentAufgabe;
+  initResizeHandle();
   requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
+}
+
+function initResizeHandle() {
+  const handle = document.getElementById('rechnen-resize-handle');
+  const area   = document.getElementById('rechnen-task-area');
+  if (!handle || !area || handle._initDone) return;
+  handle._initDone = true;
+  let startY = 0, startH = 0;
+  handle.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    startY = e.clientY;
+    startH = area.getBoundingClientRect().height;
+  }, { passive: false });
+  handle.addEventListener('pointermove', e => {
+    if (!handle.hasPointerCapture(e.pointerId)) return;
+    const newH = Math.max(50, Math.min(380, startH + (e.clientY - startY)));
+    area.style.height = newH + 'px';
+  });
 }
 
 const CANVAS_HEIGHT = 2000;

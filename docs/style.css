@@ -867,20 +867,31 @@ html, body {
 
 /* Task input area */
 .rechnen-task-area {
-  flex-shrink: 0; padding: 10px 12px 6px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 6px;
+  flex-shrink: 0; height: 130px; min-height: 50px; max-height: 380px;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg);
 }
 .rechnen-task-input {
-  width: 100%; min-height: 72px; max-height: 180px;
-  border: 1.5px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; font-size: 15px; font-family: inherit;
-  color: var(--text); background: var(--bg); outline: none;
-  resize: vertical; -webkit-appearance: none; box-sizing: border-box;
-  transition: border-color .2s;
+  flex: 1; min-height: 0;
+  border: none; outline: none; resize: none;
+  padding: 10px 14px; font-size: 15px; font-family: inherit;
+  color: var(--text); background: var(--bg);
+  -webkit-appearance: none; box-sizing: border-box;
 }
-.rechnen-task-input:focus { border-color: var(--accent); }
 .rechnen-task-input::placeholder { color: var(--text2); }
+
+/* Drag-to-resize handle */
+.rechnen-resize-handle {
+  flex-shrink: 0; height: 14px; cursor: ns-resize;
+  background: var(--surface); border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.rechnen-resize-grip {
+  width: 36px; height: 4px; border-radius: 2px; background: var(--border);
+}
+
 .rechnen-gen-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rechnen-diff-sel {
   padding: 5px 10px; border-radius: 8px; font-size: 13px;
