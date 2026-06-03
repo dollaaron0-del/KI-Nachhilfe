@@ -1120,7 +1120,7 @@ async function rephraseReply(originalReply) {
   ];
   const typ = addTyping(chatMessages);
   try {
-    const rephrase = await claude(rephrasePrompt, sysBlocks(), 1000);
+    const rephrase = await claudeLocal(rephrasePrompt, sysBlocks(), 1000);
     typ.remove();
     addMsg(chatMessages, 'assistant', rephrase, () => rephraseReply(rephrase));
   } catch (e) {
@@ -1240,7 +1240,7 @@ Antworte NUR als JSON:
 {"score":<0-3>,"correct":<true|false>,"topic":"<Thema max 4 Wörter>","feedback":"<2-3 Sätze mit Hintergrund>","correct_answer":"<Musterantwort mit Erklärung>"}`;
 
   try {
-    const raw = await claude(
+    const raw = await claudeLocal(
       [{ role: 'user', content: `Frage: ${sessionMeta.currentQuestion}\n\nAntwort: ${answer}` }],
       sysBlocks(evalPrompt), 700,
     );
@@ -1410,7 +1410,7 @@ async function generateExam() {
 [Vollständige Lösungen]`;
 
   try {
-    const exam = await claude([{ role: 'user', content: 'Klausur erstellen.' }], sysBlocks(examPrompt), 3000);
+    const exam = await claudeLocal([{ role: 'user', content: 'Klausur erstellen.' }], sysBlocks(examPrompt), 3000);
     const body = document.getElementById('exam-body');
     const sepIdx = exam.search(/---\s*\n+##\s*Lösungsschlüssel/i);
     if (sepIdx > -1) {
@@ -1529,7 +1529,7 @@ Format:
 [Realistisch: wie viel Lernaufwand noch nötig ist, und ob das Lernziel von ${targetScore}% erreichbar ist]`;
 
   try {
-    const analysis = await claude(
+    const analysis = await claudeLocal(
       [{ role: 'user', content: `Quiz-Ergebnisse:\n${statsText}\nRoh: ${raw}%` }],
       sysBlocks(analysisPrmt), 2000,
     );
@@ -1821,7 +1821,7 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
 ["Thema 1", "Thema 2", "Thema 3", ...]`;
 
   try {
-    const raw = await claude(
+    const raw = await claudeLocal(
       [{ role: 'user', content: 'Welche Hauptthemen gibt es in den Unterlagen?' }],
       sysBlocks(prompt), 400,
     );
@@ -1924,7 +1924,7 @@ Format:
 [Vollständige Lösungen mit Hintergrundinformationen]`;
 
   try {
-    const result = await claude(
+    const result = await claudeLocal(
       [{ role: 'user', content: 'Aufgaben erstellen.' }],
       sysBlocks(prompt), 2500,
     );
