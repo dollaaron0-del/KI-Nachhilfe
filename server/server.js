@@ -633,7 +633,7 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // OLLAMA PROXY (local model — free, for batch tasks)
 // ═══════════════════════════════════════════════════════════════════════════
-const OLLAMA_MODEL = 'llama3.1:8b';
+const OLLAMA_MODEL = 'phi4:14b';
 const OLLAMA_URL   = 'http://localhost:11434/v1/chat/completions';
 
 function ollamaMsgs(system, messages) {
