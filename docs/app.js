@@ -3063,13 +3063,14 @@ function updateExamRecBanner(m) {
     btn.classList.toggle('recommended', btn.dataset.diff === m.diff));
 }
 
-async function initLernen() {
-  if (sessionId) {
-    try { learnedTopics = await api(`/api/subjects/${sessionId}/learned-topics`); }
-    catch { learnedTopics = []; }
-  }
+function initLernen() {
   renderMilestone();
   loadLernpfad();
+  if (sessionId) {
+    api(`/api/subjects/${sessionId}/learned-topics`)
+      .then(t => { learnedTopics = Array.isArray(t) ? t : []; renderMilestone(); loadLernpfad(); })
+      .catch(() => {});
+  }
 }
 
 function loadLernpfad() {
