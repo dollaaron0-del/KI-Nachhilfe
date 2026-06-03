@@ -714,6 +714,9 @@ function showSubjModal() {
   selIcon = ICONS[0]; selColor = COLORS[0];
   buildIconGrid(); buildColorRow();
   document.getElementById('subj-name').value = '';
+  const btn = document.getElementById('subj-create-btn');
+  btn.disabled = false;
+  btn.textContent = 'Fach erstellen';
   document.getElementById('subj-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('subj-name').focus(), 350);
 }
@@ -743,8 +746,10 @@ async function createSubject() {
     const meta = { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
     await Promise.all([DB.addSubject(subj), DB.setMeta(id, meta)]);
 
+    btn.disabled = false;
+    btn.textContent = 'Fach erstellen';
     document.getElementById('subj-modal').classList.add('hidden');
-    openSubject(subj);
+    await openSubject(subj);
   } catch (e) {
     toast('Fehler beim Erstellen: ' + e.message, 'error');
     btn.disabled = false;
