@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=31" />
+  <link rel="stylesheet" href="style.css?v=32" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -627,8 +627,18 @@
         </div>
       </div>
       <div id="explainer-content" class="explainer-content hidden"></div>
+      <!-- Aufgabe section: shown after content loads -->
+      <div id="explainer-aufgabe-wrap" class="explainer-aufgabe-wrap hidden">
+        <div class="explainer-divider"></div>
+        <div class="explainer-aufgabe-header">✏️ Aufgabe – Wende das Wissen an</div>
+        <div class="explainer-question" id="explainer-aufgabe-text"></div>
+        <textarea id="explainer-answer" class="explainer-answer-input"
+          placeholder="Deine Lösung hier eingeben…" rows="4" maxlength="2000"></textarea>
+        <button class="btn-primary" id="explainer-check-btn">Lösung prüfen →</button>
+        <div id="explainer-check-feedback" class="explainer-check-feedback hidden"></div>
+      </div>
       <div id="explainer-actions" class="explainer-actions hidden">
-        <button class="btn-primary" id="explainer-done-btn">Verstanden ✓</button>
+        <button class="btn-primary hidden" id="explainer-done-btn">✅ Thema abschließen</button>
         <button class="btn-secondary btn-sm" id="explainer-close-btn">Schließen</button>
       </div>
     </div>
@@ -693,7 +703,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

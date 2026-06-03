@@ -3106,35 +3106,42 @@ function loadLernpfad() {
 
 async function openTopicExplainer(topic) {
   currentExplainerTopic = topic;
-  const overlay  = document.getElementById('explainer-overlay');
-  const loading  = document.getElementById('explainer-loading');
-  const content  = document.getElementById('explainer-content');
-  const actions  = document.getElementById('explainer-actions');
+  const overlay      = document.getElementById('explainer-overlay');
+  const loading      = document.getElementById('explainer-loading');
+  const content      = document.getElementById('explainer-content');
+  const aufgabeWrap  = document.getElementById('explainer-aufgabe-wrap');
+  const actions      = document.getElementById('explainer-actions');
+  const doneBtn      = document.getElementById('explainer-done-btn');
+
   overlay.classList.remove('hidden');
   loading.classList.remove('hidden');
   content.classList.add('hidden');
+  aufgabeWrap.classList.add('hidden');
   actions.classList.add('hidden');
+  doneBtn.classList.add('hidden');
+  document.getElementById('explainer-answer').value = '';
+  document.getElementById('explainer-check-feedback').classList.add('hidden');
+  document.getElementById('explainer-check-btn').textContent = 'Lösung prüfen →';
+  document.getElementById('explainer-check-btn').disabled = false;
+
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
       [{ role: 'user', content: `Erkläre das Thema "${topic}" für einen Studenten.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\nAntworte NUR als JSON-Objekt:\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Beispiel aus der Praxis","frage":"Eine Verständnisfrage"}`,
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Praxisbeispiel","rechnung":"Schritt-für-Schritt Rechenbeispiel mit konkreten Zahlen (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung relevant.","aufgabe":"Eine konkrete Übungsaufgabe mit Zahlen die der Student jetzt selbst lösen muss"}`,
       }],
-      1200
+      1800
     );
     let data = null;
     const m = raw.match(/\{[\s\S]*\}/);
-    if (m) {
-      try { data = JSON.parse(m[0]); } catch { data = null; }
-    }
+    if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
+
     loading.classList.add('hidden');
-    content.classList.remove('hidden');
-    actions.classList.remove('hidden');
-    content.innerHTML = `
-      <h3>📖 ${esc(topic)}</h3>
+
+    let html = `<h3>📖 ${esc(topic)}</h3>
       <div class="explainer-section">
         <div class="explainer-label">Was ist das?</div>
         <div class="explainer-body">${esc(data.was || '')}</div>
@@ -3146,17 +3153,76 @@ async function openTopicExplainer(topic) {
       <div class="explainer-section">
         <div class="explainer-label">Konkretes Beispiel</div>
         <div class="explainer-body">${esc(data.beispiel || '')}</div>
-      </div>
-      <div class="explainer-section">
-        <div class="explainer-label">Verständnisfrage</div>
-        <div class="explainer-question">${esc(data.frage || '')}</div>
       </div>`;
+    if (data.rechnung && data.rechnung.trim()) {
+      html += `<div class="explainer-section">
+        <div class="explainer-label">📐 Rechenbeispiel</div>
+        <div class="explainer-rechnung">${esc(data.rechnung).replace(/\n/g, '<br>')}</div>
+      </div>`;
+    }
+    content.innerHTML = html;
+    content.classList.remove('hidden');
+
+    if (data.aufgabe && data.aufgabe.trim()) {
+      document.getElementById('explainer-aufgabe-text').textContent = data.aufgabe;
+      aufgabeWrap.classList.remove('hidden');
+    } else {
+      doneBtn.classList.remove('hidden');
+    }
+    actions.classList.remove('hidden');
   } catch (e) {
     loading.classList.add('hidden');
-    content.classList.remove('hidden');
-    actions.classList.remove('hidden');
     content.innerHTML = `<p style="color:var(--red);padding:8px 0">Fehler: ${esc(e.message)}</p>`;
+    content.classList.remove('hidden');
+    doneBtn.classList.remove('hidden');
+    actions.classList.remove('hidden');
   }
+}
+
+async function checkExplainerAnswer() {
+  const answer   = document.getElementById('explainer-answer').value.trim();
+  if (!answer) return;
+  const aufgabe  = document.getElementById('explainer-aufgabe-text').textContent;
+  const checkBtn = document.getElementById('explainer-check-btn');
+  const feedback = document.getElementById('explainer-check-feedback');
+  const doneBtn  = document.getElementById('explainer-done-btn');
+
+  checkBtn.disabled = true;
+  checkBtn.textContent = '…';
+  feedback.classList.add('hidden');
+
+  try {
+    const raw = await claudeLocal(
+      [{ role: 'user', content: `Aufgabe: ${aufgabe}\n\nAntwort des Studenten: ${answer}` }],
+      [{
+        type: 'text',
+        text: `Bewerte die Lösung zum Thema "${currentExplainerTopic}". Sei wohlwollend – es geht ums Lernen.\nAntworte NUR als JSON: {"score":0,"feedback":"","loesung":""}\nscore: 2=richtig/fast richtig, 1=Ansatz erkennbar aber Lücken, 0=falsch`,
+      }],
+      500
+    );
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Keine Auswertung');
+    const ev = JSON.parse(m[0]);
+
+    const ok = ev.score >= 1;
+    feedback.className = `explainer-check-feedback ${ok ? 'explainer-feedback-ok' : 'explainer-feedback-fail'}`;
+    feedback.innerHTML = `<strong>${ok ? '✅' : '❌'} ${esc(ev.feedback || '')}</strong>`
+      + (ev.loesung ? `<span class="explainer-loesung">Musterlösung: ${esc(ev.loesung)}</span>` : '');
+    feedback.classList.remove('hidden');
+
+    if (ok) {
+      doneBtn.classList.remove('hidden');
+      checkBtn.textContent = 'Nochmal versuchen';
+    } else {
+      checkBtn.textContent = 'Nochmal versuchen';
+    }
+  } catch (e) {
+    feedback.className = 'explainer-check-feedback explainer-feedback-fail';
+    feedback.textContent = '⚠️ Fehler beim Prüfen: ' + e.message;
+    feedback.classList.remove('hidden');
+    checkBtn.textContent = 'Lösung prüfen →';
+  }
+  checkBtn.disabled = false;
 }
 
 async function markTopicDone() {
@@ -3206,6 +3272,7 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
   }
 });
 
+document.getElementById('explainer-check-btn')?.addEventListener('click', checkExplainerAnswer);
 document.getElementById('explainer-done-btn')?.addEventListener('click', markTopicDone);
 document.getElementById('explainer-close-btn')?.addEventListener('click', () =>
   document.getElementById('explainer-overlay').classList.add('hidden'));
