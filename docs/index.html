@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=21" />
+  <link rel="stylesheet" href="style.css?v=22" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -155,7 +155,7 @@
     <button class="tab tab-sep" data-mode="quiz">❓ Quiz</button>
     <button class="tab" data-mode="exam">📝 Klausur</button>
     <button class="tab" data-mode="aufgaben">🎯 Aufgaben</button>
-    <button class="tab" data-mode="rechnen">✏️ Rechnen</button>
+    <button class="tab" data-mode="rechnen">✏️ Lösen</button>
     <button class="tab tab-sep" data-mode="analysis">📊 Analyse</button>
     <button class="tab" data-mode="karten">🃏 Karten</button>
     <button class="tab tab-sep" data-mode="materialien">📋 Materialien</button>
@@ -371,6 +371,12 @@
   <!-- ── RECHNEN (Freies Lösen mit Pencil) ── -->
   <div id="panel-rechnen" class="panel">
     <div class="rechnen-wrap">
+
+      <!-- Document bar -->
+      <div class="rechnen-doc-bar" id="rechnen-doc-bar">
+        <div class="rechnen-doc-chips" id="rechnen-doc-chips"></div>
+        <button class="rechnen-doc-add" id="rechnen-doc-add-btn" title="Dokument hinzufügen">＋ Dokument</button>
+      </div>
 
       <!-- Task input area -->
       <div class="rechnen-task-area">
@@ -651,7 +657,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

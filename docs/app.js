@@ -1001,6 +1001,7 @@ async function handleUpload(files) {
     sessionMeta.files = [...(sessionMeta.files || []), ...newFiles];
     sessionMeta.updatedAt = new Date().toISOString();
     updatePruefungsnahBtns();
+    renderRechnenDocs();
 
     await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
 
@@ -2048,8 +2049,30 @@ function sendToRechnen(text) {
 
 // ══ RECHNEN (Freies Lösen mit Pencil) ═════════════════════════════════════
 
+let activeRechnenDoc = null;
+
+function renderRechnenDocs() {
+  const chips = document.getElementById('rechnen-doc-chips');
+  if (!chips) return;
+  chips.innerHTML = '';
+  const files = sessionMeta?.files || [];
+  files.forEach(f => {
+    const chip = document.createElement('button');
+    chip.className = 'rechnen-doc-chip' + (activeRechnenDoc === f.name ? ' active' : '');
+    chip.title = f.name;
+    chip.innerHTML = `<span>📄 ${f.name}</span>`;
+    chip.addEventListener('click', () => {
+      activeRechnenDoc = activeRechnenDoc === f.name ? null : f.name;
+      renderRechnenDocs();
+    });
+    chips.appendChild(chip);
+  });
+}
+
+document.getElementById('rechnen-doc-add-btn')?.addEventListener('click', () => showUploadSheet());
+
 function initRechnen() {
-  // Sync textarea with currentAufgabe if set (e.g. from sendToRechnen)
+  renderRechnenDocs();
   const input = document.getElementById('rechnen-task-input');
   if (input && currentAufgabe && !input.value) input.value = currentAufgabe;
   requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
@@ -2324,7 +2347,8 @@ async function sendAskQuestion() {
 
   const taskText = document.getElementById('rechnen-task-input')?.value.trim() || '';
   const taskContext = taskText ? `\nAktuelle Aufgabe:\n${taskText}` : '';
-  const extra = `Der Student arbeitet gerade handschriftlich an einer Aufgabe und hat eine Frage.${taskContext}
+  const docContext = activeRechnenDoc ? `\nAktives Dokument: ${activeRechnenDoc}` : '';
+  const extra = `Der Student arbeitet gerade handschriftlich an einer Aufgabe und hat eine Frage.${docContext}${taskContext}
 
 Beantworte kurz und präzise. Gib einen hilfreichen Hinweis – keine vollständige Lösung.`;
 
@@ -2392,13 +2416,14 @@ async function checkHandwriting() {
   overlay.classList.remove('hidden');
   const checkDone = startProgress('rechnen-check-bar', 'rechnen-check-pct', 15000);
 
-  const taskText = document.getElementById('rechnen-task-input')?.value.trim() || currentAufgabe;
-  const dataURL  = canvas.toDataURL('image/png');
+  const taskText  = document.getElementById('rechnen-task-input')?.value.trim() || currentAufgabe;
+  const docNote   = activeRechnenDoc ? `\n(Aktives Dokument: ${activeRechnenDoc})` : '';
+  const dataURL   = canvas.toDataURL('image/png');
   const base64   = dataURL.split(',')[1];
 
   const checkPrompt = `Ein Schüler hat die folgende Aufgabe handschriftlich auf dem beigefügten Bild gelöst.
 
-**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}
+**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}${docNote}
 
 Analysiere die handgeschriebene Lösung im Bild und antworte auf Deutsch:
 
