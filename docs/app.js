@@ -350,7 +350,7 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
 async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
   const r = await fetch('/api/claude', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: authHeaders(),
     body: JSON.stringify({
       messages, system: systemBlocks, max_tokens: maxTokens,
       model: 'claude-haiku-4-5-20251001', subject_id: sessionId,
