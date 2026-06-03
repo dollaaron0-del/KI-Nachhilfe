@@ -1004,6 +1004,11 @@ async function handleUpload(files) {
     updatePruefungsnahBtns();
     renderRechnenDocs();
 
+    if (scannedTopics.length) {
+      scannedTopics = [];
+      fetch(`/api/subjects/${sessionId}/topics`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
+    }
+
     await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
 
     prog.classList.add('hidden');
@@ -1032,6 +1037,7 @@ function switchMode(mode) {
   const rechnenSolve = document.getElementById('rechnen-solve');
   if (mathCtx && rechnenSolve && !rechnenSolve.classList.contains('hidden')) {
     savedCanvasData = document.getElementById('math-canvas').toDataURL('image/png');
+    localforage.setItem(`canvas_${sessionId}`, savedCanvasData).catch(() => {});
   }
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${mode}`));
@@ -1039,6 +1045,7 @@ function switchMode(mode) {
   if (mode === 'aufgaben')    initAufgaben();
   if (mode === 'rechnen')     initRechnen();
   if (mode === 'karten')      initKarten();
+  if (mode === 'exam')        loadSavedKlausuren();
   if (mode === 'fortschritt') { activateSubpanel('panel-fortschritt', 'dashboard'); initDashboard(); }
   if (mode === 'materialien') { activateSubpanel('panel-materialien', 'cheat'); loadSavedCheat(); }
 }
@@ -1409,8 +1416,60 @@ document.getElementById('exam-gen-btn')?.addEventListener('click', generateExam)
 document.getElementById('exam-new-btn')?.addEventListener('click', () => {
   document.getElementById('exam-idle').classList.remove('hidden');
   document.getElementById('exam-result').classList.add('hidden');
+  loadSavedKlausuren();
 });
 document.getElementById('exam-ans-btn')?.addEventListener('click', toggleExamAns);
+
+async function loadSavedKlausuren() {
+  const wrap = document.getElementById('exam-saved-wrap');
+  const list = document.getElementById('exam-saved-list');
+  if (!wrap || !list || !sessionId) return;
+  try {
+    const items = await api(`/api/subjects/${sessionId}/klausuren`);
+    if (!items.length) { wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    list.innerHTML = '';
+    const diffLabels = { leicht: 'Leicht', mittel: 'Mittel', schwer: 'Schwer', pruefungsnah: '📋 Prüfungsnah', experte: '💪 Experte' };
+    items.forEach(k => {
+      const date = new Date(k.created_at).toLocaleDateString('de-DE', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+      const row = document.createElement('div');
+      row.className = 'saved-aufg-row';
+      row.innerHTML = `
+        <div class="saved-aufg-info">
+          <span class="saved-aufg-type">📋 Klausur</span>
+          <span class="saved-aufg-topic">${esc(diffLabels[k.diff] || k.diff || '')}</span>
+          <span class="saved-aufg-date">${date}</span>
+        </div>
+        <div class="saved-aufg-btns">
+          <button class="btn-secondary btn-sm">Öffnen</button>
+          <button class="btn-icon-sm saved-del-btn">🗑</button>
+        </div>`;
+      row.querySelector('.btn-secondary').addEventListener('click', () => restoreKlausur(k));
+      row.querySelector('.saved-del-btn').addEventListener('click', async () => {
+        await fetch(`/api/subjects/${sessionId}/klausuren/${k.id}`, { method: 'DELETE', headers: authHeaders() });
+        loadSavedKlausuren();
+      });
+      list.appendChild(row);
+    });
+  } catch (_) {}
+}
+
+function restoreKlausur(k) {
+  currentExamText = k.content;
+  const body = document.getElementById('exam-body');
+  const sepIdx = k.content.search(/---\s*\n+##\s*Lösungsschlüssel/i);
+  if (sepIdx > -1) {
+    body.innerHTML = safeHtml(md(k.content.slice(0, sepIdx)) +
+      `<div class="ans-section">${md(k.content.slice(sepIdx).replace(/^---\s*\n+/, ''))}</div>`);
+  } else {
+    body.innerHTML = safeHtml(md(k.content));
+  }
+  examAnsVis = false;
+  body.closest('.exam-content').classList.add('answers-hidden');
+  document.getElementById('exam-ans-btn').textContent = 'Lösungen anzeigen';
+  document.getElementById('exam-idle').classList.add('hidden');
+  document.getElementById('exam-result').classList.remove('hidden');
+}
 
 async function generateExam() {
   ['exam-idle','exam-result'].forEach(id => document.getElementById(id).classList.add('hidden'));
@@ -1451,6 +1510,10 @@ ${diffInstructions[selDiff] || diffInstructions.mittel}
   try {
     const exam = await claudeLocal([{ role: 'user', content: 'Klausur erstellen.' }], sysBlocks(examPrompt), 3000);
     currentExamText = exam;
+    fetch(`/api/subjects/${sessionId}/klausuren`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ id: Date.now().toString(), diff: selDiff, content: exam }),
+    }).catch(() => {});
     const body = document.getElementById('exam-body');
     const sepIdx = exam.search(/---\s*\n+##\s*Lösungsschlüssel/i);
     if (sepIdx > -1) {
@@ -2077,11 +2140,14 @@ function renderRechnenDocs() {
 
 document.getElementById('rechnen-doc-add-btn')?.addEventListener('click', () => showUploadSheet());
 
-function initRechnen() {
+async function initRechnen() {
   renderRechnenDocs();
   const input = document.getElementById('rechnen-task-input');
   if (input && currentAufgabe && !input.value) input.value = currentAufgabe;
   initResizeHandle();
+  if (!savedCanvasData && sessionId) {
+    savedCanvasData = await localforage.getItem(`canvas_${sessionId}`).catch(() => null);
+  }
   requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
 }
 
@@ -2255,6 +2321,7 @@ function canvasPos(e, canvas) {
 
 function clearCanvas() {
   if (!mathCtx) return;
+  if (sessionId) localforage.removeItem(`canvas_${sessionId}`).catch(() => {});
   const canvas = document.getElementById('math-canvas');
   const r      = canvas.getBoundingClientRect();
   undoStack = []; redoStack = [];

@@ -449,6 +449,12 @@ app.patch('/api/subjects/:id', authMiddleware, async (req, res) => {
 app.delete('/api/subjects/:id', authMiddleware, async (req, res) => {
   try {
     await pool.query('DELETE FROM subjects WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    await Promise.all([
+      pool.query('DELETE FROM cheat_sheets     WHERE subject_id=$1', [req.params.id]),
+      pool.query('DELETE FROM scanned_topics   WHERE subject_id=$1', [req.params.id]),
+      pool.query('DELETE FROM saved_aufgaben   WHERE subject_id=$1', [req.params.id]),
+      pool.query('DELETE FROM saved_klausuren  WHERE subject_id=$1', [req.params.id]),
+    ]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -777,7 +783,7 @@ app.post('/api/subjects/:id/quiz', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 app.get('/api/streak', authMiddleware, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT count,last_date FROM streak WHERE id=1');
+    const { rows } = await pool.query('SELECT count,last_date FROM user_streaks WHERE user_id=$1', [req.user.id]);
     res.json(rows[0] || { count: 0, last_date: null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -786,8 +792,9 @@ app.post('/api/streak', authMiddleware, async (req, res) => {
   const { count, last_date } = req.body;
   try {
     await pool.query(
-      'UPDATE streak SET count=$1,last_date=$2 WHERE id=1',
-      [count, last_date]
+      `INSERT INTO user_streaks (user_id, count, last_date) VALUES ($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET count=$2, last_date=$3`,
+      [req.user.id, count, last_date]
     );
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -830,11 +837,15 @@ app.get('/api/backup', authMiddleware, async (req, res) => {
     const backup = { version: 2, exportedAt: new Date().toISOString(), subjects: [] };
 
     for (const s of subjects) {
-      const messages = (await pool.query('SELECT role,content FROM messages WHERE subject_id=$1 ORDER BY created_at', [s.id])).rows;
-      const cards = (await pool.query('SELECT front,back,ef,interval,repetitions,due FROM flashcards WHERE subject_id=$1', [s.id])).rows;
-      const quiz = (await pool.query('SELECT score,total FROM quiz_results WHERE subject_id=$1 ORDER BY taken_at', [s.id])).rows;
-      const glossar = (await pool.query('SELECT term,definition FROM glossar WHERE subject_id=$1', [s.id])).rows;
-      backup.subjects.push({ ...s, messages, cards, quiz, glossar });
+      const messages  = (await pool.query('SELECT role,content FROM messages WHERE subject_id=$1 ORDER BY created_at', [s.id])).rows;
+      const cards     = (await pool.query('SELECT front,back,ef,interval,repetitions,due FROM flashcards WHERE subject_id=$1', [s.id])).rows;
+      const quiz      = (await pool.query('SELECT score,total FROM quiz_results WHERE subject_id=$1 ORDER BY taken_at', [s.id])).rows;
+      const glossar   = (await pool.query('SELECT term,definition FROM glossar WHERE subject_id=$1', [s.id])).rows;
+      const cheat     = (await pool.query('SELECT content FROM cheat_sheets WHERE subject_id=$1', [s.id])).rows[0]?.content || null;
+      const topics    = (await pool.query('SELECT topics FROM scanned_topics WHERE subject_id=$1', [s.id])).rows[0]?.topics || [];
+      const aufgaben  = (await pool.query('SELECT id,topic,type,tasks_part,full_result,created_at FROM saved_aufgaben WHERE subject_id=$1 ORDER BY created_at', [s.id])).rows;
+      const klausuren = (await pool.query('SELECT id,diff,content,created_at FROM saved_klausuren WHERE subject_id=$1 ORDER BY created_at', [s.id])).rows;
+      backup.subjects.push({ ...s, messages, cards, quiz, glossar, cheat, topics, aufgaben, klausuren });
     }
 
     res.setHeader('Content-Disposition', `attachment; filename="nachhilfe-backup-${Date.now()}.json"`);
@@ -873,6 +884,38 @@ app.post('/api/restore', authMiddleware, async (req, res) => {
         await client.query('DELETE FROM glossar WHERE subject_id=$1', [s.id]);
         for (const g of s.glossar) {
           await client.query('INSERT INTO glossar (subject_id,term,definition) VALUES ($1,$2,$3)', [s.id, g.term, g.definition]);
+        }
+      }
+      if (s.cheat) {
+        await client.query(
+          `INSERT INTO cheat_sheets (subject_id, content, updated_at) VALUES ($1,$2,now())
+           ON CONFLICT (subject_id) DO UPDATE SET content=$2, updated_at=now()`,
+          [s.id, s.cheat]
+        );
+      }
+      if (s.topics?.length) {
+        await client.query(
+          `INSERT INTO scanned_topics (subject_id, topics, updated_at) VALUES ($1,$2,now())
+           ON CONFLICT (subject_id) DO UPDATE SET topics=$2, updated_at=now()`,
+          [s.id, JSON.stringify(s.topics)]
+        );
+      }
+      if (s.aufgaben?.length) {
+        await client.query('DELETE FROM saved_aufgaben WHERE subject_id=$1', [s.id]);
+        for (const a of s.aufgaben) {
+          await client.query(
+            'INSERT INTO saved_aufgaben (id,subject_id,topic,type,tasks_part,full_result,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+            [a.id, s.id, a.topic||'', a.type||'uebung', a.tasks_part||'', a.full_result||'', a.created_at||new Date()]
+          );
+        }
+      }
+      if (s.klausuren?.length) {
+        await client.query('DELETE FROM saved_klausuren WHERE subject_id=$1', [s.id]);
+        for (const k of s.klausuren) {
+          await client.query(
+            'INSERT INTO saved_klausuren (id,subject_id,diff,content,created_at) VALUES ($1,$2,$3,$4,$5)',
+            [k.id, s.id, k.diff||'mittel', k.content||'', k.created_at||new Date()]
+          );
         }
       }
     }
@@ -1127,6 +1170,43 @@ app.delete('/api/subjects/:id/aufgaben/:aufgId', authMiddleware, async (req, res
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SAVED KLAUSUREN (Probeklausuren aus dem Klausur-Tab)
+// ═══════════════════════════════════════════════════════════════════════════
+app.get('/api/subjects/:id/klausuren', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, diff, content, created_at FROM saved_klausuren WHERE subject_id=$1 ORDER BY created_at DESC LIMIT 10',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/subjects/:id/klausuren', authMiddleware, async (req, res) => {
+  const { id, diff, content } = req.body;
+  if (!id || !content) return res.status(400).json({ error: 'id und content erforderlich' });
+  try {
+    await pool.query(
+      `INSERT INTO saved_klausuren (id, subject_id, diff, content) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
+      [id.toString(), req.params.id, diff || 'mittel', content]
+    );
+    await pool.query(
+      `DELETE FROM saved_klausuren WHERE subject_id=$1 AND id NOT IN (
+        SELECT id FROM saved_klausuren WHERE subject_id=$1 ORDER BY created_at DESC LIMIT 10
+      )`, [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/subjects/:id/klausuren/:klId', authMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM saved_klausuren WHERE id=$1 AND subject_id=$2', [req.params.klId, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SPA fallback ───────────────────────────────────────────────────────────
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../docs/index.html'));
@@ -1155,6 +1235,19 @@ async function initTables() {
       created_at  TIMESTAMPTZ DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_saved_aufgaben_subject ON saved_aufgaben(subject_id);
+    CREATE TABLE IF NOT EXISTS saved_klausuren (
+      id          TEXT PRIMARY KEY,
+      subject_id  TEXT NOT NULL,
+      diff        TEXT,
+      content     TEXT,
+      created_at  TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_saved_klausuren_subject ON saved_klausuren(subject_id);
+    CREATE TABLE IF NOT EXISTS user_streaks (
+      user_id   INTEGER PRIMARY KEY,
+      count     INTEGER DEFAULT 0,
+      last_date TEXT
+    );
   `);
 }
 initTables().catch(e => console.error('Table init error:', e.message));
