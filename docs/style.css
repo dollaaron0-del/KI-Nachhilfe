@@ -916,12 +916,8 @@ html, body {
 #math-canvas {
   display: block; width: 100%;
   min-height: 2000px;
-  touch-action: none; /* default: draw with finger or pencil */
+  touch-action: pan-y; /* finger scrolls, pencil draws via pointer events */
   cursor: crosshair; background: #fff;
-}
-#math-canvas.scroll-mode {
-  touch-action: pan-y; /* scroll mode: finger scrolls */
-  cursor: default;
 }
 [data-theme="dark"] .canvas-scroll-wrap { border-top: 1px solid #444; }
 [data-theme="dark"] #math-canvas { background: #fff; } /* white needed for vision API */
