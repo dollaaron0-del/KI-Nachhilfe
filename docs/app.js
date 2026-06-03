@@ -3098,39 +3098,64 @@ function loadLernpfad() {
       <span class="lernpfad-name">${esc(topic)}</span>
       ${!isDone ? `<button class="lernpfad-btn">${isCurrent ? 'Lernen →' : 'Anzeigen'}</button>` : ''}`;
     if (!isDone) {
-      item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicExplainer(topic));
+      item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
     }
     list.appendChild(item);
   });
 }
 
-async function openTopicExplainer(topic) {
+// ── Lernen canvas state ────────────────────────────────────────────────────
+let lernenCtx      = null;
+let isDrawingLernen = false;
+let lernenLastX    = 0, lernenLastY = 0;
+let lernenPenColor = '#1c1c1e';
+let lernenTool     = 'pen';
+let lernenTopicData = null;
+let lernenQaMsgs   = [];
+
+function openTopicView(topic) {
   currentExplainerTopic = topic;
-  const overlay      = document.getElementById('explainer-overlay');
-  const loading      = document.getElementById('explainer-loading');
-  const content      = document.getElementById('explainer-content');
-  const aufgabeWrap  = document.getElementById('explainer-aufgabe-wrap');
-  const actions      = document.getElementById('explainer-actions');
-  const doneBtn      = document.getElementById('explainer-done-btn');
+  lernenTopicData = null;
+  lernenQaMsgs    = [];
+  lernenCtx       = null;
+  // Switch views
+  document.getElementById('lernen-pfad-view').classList.add('hidden');
+  document.getElementById('lernen-topic-view').style.display = 'flex';
+  document.getElementById('lernen-topic-name').textContent = topic;
+  document.getElementById('lernen-qa-title').textContent = 'Fragen zu: ' + topic;
+  document.getElementById('lernen-qa-msgs').innerHTML = '';
+  // Reset step 1
+  document.getElementById('lernen-erkl-loading').style.display = '';
+  document.getElementById('lernen-erkl-body').classList.add('hidden');
+  document.getElementById('lernen-step1-footer').classList.add('hidden');
+  document.getElementById('lernen-tab-aufgabe').disabled = true;
+  document.getElementById('lernen-done-btn').classList.add('hidden');
+  lernenSwitchStep(1);
+  loadTopicContent(topic);
+}
 
-  overlay.classList.remove('hidden');
-  loading.classList.remove('hidden');
-  content.classList.add('hidden');
-  aufgabeWrap.classList.add('hidden');
-  actions.classList.add('hidden');
-  doneBtn.classList.add('hidden');
-  document.getElementById('explainer-answer').value = '';
-  document.getElementById('explainer-check-feedback').classList.add('hidden');
-  document.getElementById('explainer-check-btn').textContent = 'Lösung prüfen →';
-  document.getElementById('explainer-check-btn').disabled = false;
+function closeLernenTopic() {
+  document.getElementById('lernen-pfad-view').classList.remove('hidden');
+  document.getElementById('lernen-topic-view').style.display = 'none';
+  lernenCtx = null;
+}
 
+function lernenSwitchStep(step) {
+  document.querySelectorAll('.lernen-step-tab').forEach(t =>
+    t.classList.toggle('active', +t.dataset.lstep === step));
+  document.getElementById('lernen-step-1').classList.toggle('lernen-step-hidden', step !== 1);
+  document.getElementById('lernen-step-2').classList.toggle('lernen-step-hidden', step !== 2);
+  if (step === 2) requestAnimationFrame(initLernenCanvas);
+}
+
+async function loadTopicContent(topic) {
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
       [{ role: 'user', content: `Erkläre das Thema "${topic}" für einen Studenten.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Praxisbeispiel","rechnung":"Schritt-für-Schritt Rechenbeispiel mit konkreten Zahlen (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung relevant.","aufgabe":"Eine konkrete Übungsaufgabe mit Zahlen die der Student jetzt selbst lösen muss"}`,
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Praxisbeispiel (mit Zahlen)","rechnung":"Schritt-für-Schritt Rechenbeispiel mit konkreten Zahlen (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung.","aufgabe":"Eine konkrete Übungsaufgabe mit Zahlen die der Student jetzt selbst lösen muss"}`,
       }],
       1800
     );
@@ -3138,97 +3163,150 @@ async function openTopicExplainer(topic) {
     const m = raw.match(/\{[\s\S]*\}/);
     if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
+    lernenTopicData = data;
 
-    loading.classList.add('hidden');
-
-    let html = `<h3>📖 ${esc(topic)}</h3>
-      <div class="explainer-section">
-        <div class="explainer-label">Was ist das?</div>
-        <div class="explainer-body">${esc(data.was || '')}</div>
-      </div>
-      <div class="explainer-section">
-        <div class="explainer-label">Warum wichtig?</div>
-        <div class="explainer-body">${esc(data.warum || '')}</div>
-      </div>
-      <div class="explainer-section">
-        <div class="explainer-label">Konkretes Beispiel</div>
-        <div class="explainer-body">${esc(data.beispiel || '')}</div>
-      </div>`;
+    document.getElementById('lernen-erkl-loading').style.display = 'none';
+    let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>
+      <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${esc(data.was || '')}</div></div>
+      <div class="explainer-section"><div class="explainer-label">Warum wichtig?</div><div class="explainer-body">${esc(data.warum || '')}</div></div>
+      <div class="explainer-section"><div class="explainer-label">Konkretes Beispiel</div><div class="explainer-body">${esc(data.beispiel || '')}</div></div>`;
     if (data.rechnung && data.rechnung.trim()) {
-      html += `<div class="explainer-section">
-        <div class="explainer-label">📐 Rechenbeispiel</div>
-        <div class="explainer-rechnung">${esc(data.rechnung).replace(/\n/g, '<br>')}</div>
-      </div>`;
+      html += `<div class="explainer-section"><div class="explainer-label">📐 Rechenbeispiel</div><div class="explainer-rechnung">${esc(data.rechnung).replace(/\n/g, '<br>')}</div></div>`;
     }
-    content.innerHTML = html;
-    content.classList.remove('hidden');
+    const body = document.getElementById('lernen-erkl-body');
+    body.innerHTML = html;
+    body.classList.remove('hidden');
+    document.getElementById('lernen-step1-footer').classList.remove('hidden');
 
     if (data.aufgabe && data.aufgabe.trim()) {
-      document.getElementById('explainer-aufgabe-text').textContent = data.aufgabe;
-      aufgabeWrap.classList.remove('hidden');
+      document.getElementById('lernen-task-bar').textContent = data.aufgabe;
+      document.getElementById('lernen-tab-aufgabe').disabled = false;
     } else {
-      doneBtn.classList.remove('hidden');
+      document.getElementById('lernen-done-btn').classList.remove('hidden');
     }
-    actions.classList.remove('hidden');
   } catch (e) {
-    loading.classList.add('hidden');
-    content.innerHTML = `<p style="color:var(--red);padding:8px 0">Fehler: ${esc(e.message)}</p>`;
-    content.classList.remove('hidden');
-    doneBtn.classList.remove('hidden');
-    actions.classList.remove('hidden');
+    document.getElementById('lernen-erkl-loading').style.display = 'none';
+    const body = document.getElementById('lernen-erkl-body');
+    body.innerHTML = `<p style="color:var(--red);padding:16px">Fehler: ${esc(e.message)}</p>`;
+    body.classList.remove('hidden');
+    document.getElementById('lernen-step1-footer').classList.remove('hidden');
+    document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
 }
 
-async function checkExplainerAnswer() {
-  const answer   = document.getElementById('explainer-answer').value.trim();
-  if (!answer) return;
-  const aufgabe  = document.getElementById('explainer-aufgabe-text').textContent;
-  const checkBtn = document.getElementById('explainer-check-btn');
-  const feedback = document.getElementById('explainer-check-feedback');
-  const doneBtn  = document.getElementById('explainer-done-btn');
+function initLernenCanvas() {
+  const canvas = document.getElementById('lernen-canvas');
+  const wrap   = document.getElementById('lernen-canvas-wrap');
+  if (!canvas || !wrap || lernenCtx) return;
+  canvas.width  = wrap.clientWidth  || 800;
+  canvas.height = wrap.clientHeight || 600;
+  lernenCtx = canvas.getContext('2d');
+  lernenCtx.fillStyle = '#ffffff';
+  lernenCtx.fillRect(0, 0, canvas.width, canvas.height);
+  lernenCtx.lineCap  = 'round';
+  lernenCtx.lineJoin = 'round';
+  canvas.addEventListener('pointerdown',   onLernenDown,   { passive: false });
+  canvas.addEventListener('pointermove',   onLernenMove,   { passive: false });
+  canvas.addEventListener('pointerup',     onLernenUp);
+  canvas.addEventListener('pointercancel', onLernenUp);
+}
 
-  checkBtn.disabled = true;
-  checkBtn.textContent = '…';
-  feedback.classList.add('hidden');
+function onLernenDown(e) {
+  e.preventDefault();
+  const r = e.target.getBoundingClientRect();
+  lernenLastX = e.clientX - r.left;
+  lernenLastY = e.clientY - r.top;
+  isDrawingLernen = true;
+}
+
+function onLernenMove(e) {
+  if (!isDrawingLernen || !lernenCtx) return;
+  e.preventDefault();
+  const r = e.target.getBoundingClientRect();
+  const x = e.clientX - r.left;
+  const y = e.clientY - r.top;
+  lernenCtx.beginPath();
+  lernenCtx.moveTo(lernenLastX, lernenLastY);
+  lernenCtx.lineTo(x, y);
+  if (lernenTool === 'eraser') {
+    lernenCtx.globalCompositeOperation = 'destination-out';
+    lernenCtx.lineWidth = 22;
+  } else {
+    lernenCtx.globalCompositeOperation = 'source-over';
+    lernenCtx.strokeStyle = lernenPenColor;
+    lernenCtx.lineWidth   = 2.5;
+  }
+  lernenCtx.stroke();
+  lernenLastX = x; lernenLastY = y;
+}
+
+function onLernenUp() { isDrawingLernen = false; }
+
+async function checkLernenSolution() {
+  if (!lernenCtx || !lernenTopicData) return;
+  const checkBtn = document.getElementById('lernen-check-btn');
+  checkBtn.disabled = true; checkBtn.textContent = '…';
+  try {
+    const canvas = document.getElementById('lernen-canvas');
+    const flat = document.createElement('canvas');
+    flat.width = canvas.width; flat.height = canvas.height;
+    const fc = flat.getContext('2d');
+    fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
+    fc.drawImage(canvas, 0, 0);
+    const base64 = flat.toDataURL('image/png').split(',')[1];
+
+    const result = await claudeVision(
+      base64,
+      `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewertet die handschriftliche Lösung des Studenten. Antworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/fast richtig, 1=Ansatz gut aber Lücken, 0=falsch oder zu wenig`,
+      sysBlocks()
+    );
+    const mv = result.match(/\{[\s\S]*\}/);
+    if (!mv) throw new Error('Keine Auswertung');
+    const ev = JSON.parse(mv[0]);
+    const ok = ev.score >= 1;
+    toast((ok ? '✅ ' : '❌ ') + (ev.feedback || ''), ok ? 'success' : 'warn', 5000);
+    if (ev.loesung) toast('Musterlösung: ' + ev.loesung, 'info', 6000);
+    if (ok) document.getElementById('lernen-done-btn').classList.remove('hidden');
+  } catch (e) { toast('Fehler beim Prüfen: ' + e.message, 'error'); }
+  checkBtn.disabled = false; checkBtn.textContent = '✅ Prüfen';
+}
+
+async function lernenQaSend() {
+  const input = document.getElementById('lernen-qa-input');
+  const text  = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const msgs = document.getElementById('lernen-qa-msgs');
+  const uEl = document.createElement('div');
+  uEl.className = 'rechnen-ask-msg rechnen-ask-user';
+  uEl.textContent = text;
+  msgs.appendChild(uEl);
+
+  lernenQaMsgs.push({ role: 'user', content: text });
+
+  const aEl = document.createElement('div');
+  aEl.className = 'rechnen-ask-msg rechnen-ask-ai';
+  aEl.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  msgs.appendChild(aEl);
+  msgs.scrollTop = msgs.scrollHeight;
 
   try {
-    const raw = await claudeLocal(
-      [{ role: 'user', content: `Aufgabe: ${aufgabe}\n\nAntwort des Studenten: ${answer}` }],
-      [{
-        type: 'text',
-        text: `Bewerte die Lösung zum Thema "${currentExplainerTopic}". Sei wohlwollend – es geht ums Lernen.\nAntworte NUR als JSON: {"score":0,"feedback":"","loesung":""}\nscore: 2=richtig/fast richtig, 1=Ansatz erkennbar aber Lücken, 0=falsch`,
-      }],
-      500
+    const reply = await claudeLocal(
+      lernenQaMsgs,
+      sysBlocks(`Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich. Erkläre Schritt für Schritt wenn nötig.`),
+      600
     );
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Keine Auswertung');
-    const ev = JSON.parse(m[0]);
-
-    const ok = ev.score >= 1;
-    feedback.className = `explainer-check-feedback ${ok ? 'explainer-feedback-ok' : 'explainer-feedback-fail'}`;
-    feedback.innerHTML = `<strong>${ok ? '✅' : '❌'} ${esc(ev.feedback || '')}</strong>`
-      + (ev.loesung ? `<span class="explainer-loesung">Musterlösung: ${esc(ev.loesung)}</span>` : '');
-    feedback.classList.remove('hidden');
-
-    if (ok) {
-      doneBtn.classList.remove('hidden');
-      checkBtn.textContent = 'Nochmal versuchen';
-    } else {
-      checkBtn.textContent = 'Nochmal versuchen';
-    }
-  } catch (e) {
-    feedback.className = 'explainer-check-feedback explainer-feedback-fail';
-    feedback.textContent = '⚠️ Fehler beim Prüfen: ' + e.message;
-    feedback.classList.remove('hidden');
-    checkBtn.textContent = 'Lösung prüfen →';
-  }
-  checkBtn.disabled = false;
+    lernenQaMsgs.push({ role: 'assistant', content: reply });
+    aEl.textContent = reply;
+  } catch (e) { aEl.textContent = '⚠️ ' + e.message; }
+  msgs.scrollTop = msgs.scrollHeight;
 }
 
 async function markTopicDone() {
   const topic = currentExplainerTopic;
   if (!topic || !sessionId) return;
-  document.getElementById('explainer-overlay').classList.add('hidden');
+  closeLernenTopic();
   if (!learnedTopics.includes(topic)) {
     learnedTopics.push(topic);
     fetch(`/api/subjects/${sessionId}/learned-topics`, {
@@ -3272,12 +3350,43 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
   }
 });
 
-document.getElementById('explainer-check-btn')?.addEventListener('click', checkExplainerAnswer);
-document.getElementById('explainer-done-btn')?.addEventListener('click', markTopicDone);
-document.getElementById('explainer-close-btn')?.addEventListener('click', () =>
-  document.getElementById('explainer-overlay').classList.add('hidden'));
-document.getElementById('explainer-bg')?.addEventListener('click', () =>
-  document.getElementById('explainer-overlay').classList.add('hidden'));
+// Lernen topic view controls
+document.getElementById('lernen-back-btn')?.addEventListener('click', closeLernenTopic);
+document.getElementById('lernen-to-task-btn')?.addEventListener('click', () => lernenSwitchStep(2));
+document.getElementById('lernen-check-btn')?.addEventListener('click', checkLernenSolution);
+document.getElementById('lernen-done-btn')?.addEventListener('click', markTopicDone);
+document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
+  if (!lernenCtx) return;
+  const c = document.getElementById('lernen-canvas');
+  lernenCtx.fillStyle = '#fff'; lernenCtx.fillRect(0, 0, c.width, c.height);
+});
+document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
+  if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);
+}));
+document.querySelectorAll('[data-ltool]').forEach(b => b.addEventListener('click', () => {
+  lernenTool = b.dataset.ltool;
+  document.querySelectorAll('[data-ltool]').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+}));
+document.querySelectorAll('[data-lcolor]').forEach(b => b.addEventListener('click', () => {
+  lernenPenColor = b.dataset.lcolor;
+  lernenTool = 'pen';
+  document.querySelectorAll('[data-lcolor]').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('[data-ltool]').forEach(x => x.classList.toggle('active', x.dataset.ltool === 'pen'));
+  b.classList.add('active');
+}));
+document.getElementById('lernen-qa-btn')?.addEventListener('click', () => {
+  document.getElementById('lernen-qa-overlay').classList.remove('hidden');
+  setTimeout(() => document.getElementById('lernen-qa-input')?.focus(), 300);
+});
+document.getElementById('lernen-qa-close-btn')?.addEventListener('click', () =>
+  document.getElementById('lernen-qa-overlay').classList.add('hidden'));
+document.getElementById('lernen-qa-bg')?.addEventListener('click', () =>
+  document.getElementById('lernen-qa-overlay').classList.add('hidden'));
+document.getElementById('lernen-qa-send-btn')?.addEventListener('click', lernenQaSend);
+document.getElementById('lernen-qa-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter') lernenQaSend();
+});
 
 // ══ DASHBOARD ════════════════════════════════════════════════════════════
 

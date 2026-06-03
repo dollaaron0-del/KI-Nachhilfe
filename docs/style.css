@@ -1382,67 +1382,113 @@ html, body {
   border-left: 3px solid var(--accent);
   white-space: pre-wrap;
 }
-.explainer-divider {
-  height: 1px;
-  background: var(--border);
-  margin: 16px 0 14px;
+
+/* ── Lernen Topic View (full-panel, replaces popup) ─────────────────────── */
+.lernen-topic-view {
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
 }
-.explainer-aufgabe-header {
-  font-size: 13px;
+.lernen-topic-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.lernen-topic-name {
+  flex: 1;
+  font-size: 16px;
   font-weight: 700;
-  color: var(--text2);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.explainer-aufgabe-wrap {
-  margin-top: 4px;
-}
-.explainer-answer-input {
-  display: block;
-  width: 100%;
-  margin: 10px 0 8px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1.5px solid var(--border);
+.lernen-step-tabs {
+  display: flex;
   background: var(--bg);
-  color: var(--text);
-  font-size: 15px;
-  line-height: 1.55;
-  resize: vertical;
-  font-family: inherit;
-  -webkit-appearance: none;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
-.explainer-answer-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.explainer-check-feedback {
-  border-radius: 10px;
-  padding: 10px 14px;
+.lernen-step-tab {
+  flex: 1;
+  padding: 11px 8px;
   font-size: 14px;
-  line-height: 1.6;
-  margin: 10px 0 4px;
-}
-.explainer-feedback-ok {
-  background: rgba(52,199,89,0.1);
-  border: 1.5px solid var(--green);
-}
-.explainer-feedback-fail {
-  background: rgba(255,59,48,0.08);
-  border: 1.5px solid var(--red);
-}
-.explainer-loesung {
-  display: block;
-  margin-top: 6px;
+  font-weight: 600;
   color: var(--text2);
-  font-size: 13px;
+  background: transparent;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+  -webkit-tap-highlight-color: transparent;
 }
-.explainer-actions {
+.lernen-step-tab.active   { color: var(--accent); border-bottom-color: var(--accent); }
+.lernen-step-tab:disabled { opacity: 0.4; cursor: default; }
+.lernen-step {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 20px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  overflow: hidden;
+  min-height: 0;
 }
+.lernen-step-hidden { display: none !important; }
+
+/* Step 1 – Erklärung */
+.lernen-erkl-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.lernen-erkl-title { font-size: 22px; font-weight: 700; margin-bottom: 18px; }
+.lernen-step1-footer {
+  flex-shrink: 0;
+  padding: 12px 16px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* Step 2 – Aufgabe + Canvas */
+.lernen-task-bar {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  background: rgba(88,86,214,0.08);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.45;
+  max-height: 76px;
+  overflow-y: auto;
+}
+.lernen-canvas-bar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.lernen-tool, .lernen-color {
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; border: none;
+  background: transparent; cursor: pointer;
+  color: var(--text); font-size: 15px; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.lernen-tool.active { background: rgba(88,86,214,0.12); color: var(--accent); }
+.lernen-color { padding: 4px; }
+.lernen-color.active .color-dot { box-shadow: 0 0 0 2px white, 0 0 0 4px var(--accent); }
+.lernen-canvas-wrap {
+  flex: 1;
+  overflow: hidden;
+  background: #fff;
+  touch-action: none;
+  min-height: 0;
+}
+#lernen-canvas { display: block; width: 100%; height: 100%; }
