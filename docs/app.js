@@ -1056,12 +1056,11 @@ function switchMode(mode) {
   if (mode === 'exam')     { loadSavedKlausuren(); updateExamRecBanner(); }
   if (mode === 'material') { activateSubpanel('panel-material', 'cheat'); loadSavedCheat(); }
   if (mode === 'lernen')   initLernen();
+  if (mode === 'analyse')  refreshAnalysisState();
 }
 
 function switchToAnalysis() {
-  switchMode('quiz');
-  activateSubpanel('panel-quiz', 'analyse-content');
-  refreshAnalysisState();
+  switchMode('analyse');
 }
 
 function switchToLoesen() {
@@ -1091,7 +1090,6 @@ document.querySelectorAll('.subpanel-nav').forEach(nav => {
     if (sub === 'glossar')         loadSavedGlossar();
     if (sub === 'aufgaben-content') initAufgaben();
     if (sub === 'loesen-content')   initRechnen();
-    if (sub === 'analyse-content')  refreshAnalysisState();
   });
 });
 

@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=28" />
+  <link rel="stylesheet" href="style.css?v=29" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -158,6 +158,7 @@
     <button class="tab tab-sep" data-mode="exam">📝 Klausur</button>
     <button class="tab" data-mode="karten">🃏 Karten</button>
     <button class="tab tab-sep" data-mode="material">📚 Material</button>
+    <button class="tab tab-sep" data-mode="analyse">📊 Analyse</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -193,11 +194,6 @@
 
   <!-- ── QUIZ ── -->
   <div id="panel-quiz" class="panel">
-    <div class="subpanel-nav">
-      <button class="subpanel-btn active" data-sub="quiz-content">❓ Quiz</button>
-      <button class="subpanel-btn" data-sub="analyse-content">📊 Analyse</button>
-    </div>
-    <div class="subpanel" data-subid="quiz-content">
     <div class="quiz-content">
       <div id="quiz-idle" class="cx-state">
         <div class="big-icon">🧠</div>
@@ -249,39 +245,40 @@
         </div>
       </div>
     </div>
-    </div><!-- end subpanel quiz-content -->
-    <div class="subpanel hidden" data-subid="analyse-content">
-      <div class="analysis-content">
-        <div id="analysis-idle" class="cx-state">
-          <div class="big-icon">📊</div>
-          <h2>Lernstandsanalyse</h2>
-          <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen für eine Analyse.</p>
-          <div class="lernziel-row">
-            <span>🎯 Lernziel:</span>
-            <input type="range" id="lernziel-slider" min="50" max="100" value="75" step="5" />
-            <strong id="lernziel-val">75%</strong>
-          </div>
-          <div class="pessimism-note">⚠️ Bewusst pessimistische Einschätzung – um falsche Sicherheit zu vermeiden.</div>
-          <button class="btn-primary" id="analysis-btn" disabled>Analyse erstellen</button>
+  </div>
+
+  <!-- ── ANALYSE ── -->
+  <div id="panel-analyse" class="panel">
+    <div class="analysis-content">
+      <div id="analysis-idle" class="cx-state">
+        <div class="big-icon">📊</div>
+        <h2>Lernstandsanalyse</h2>
+        <p id="analysis-hint">Beantworte mindestens 3 Quiz-Fragen für eine Analyse.</p>
+        <div class="lernziel-row">
+          <span>🎯 Lernziel:</span>
+          <input type="range" id="lernziel-slider" min="50" max="100" value="75" step="5" />
+          <strong id="lernziel-val">75%</strong>
         </div>
-        <div id="analysis-loading" class="cx-state hidden">
-          <div class="big-icon spin">🔍</div>
-          <p>Analysiere deinen Lernstand…</p>
-          <div class="ai-progress-wrap"><div class="ai-progress-bar" id="analysis-progress-bar"></div></div>
-          <p class="ai-progress-pct" id="analysis-progress-pct">0%</p>
-        </div>
-        <div id="analysis-result" class="cx-state hidden">
-          <div class="gauge" id="gauge"></div>
-          <div class="spark-wrap" id="spark-wrap"></div>
-          <div class="chart-wrap hidden" id="chart-wrap">
-            <canvas id="progress-chart" height="160"></canvas>
-          </div>
-          <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
-          <div class="analysis-body" id="analysis-body"></div>
-          <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
-        </div>
+        <div class="pessimism-note">⚠️ Bewusst pessimistische Einschätzung – um falsche Sicherheit zu vermeiden.</div>
+        <button class="btn-primary" id="analysis-btn" disabled>Analyse erstellen</button>
       </div>
-    </div><!-- end subpanel analyse-content -->
+      <div id="analysis-loading" class="cx-state hidden">
+        <div class="big-icon spin">🔍</div>
+        <p>Analysiere deinen Lernstand…</p>
+        <div class="ai-progress-wrap"><div class="ai-progress-bar" id="analysis-progress-bar"></div></div>
+        <p class="ai-progress-pct" id="analysis-progress-pct">0%</p>
+      </div>
+      <div id="analysis-result" class="cx-state hidden">
+        <div class="gauge" id="gauge"></div>
+        <div class="spark-wrap" id="spark-wrap"></div>
+        <div class="chart-wrap hidden" id="chart-wrap">
+          <canvas id="progress-chart" height="160"></canvas>
+        </div>
+        <div class="pessimism-note">⚠️ Konservative Einschätzung – Prüfungsdruck verschlechtert die Leistung.</div>
+        <div class="analysis-body" id="analysis-body"></div>
+        <button class="btn-secondary btn-sm" id="analysis-refresh" style="margin-top:16px">Neu analysieren</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── EXAM ── -->
@@ -695,7 +692,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=28"></script>
+<script src="app.js?v=29"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
