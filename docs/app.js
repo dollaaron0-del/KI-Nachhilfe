@@ -2037,7 +2037,7 @@ function setupCanvasEvents() {
   const canvas = document.getElementById('math-canvas');
 
   canvas.addEventListener('pointerdown', e => {
-    if (e.pointerType === 'touch') return; // finger → scroll, not draw
+    if (canvas.classList.contains('scroll-mode')) return;
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     isDrawingCanvas = true;
@@ -2064,7 +2064,6 @@ function setupCanvasEvents() {
 
   canvas.addEventListener('pointermove', e => {
     if (!isDrawingCanvas || !mathCtx) return;
-    if (e.pointerType === 'touch') return;
     e.preventDefault();
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
@@ -2188,6 +2187,14 @@ document.querySelectorAll('.canvas-size').forEach(btn => btn.addEventListener('c
   document.querySelectorAll('.canvas-size').forEach(x => x.classList.remove('active'));
   btn.classList.add('active');
 }));
+
+document.getElementById('canvas-scroll-btn')?.addEventListener('click', () => {
+  const canvas = document.getElementById('math-canvas');
+  const btn    = document.getElementById('canvas-scroll-btn');
+  const on = canvas.classList.toggle('scroll-mode');
+  btn.classList.toggle('active', on);
+  btn.title = on ? 'Scroll-Modus aktiv – tippen zum Beenden' : 'Scroll-Modus';
+});
 
 document.getElementById('rechnen-gen-btn')?.addEventListener('click', generateMathAufgabe);
 document.getElementById('canvas-pen-btn')?.addEventListener('click',       () => setActiveTool('pen'));
