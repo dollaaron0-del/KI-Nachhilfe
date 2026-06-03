@@ -1990,28 +1990,30 @@ function initRechnen() {
   }
 }
 
+const CANVAS_HEIGHT = 2000;
+
 function initCanvas() {
   const canvas = document.getElementById('math-canvas');
-  const rect   = canvas.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const dpr    = window.devicePixelRatio || 1;
-  canvas.width  = Math.round(rect.width  * dpr);
-  canvas.height = Math.round(rect.height * dpr);
+  const wrap   = document.getElementById('canvas-scroll-wrap');
+  const w      = wrap ? wrap.clientWidth : canvas.getBoundingClientRect().width;
+  if (!w) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.height = CANVAS_HEIGHT + 'px';
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(CANVAS_HEIGHT * dpr);
   mathCtx = canvas.getContext('2d');
   mathCtx.scale(dpr, dpr);
-  // Fill white background (needed for vision API)
   mathCtx.fillStyle = '#ffffff';
-  mathCtx.fillRect(0, 0, rect.width, rect.height);
-  // Restore saved drawing when returning from another tab
+  mathCtx.fillRect(0, 0, w, CANVAS_HEIGHT);
   if (savedCanvasData) {
     const img = new Image();
-    img.onload = () => { mathCtx.drawImage(img, 0, 0, rect.width, rect.height); applyCtxStyle(); };
+    img.onload = () => { mathCtx.drawImage(img, 0, 0, w, CANVAS_HEIGHT); applyCtxStyle(); };
     img.src = savedCanvasData;
     savedCanvasData = null;
   } else {
     applyCtxStyle();
   }
-  undoStack = [];
+  undoStack = []; redoStack = [];
 }
 
 const PEN_BASE = { fine: 1.0, medium: 2.0, thick: 4.5 };
@@ -2041,7 +2043,7 @@ function setupCanvasEvents() {
     redoStack = [];
     const snap = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
     undoStack.push(snap);
-    if (undoStack.length > 30) undoStack.shift();
+    if (undoStack.length > 8) undoStack.shift();
     const p = canvasPos(e, canvas);
     canvasLastX = p.x; canvasLastY = p.y;
 

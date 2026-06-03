@@ -907,12 +907,20 @@ html, body {
 }
 .btn-canvas-check:active { opacity: .82; }
 
+.canvas-scroll-wrap {
+  flex: 1; min-height: 0;
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: #fff;
+}
+
 #math-canvas {
-  flex: 1; min-height: 0; display: block; width: 100%;
+  display: block; width: 100%;
+  min-height: 2000px;
   touch-action: none; /* essential for Apple Pencil pointer events */
   cursor: crosshair; background: #fff;
 }
-[data-theme="dark"] #math-canvas { background: #fff; border: 1px solid #444; } /* white needed for vision API */
+[data-theme="dark"] .canvas-scroll-wrap { border-top: 1px solid #444; }
+[data-theme="dark"] #math-canvas { background: #fff; } /* white needed for vision API */
 
 /* Result state */
 #rechnen-result { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; gap: 14px; display: flex; flex-direction: column; }
