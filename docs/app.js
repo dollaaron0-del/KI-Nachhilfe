@@ -374,6 +374,33 @@ async function claudeLocal(messages, systemBlocks, maxTokens = 2000) {
   return (await r.json()).content[0].text;
 }
 
+async function claudeLocalStream(messages, systemBlocks, maxTokens = 3000, onToken) {
+  const r = await fetch('/api/local/stream', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
+  });
+  if (!r.ok) throw new Error(`Serverfehler ${r.status}`);
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let full = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    for (const line of dec.decode(value).split('\n')) {
+      if (!line.startsWith('data: ')) continue;
+      const d = line.slice(6).trim();
+      if (d === '[DONE]') return full;
+      try {
+        const parsed = JSON.parse(d);
+        if (parsed.error) throw new Error(parsed.error);
+        if (parsed.token) { full += parsed.token; onToken(full); }
+      } catch (e) { if (e.message) throw e; }
+    }
+  }
+  return full;
+}
+
 // ── Anthropic Vision API (via server proxy) ────────────────────────────────
 async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
   const messages = [{
@@ -1174,7 +1201,7 @@ ${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
 Antworte NUR mit der Frage, ohne Kommentar.`;
 
   try {
-    const q = await claudeHaiku([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
+    const q = await claudeLocal([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
     sessionMeta.currentQuestion = q.trim();
     await DB.setMeta(sessionId, sessionMeta);
     document.getElementById('q-box').textContent = q.trim();
@@ -1275,7 +1302,7 @@ Antworte NUR als JSON (kein Text davor oder danach):
 "correct" ist der 0-basierte Index der richtigen Option (0=A, 1=B, 2=C, 3=D).`;
 
   try {
-    const raw = await claudeHaiku([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
+    const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Antwort');
     const data = JSON.parse(m[0]);
@@ -1589,7 +1616,7 @@ async function compressHistory(history) {
   ).join('\n\n');
 
   try {
-    const summary = await claudeHaiku(
+    const summary = await claudeLocal(
       [{ role: 'user', content: `Fasse dieses Gespräch in max. 150 Wörtern zusammen. Wichtige Fakten, Erklärungen und offene Fragen beibehalten:\n\n${convText}` }],
       [{ type: 'text', text: 'Du fasst Lernunterhaltungen prägnant zusammen.' }],
       400,
@@ -2237,7 +2264,7 @@ Regeln:
 Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
 
   try {
-    const aufgabe = await claudeHaiku(
+    const aufgabe = await claudeLocal(
       [{ role: 'user', content: 'Rechenaufgabe erstellen.' }],
       sysBlocks(prompt), 500,
     );
@@ -2381,18 +2408,20 @@ $$[Formel 1]$$
 Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
 
   try {
-    const result = await claudeLocal(
-      [{ role: 'user', content: 'Zusammenfassung erstellen.' }],
-      sysBlocks(prompt), 3000,
-    );
-    cheatDone();
-    document.getElementById('cheat-body').innerHTML = safeHtml(md(result));
-    localforage.setItem(`cheat_${sessionId}`, result).catch(() => {});
     document.getElementById('cheat-loading').classList.add('hidden');
     document.getElementById('cheat-result').classList.remove('hidden');
+    const body = document.getElementById('cheat-body');
+    body.innerHTML = '';
+    const result = await claudeLocalStream(
+      [{ role: 'user', content: 'Zusammenfassung erstellen.' }],
+      sysBlocks(prompt), 3000,
+      (text) => { body.innerHTML = safeHtml(md(text)); },
+    );
+    cheatDone();
+    localforage.setItem(`cheat_${sessionId}`, result).catch(() => {});
   } catch (e) {
     cheatDone();
-    document.getElementById('cheat-loading').classList.add('hidden');
+    document.getElementById('cheat-result').classList.add('hidden');
     document.getElementById('cheat-idle').classList.remove('hidden');
     toast('Fehler: ' + e.message, 'error');
   }

@@ -636,11 +636,21 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
 const OLLAMA_MODEL = 'llama3.1:8b';
 const OLLAMA_URL   = 'http://localhost:11434/v1/chat/completions';
 
+function ollamaMsgs(system, messages) {
+  const sysText = Array.isArray(system)
+    ? system.map(b => b.text || '').join('\n')
+    : (system || '');
+  return sysText ? [{ role: 'system', content: sysText }, ...messages] : messages;
+}
+
 async function callOllama(messages, maxTokens = 2000) {
   const r = await fetch(OLLAMA_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: OLLAMA_MODEL, messages, max_tokens: maxTokens, stream: false }),
+    body: JSON.stringify({
+      model: OLLAMA_MODEL, messages, max_tokens: maxTokens,
+      stream: false, options: { num_ctx: 8192 },
+    }),
   });
   if (!r.ok) throw new Error(`Ollama error ${r.status}`);
   const data = await r.json();
@@ -653,15 +663,10 @@ app.post('/api/local', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'messages array erforderlich' });
   }
   try {
-    const msgs = system
-      ? [{ role: 'system', content: system }, ...messages]
-      : messages;
-    const text = await callOllama(msgs, max_tokens || 2000);
-    // Return same shape as Claude so frontend code is identical
+    const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000);
     res.json({ content: [{ text }] });
   } catch (e) {
     console.error('Ollama error:', e.message);
-    // Fallback to Claude if Ollama is down
     try {
       const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
       if (system) params.system = system;
@@ -670,6 +675,47 @@ app.post('/api/local', authMiddleware, async (req, res) => {
     } catch (e2) {
       res.status(500).json({ error: e.message });
     }
+  }
+});
+
+app.post('/api/local/stream', authMiddleware, async (req, res) => {
+  const { messages, system, max_tokens } = req.body;
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array erforderlich' });
+  }
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  try {
+    const r = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL, messages: ollamaMsgs(system, messages),
+        max_tokens: max_tokens || 3000, stream: true, options: { num_ctx: 8192 },
+      }),
+    });
+    if (!r.ok) throw new Error(`Ollama ${r.status}`);
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const line of dec.decode(value).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const d = line.slice(6).trim();
+        if (d === '[DONE]') continue;
+        try {
+          const token = JSON.parse(d).choices?.[0]?.delta?.content || '';
+          if (token) res.write(`data: ${JSON.stringify({ token })}\n\n`);
+        } catch {}
+      }
+    }
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (e) {
+    res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
+    res.end();
   }
 });
 
