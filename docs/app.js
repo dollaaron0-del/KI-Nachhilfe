@@ -215,7 +215,12 @@ let isDrawingCanvas = false;
 let isErasing       = false;
 let canvasLastX     = 0, canvasLastY = 0;
 let undoStack       = [];
+let redoStack       = [];
 let savedCanvasData = null;
+let penColor        = '#1c1c1e';
+let penSize         = 'medium';   // 'fine' | 'medium' | 'thick'
+let activeTool      = 'pen';      // 'pen' | 'eraser' | 'highlighter' | 'line'
+let linePreviewData = null;
 
 // ── DB (server-backed) ────────────────────────────────────────────────────
 const api = (url, opts = {}) =>
@@ -2009,12 +2014,21 @@ function initCanvas() {
   undoStack = [];
 }
 
+const PEN_BASE = { fine: 1.0, medium: 2.0, thick: 4.5 };
+
 function applyCtxStyle() {
   if (!mathCtx) return;
-  mathCtx.strokeStyle = '#1c1c1e';
-  mathCtx.lineCap     = 'round';
-  mathCtx.lineJoin    = 'round';
-  mathCtx.lineWidth   = 2;
+  mathCtx.lineCap  = 'round';
+  mathCtx.lineJoin = 'round';
+  if (activeTool === 'highlighter') {
+    mathCtx.globalAlpha  = 0.35;
+    mathCtx.strokeStyle  = '#FFD60A';
+    mathCtx.lineWidth    = PEN_BASE[penSize] * 10;
+  } else {
+    mathCtx.globalAlpha  = 1;
+    mathCtx.strokeStyle  = penColor;
+    mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
+  }
 }
 
 function setupCanvasEvents() {
@@ -2024,18 +2038,23 @@ function setupCanvasEvents() {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     isDrawingCanvas = true;
-    // Snapshot before stroke → enables undo
-    if (mathCtx) {
-      undoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
-      if (undoStack.length > 20) undoStack.shift();
-    }
+    redoStack = [];
+    const snap = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
+    undoStack.push(snap);
+    if (undoStack.length > 30) undoStack.shift();
     const p = canvasPos(e, canvas);
     canvasLastX = p.x; canvasLastY = p.y;
-    // Dot for tap/click (pen mode only)
-    if (mathCtx && !isErasing) {
+
+    if (activeTool === 'line') {
+      linePreviewData = snap;
+      return;
+    }
+    if (activeTool === 'pen' || activeTool === 'highlighter') {
+      applyCtxStyle();
       mathCtx.beginPath();
-      mathCtx.arc(p.x, p.y, Math.max(0.5, (e.pressure || 0.5) * 1.5), 0, Math.PI * 2);
-      mathCtx.fillStyle = '#1c1c1e';
+      const r = Math.max(0.5, (e.pressure || 0.5) * PEN_BASE[penSize]);
+      mathCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      mathCtx.fillStyle = activeTool === 'highlighter' ? 'rgba(255,214,10,0.35)' : penColor;
       mathCtx.fill();
     }
   }, { passive: false });
@@ -2045,13 +2064,32 @@ function setupCanvasEvents() {
     e.preventDefault();
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
-    if (isErasing) {
-      mathCtx.lineWidth   = 24;
-      mathCtx.strokeStyle = '#ffffff';
+
+    if (activeTool === 'eraser') {
+      mathCtx.globalAlpha  = 1;
+      mathCtx.lineWidth    = PEN_BASE[penSize] * 12;
+      mathCtx.strokeStyle  = '#ffffff';
+    } else if (activeTool === 'highlighter') {
+      mathCtx.globalAlpha  = 0.35;
+      mathCtx.strokeStyle  = '#FFD60A';
+      mathCtx.lineWidth    = PEN_BASE[penSize] * 10;
+    } else if (activeTool === 'line') {
+      // Restore snapshot and draw fresh preview line
+      mathCtx.putImageData(linePreviewData, 0, 0);
+      mathCtx.globalAlpha  = 1;
+      mathCtx.strokeStyle  = penColor;
+      mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
+      mathCtx.beginPath();
+      mathCtx.moveTo(canvasLastX, canvasLastY);
+      mathCtx.lineTo(p.x, p.y);
+      mathCtx.stroke();
+      return;
     } else {
-      mathCtx.lineWidth   = Math.max(1, pressure * 3.5);
-      mathCtx.strokeStyle = '#1c1c1e';
+      mathCtx.globalAlpha  = 1;
+      mathCtx.strokeStyle  = penColor;
+      mathCtx.lineWidth    = Math.max(0.5, pressure * PEN_BASE[penSize] * 1.8);
     }
+
     mathCtx.beginPath();
     mathCtx.moveTo(canvasLastX, canvasLastY);
     mathCtx.lineTo(p.x, p.y);
@@ -2059,7 +2097,24 @@ function setupCanvasEvents() {
     canvasLastX = p.x; canvasLastY = p.y;
   }, { passive: false });
 
-  const endDraw = () => { isDrawingCanvas = false; };
+  const endDraw = (e) => {
+    if (!isDrawingCanvas) return;
+    isDrawingCanvas = false;
+    if (activeTool === 'line' && linePreviewData) {
+      // Finalize the line at the last position
+      const p = canvasPos(e, canvas);
+      mathCtx.putImageData(linePreviewData, 0, 0);
+      mathCtx.globalAlpha  = 1;
+      mathCtx.strokeStyle  = penColor;
+      mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
+      mathCtx.beginPath();
+      mathCtx.moveTo(canvasLastX, canvasLastY);
+      mathCtx.lineTo(p.x, p.y);
+      mathCtx.stroke();
+      linePreviewData = null;
+    }
+    mathCtx.globalAlpha = 1;
+  };
   canvas.addEventListener('pointerup',     endDraw);
   canvas.addEventListener('pointercancel', endDraw);
   canvas.addEventListener('pointerleave',  endDraw);
@@ -2075,23 +2130,37 @@ function clearCanvas() {
   if (!mathCtx) return;
   const canvas = document.getElementById('math-canvas');
   const r      = canvas.getBoundingClientRect();
-  undoStack = [];
+  undoStack = []; redoStack = [];
+  mathCtx.globalAlpha = 1;
   mathCtx.fillStyle = '#ffffff';
   mathCtx.fillRect(0, 0, r.width, r.height);
-  setEraserMode(false);
+  setActiveTool('pen');
 }
 
-function setEraserMode(on) {
-  isErasing = on;
-  const btn = document.getElementById('canvas-eraser-btn');
+function setActiveTool(tool) {
+  activeTool = tool;
+  isErasing  = tool === 'eraser';
   const cvs = document.getElementById('math-canvas');
-  if (btn) btn.classList.toggle('active', on);
-  if (cvs) cvs.style.cursor = on ? 'cell' : 'crosshair';
+  if (cvs) cvs.style.cursor = tool === 'eraser' ? 'cell' : tool === 'line' ? 'crosshair' : 'default';
+  ['canvas-pen-btn','canvas-highlight-btn','canvas-line-btn','canvas-eraser-btn'].forEach(id => {
+    document.getElementById(id)?.classList.remove('active');
+  });
+  const map = { pen: 'canvas-pen-btn', highlighter: 'canvas-highlight-btn', line: 'canvas-line-btn', eraser: 'canvas-eraser-btn' };
+  document.getElementById(map[tool])?.classList.add('active');
 }
 
 function undoCanvas() {
   if (!mathCtx || !undoStack.length) return;
+  const canvas = document.getElementById('math-canvas');
+  redoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
   mathCtx.putImageData(undoStack.pop(), 0, 0);
+}
+
+function redoCanvas() {
+  if (!mathCtx || !redoStack.length) return;
+  const canvas = document.getElementById('math-canvas');
+  undoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
+  mathCtx.putImageData(redoStack.pop(), 0, 0);
 }
 
 // Difficulty buttons
@@ -2101,15 +2170,30 @@ document.querySelectorAll('.diff-btn-r').forEach(b => b.addEventListener('click'
   b.classList.add('active');
 }));
 
+// Color picker
+document.querySelectorAll('.canvas-color').forEach(btn => btn.addEventListener('click', () => {
+  penColor = btn.dataset.color;
+  document.querySelectorAll('.canvas-color').forEach(x => x.classList.remove('active'));
+  btn.classList.add('active');
+  if (activeTool === 'eraser' || activeTool === 'highlighter') setActiveTool('pen');
+}));
+
+// Size picker
+document.querySelectorAll('.canvas-size').forEach(btn => btn.addEventListener('click', () => {
+  penSize = btn.dataset.size;
+  document.querySelectorAll('.canvas-size').forEach(x => x.classList.remove('active'));
+  btn.classList.add('active');
+}));
+
 document.getElementById('rechnen-gen-btn')?.addEventListener('click', generateMathAufgabe);
-document.getElementById('canvas-undo-btn')?.addEventListener('click', undoCanvas);
+document.getElementById('canvas-pen-btn')?.addEventListener('click',       () => setActiveTool('pen'));
+document.getElementById('canvas-highlight-btn')?.addEventListener('click', () => setActiveTool('highlighter'));
+document.getElementById('canvas-line-btn')?.addEventListener('click',      () => setActiveTool('line'));
+document.getElementById('canvas-eraser-btn')?.addEventListener('click',    () => setActiveTool(activeTool === 'eraser' ? 'pen' : 'eraser'));
+document.getElementById('canvas-undo-btn')?.addEventListener('click',  undoCanvas);
+document.getElementById('canvas-redo-btn')?.addEventListener('click',  redoCanvas);
 document.getElementById('canvas-clear-btn')?.addEventListener('click', clearCanvas);
 document.getElementById('canvas-check-btn')?.addEventListener('click', checkHandwriting);
-document.getElementById('canvas-eraser-btn')?.addEventListener('click', () => {
-  isErasing = !isErasing;
-  document.getElementById('canvas-eraser-btn').classList.toggle('active', isErasing);
-  document.getElementById('math-canvas').style.cursor = isErasing ? 'cell' : 'crosshair';
-});
 document.getElementById('rechnen-new-btn')?.addEventListener('click', () => {
   currentAufgabe = ''; savedCanvasData = null;
   showRechnenState(document.getElementById('rechnen-idle'));

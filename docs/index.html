@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=7" />
+  <link rel="stylesheet" href="style.css?v=10" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -384,14 +384,34 @@
 
       <div id="rechnen-solve" class="cx-state hidden">
         <div class="aufgabe-display" id="aufgabe-display"></div>
+
+        <!-- Color + Size row -->
+        <div class="canvas-bar canvas-bar-style">
+          <button class="canvas-color active" data-color="#1c1c1e" title="Schwarz"><span class="color-dot" style="background:#1c1c1e"></span></button>
+          <button class="canvas-color" data-color="#007aff" title="Blau"><span class="color-dot" style="background:#007aff"></span></button>
+          <button class="canvas-color" data-color="#ff3b30" title="Rot"><span class="color-dot" style="background:#ff3b30"></span></button>
+          <button class="canvas-color" data-color="#34c759" title="Grün"><span class="color-dot" style="background:#34c759"></span></button>
+          <div class="canvas-divider"></div>
+          <button class="canvas-size active" data-size="fine" title="Dünn"><span class="size-dot" style="width:4px;height:4px"></span></button>
+          <button class="canvas-size" data-size="medium" title="Mittel"><span class="size-dot" style="width:8px;height:8px"></span></button>
+          <button class="canvas-size" data-size="thick" title="Dick"><span class="size-dot" style="width:13px;height:13px"></span></button>
+        </div>
+
+        <!-- Tool row -->
         <div class="canvas-bar">
-          <button class="btn-canvas-tool" id="canvas-undo-btn" title="Rückgängig">↩️</button>
+          <button class="btn-canvas-tool active" id="canvas-pen-btn" title="Stift">✏️</button>
+          <button class="btn-canvas-tool" id="canvas-highlight-btn" title="Textmarker">🖊️</button>
+          <button class="btn-canvas-tool" id="canvas-line-btn" title="Gerade Linie">📏</button>
           <button class="btn-canvas-tool" id="canvas-eraser-btn" title="Radierer">🧹</button>
+          <div class="canvas-divider"></div>
+          <button class="btn-canvas-tool" id="canvas-undo-btn" title="Rückgängig">↩️</button>
+          <button class="btn-canvas-tool" id="canvas-redo-btn" title="Wiederholen">↪️</button>
           <button class="btn-canvas-tool" id="canvas-clear-btn" title="Alles löschen">🗑️</button>
           <div class="canvas-bar-spacer"></div>
           <button class="btn-canvas-check" id="canvas-check-btn">✅ Prüfen</button>
           <button class="btn-canvas-tool" id="rechnen-new-btn" title="Neue Aufgabe">🔄</button>
         </div>
+
         <canvas id="math-canvas"></canvas>
       </div>
 
@@ -600,7 +620,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

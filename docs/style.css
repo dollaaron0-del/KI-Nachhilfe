@@ -856,11 +856,35 @@ html, body {
 
 .canvas-bar {
   flex-shrink: 0;
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 12px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
   background: var(--bg); border-bottom: 1px solid var(--border);
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
 }
-.canvas-bar-spacer { flex: 1; }
+.canvas-bar::-webkit-scrollbar { display: none; }
+.canvas-bar-style { padding: 5px 10px; gap: 5px; }
+.canvas-bar-spacer { flex: 1; min-width: 6px; }
+.canvas-divider { width: 1px; height: 28px; background: var(--border); margin: 0 2px; flex-shrink: 0; }
+
+/* Color swatches */
+.canvas-color {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--surface); border: 2px solid transparent;
+  border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent; transition: border-color .12s;
+}
+.canvas-color.active { border-color: var(--accent); }
+.color-dot { width: 18px; height: 18px; border-radius: 50%; display: block; }
+
+/* Size buttons */
+.canvas-size {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--surface); border: 2px solid transparent;
+  border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent; transition: border-color .12s;
+}
+.canvas-size.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.size-dot { border-radius: 50%; background: var(--label); display: block; flex-shrink: 0; }
 
 .btn-canvas-tool {
   min-width: 42px; min-height: 42px;
