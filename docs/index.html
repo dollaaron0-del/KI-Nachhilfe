@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=26" />
+  <link rel="stylesheet" href="style.css?v=27" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -160,6 +160,7 @@
     <button class="tab" data-mode="karten">🃏 Karten</button>
     <button class="tab tab-sep" data-mode="materialien">📋 Materialien</button>
     <button class="tab tab-sep" data-mode="fortschritt">📈 Fortschritt</button>
+    <button class="tab tab-sep" data-mode="lernen">🎓 Lernen</button>
   </nav>
 
   <div class="no-docs-banner hidden" id="no-docs-banner">
@@ -255,6 +256,7 @@
         <div class="big-icon">📝</div>
         <h2>Probeklausur</h2>
         <p>Ich erstelle eine anspruchsvolle Klausur mit Multiple-Choice, Kurzantworten und Aufsatzfragen.</p>
+        <div id="exam-rec-banner" class="exam-rec-banner hidden"></div>
         <div class="diff-row">
           <span>Schwierigkeit:</span>
           <div class="diff-group">
@@ -583,6 +585,21 @@
     </div>
   </div>
 
+  <!-- ── LERNEN (Lernpfad + Meilensteine) ── -->
+  <div id="panel-lernen" class="panel">
+    <div class="lernen-content">
+      <div id="milestone-banner" class="milestone-banner hidden"></div>
+      <div class="lernpfad-section-title" id="lernpfad-title" style="display:none">Lernpfad</div>
+      <div id="lernpfad-empty" class="cx-state">
+        <div class="big-icon">🎓</div>
+        <h2>Lernpfad</h2>
+        <p>Erkenne die Themen aus deinen Dokumenten um deinen persönlichen Lernpfad zu starten.</p>
+        <button class="btn-primary" id="lernpfad-scan-btn">Themen erkennen</button>
+      </div>
+      <div id="lernpfad-list" class="lernpfad-list hidden"></div>
+    </div>
+  </div>
+
   <!-- ── FORTSCHRITT (Dashboard + Fehler) ── -->
   <div id="panel-fortschritt" class="panel">
     <div class="subpanel-nav">
@@ -600,6 +617,25 @@
           <p>Hier erscheinen alle Fragen, bei denen du Punkte verloren hast.</p>
         </div>
         <div class="fehler-list" id="fehler-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LERNEN: Explainer Sheet ── -->
+  <div id="explainer-overlay" class="sheet-overlay hidden">
+    <div class="sheet-bg" id="explainer-bg"></div>
+    <div class="sheet explainer-sheet">
+      <div class="sheet-handle"></div>
+      <div id="explainer-loading">
+        <div style="text-align:center;padding:16px 0">
+          <div class="big-icon spin">📖</div>
+          <p>Thema wird erklärt…</p>
+        </div>
+      </div>
+      <div id="explainer-content" class="explainer-content hidden"></div>
+      <div id="explainer-actions" class="explainer-actions hidden">
+        <button class="btn-primary" id="explainer-done-btn">Verstanden ✓</button>
+        <button class="btn-secondary btn-sm" id="explainer-close-btn">Schließen</button>
       </div>
     </div>
   </div>
@@ -663,7 +699,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=26"></script>
+<script src="app.js?v=27"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

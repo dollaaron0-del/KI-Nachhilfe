@@ -213,6 +213,8 @@ let currentAufgabe  = '';
 let currentCheatText     = '';
 let currentAufgabenResult = '';
 let currentExamText      = '';
+let learnedTopics        = [];
+let currentExplainerTopic = null;
 let rechnenDiff     = 'mittel';
 let mathCtx         = null;
 let isDrawingCanvas = false;
@@ -780,6 +782,7 @@ async function openSubject(subj) {
   sessionTxt = await DB.content(subj.id);
   customPrompt = subj.custom_prompt || '';
   scannedTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => []);
+  learnedTopics = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => []);
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
@@ -1050,9 +1053,10 @@ function switchMode(mode) {
   if (mode === 'aufgaben')    initAufgaben();
   if (mode === 'rechnen')     initRechnen();
   if (mode === 'karten')      initKarten();
-  if (mode === 'exam')        loadSavedKlausuren();
+  if (mode === 'exam')        { loadSavedKlausuren(); updateExamRecBanner(); }
   if (mode === 'fortschritt') { activateSubpanel('panel-fortschritt', 'dashboard'); initDashboard(); }
   if (mode === 'materialien') { activateSubpanel('panel-materialien', 'cheat'); loadSavedCheat(); }
+  if (mode === 'lernen')      initLernen();
 }
 
 function activateSubpanel(panelId, subId) {
@@ -2985,6 +2989,215 @@ function endReview() {
 document.getElementById('karten-gen-btn')?.addEventListener('click', generateKarten);
 document.getElementById('karten-review-btn')?.addEventListener('click', startReview);
 document.getElementById('karten-done-btn')?.addEventListener('click', initKarten);
+
+// ══ LERNEN (Lernpfad + Meilensteine) ═════════════════════════════════════
+
+function calculateMilestone() {
+  const total = scannedTopics.length;
+  const topicPct = total > 0 ? learnedTopics.length / total : 0;
+  const q = sessionMeta?.quizStats?.questions || [];
+  const quizAvg = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
+  const score = topicPct * 0.7 + quizAvg * 0.3;
+  const pct = Math.round(score * 100);
+
+  const LEVELS = [
+    { min: 0,  emoji: '🌱', name: 'Einsteiger',      rec: null,           diff: null },
+    { min: 20, emoji: '📖', name: 'Grundlagen',       rec: 'Leicht',       diff: 'leicht' },
+    { min: 40, emoji: '🎓', name: 'Lernender',        rec: 'Mittel',       diff: 'mittel' },
+    { min: 60, emoji: '💪', name: 'Fortgeschritten',  rec: 'Schwer',       diff: 'schwer' },
+    { min: 80, emoji: '🏆', name: 'Prüfungsbereit',   rec: 'Prüfungsnah',  diff: 'pruefungsnah' },
+  ];
+  let level = LEVELS[0], levelIdx = 0;
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (pct >= LEVELS[i].min) { level = LEVELS[i]; levelIdx = i; }
+  }
+  return { ...level, pct, levelNum: levelIdx + 1, totalLevels: LEVELS.length };
+}
+
+function renderMilestone() {
+  const banner = document.getElementById('milestone-banner');
+  const title  = document.getElementById('lernpfad-title');
+  if (!banner) return;
+  if (!scannedTopics.length) {
+    banner.classList.add('hidden');
+    if (title) title.style.display = 'none';
+    updateExamRecBanner();
+    return;
+  }
+  const m = calculateMilestone();
+  banner.classList.remove('hidden');
+  if (title) title.style.display = '';
+  banner.innerHTML = `
+    <div class="milestone-title">${m.emoji} Meilenstein: ${m.name} (Level ${m.levelNum}/${m.totalLevels})</div>
+    <div class="milestone-bar-wrap">
+      <div class="milestone-bar-fill" style="width:${m.pct}%"></div>
+    </div>
+    <div class="milestone-pct">${m.pct}% Fortschritt · ${learnedTopics.length}/${scannedTopics.length} Themen gelernt</div>
+    <div class="milestone-rec">${m.rec
+      ? `📋 Empfohlene Klausur: ${m.rec}`
+      : 'Lerne einige Themen um Klausur-Empfehlungen freizuschalten.'
+    }</div>`;
+  updateExamRecBanner(m);
+}
+
+function updateExamRecBanner(m) {
+  const banner = document.getElementById('exam-rec-banner');
+  if (!banner) return;
+  if (!m) { m = scannedTopics.length ? calculateMilestone() : null; }
+  if (!m || !m.rec) { banner.classList.add('hidden'); return; }
+  banner.classList.remove('hidden');
+  banner.innerHTML = `${m.emoji} Empfehlung für dein Level: <strong>${m.rec}</strong>`;
+  document.querySelectorAll('.diff-btn').forEach(btn =>
+    btn.classList.toggle('recommended', btn.dataset.diff === m.diff));
+}
+
+async function initLernen() {
+  if (sessionId) {
+    try { learnedTopics = await api(`/api/subjects/${sessionId}/learned-topics`); }
+    catch { learnedTopics = []; }
+  }
+  renderMilestone();
+  loadLernpfad();
+}
+
+function loadLernpfad() {
+  const empty = document.getElementById('lernpfad-empty');
+  const list  = document.getElementById('lernpfad-list');
+  if (!empty || !list) return;
+  if (!scannedTopics.length) {
+    empty.classList.remove('hidden');
+    list.classList.add('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  list.classList.remove('hidden');
+  list.innerHTML = '';
+  const learnedSet = new Set(learnedTopics);
+  let foundCurrent = false;
+  scannedTopics.forEach(topic => {
+    const isDone    = learnedSet.has(topic);
+    const isCurrent = !isDone && !foundCurrent;
+    if (isCurrent) foundCurrent = true;
+    const item = document.createElement('div');
+    item.className = `lernpfad-item${isDone ? ' is-done' : ''}${isCurrent ? ' is-current' : ''}`;
+    item.innerHTML = `
+      <span class="lernpfad-status">${isDone ? '✅' : isCurrent ? '▶' : '○'}</span>
+      <span class="lernpfad-name">${esc(topic)}</span>
+      ${!isDone ? `<button class="lernpfad-btn">${isCurrent ? 'Lernen →' : 'Anzeigen'}</button>` : ''}`;
+    if (!isDone) {
+      item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicExplainer(topic));
+    }
+    list.appendChild(item);
+  });
+}
+
+async function openTopicExplainer(topic) {
+  currentExplainerTopic = topic;
+  const overlay  = document.getElementById('explainer-overlay');
+  const loading  = document.getElementById('explainer-loading');
+  const content  = document.getElementById('explainer-content');
+  const actions  = document.getElementById('explainer-actions');
+  overlay.classList.remove('hidden');
+  loading.classList.remove('hidden');
+  content.classList.add('hidden');
+  actions.classList.add('hidden');
+  try {
+    const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
+    const raw = await claudeLocal(
+      [{ role: 'user', content: `Erkläre das Thema "${topic}" für einen Studenten.` }],
+      [{
+        type: 'text',
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\nAntworte NUR als JSON-Objekt:\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Beispiel aus der Praxis","frage":"Eine Verständnisfrage"}`,
+      }],
+      1200
+    );
+    let data = null;
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { data = JSON.parse(m[0]); } catch { data = null; }
+    }
+    if (!data) throw new Error('Keine Erklärung erhalten');
+    loading.classList.add('hidden');
+    content.classList.remove('hidden');
+    actions.classList.remove('hidden');
+    content.innerHTML = `
+      <h3>📖 ${esc(topic)}</h3>
+      <div class="explainer-section">
+        <div class="explainer-label">Was ist das?</div>
+        <div class="explainer-body">${esc(data.was || '')}</div>
+      </div>
+      <div class="explainer-section">
+        <div class="explainer-label">Warum wichtig?</div>
+        <div class="explainer-body">${esc(data.warum || '')}</div>
+      </div>
+      <div class="explainer-section">
+        <div class="explainer-label">Konkretes Beispiel</div>
+        <div class="explainer-body">${esc(data.beispiel || '')}</div>
+      </div>
+      <div class="explainer-section">
+        <div class="explainer-label">Verständnisfrage</div>
+        <div class="explainer-question">${esc(data.frage || '')}</div>
+      </div>`;
+  } catch (e) {
+    loading.classList.add('hidden');
+    content.classList.remove('hidden');
+    actions.classList.remove('hidden');
+    content.innerHTML = `<p style="color:var(--red);padding:8px 0">Fehler: ${esc(e.message)}</p>`;
+  }
+}
+
+async function markTopicDone() {
+  const topic = currentExplainerTopic;
+  if (!topic || !sessionId) return;
+  document.getElementById('explainer-overlay').classList.add('hidden');
+  if (!learnedTopics.includes(topic)) {
+    learnedTopics.push(topic);
+    fetch(`/api/subjects/${sessionId}/learned-topics`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ topic }),
+    }).catch(() => {});
+  }
+  renderMilestone();
+  loadLernpfad();
+  toast(`✅ "${topic}" als gelernt markiert`, 'success', 2500);
+}
+
+document.getElementById('lernpfad-scan-btn')?.addEventListener('click', async () => {
+  if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
+  const btn = document.getElementById('lernpfad-scan-btn');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const raw = await claudeLocal(
+      [{ role: 'user', content: 'Welche Hauptthemen gibt es in den Unterlagen?' }],
+      sysBlocks(`Analysiere den Lernstoff und erstelle eine Liste der wichtigsten Themen.
+Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter je Thema):
+["Thema 1", "Thema 2", ...]`),
+      400
+    );
+    const m = raw.match(/\[[\s\S]*\]/);
+    if (!m) throw new Error('Keine Themen erkannt');
+    const topics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
+    if (!topics.length) throw new Error('Keine Themen gefunden');
+    scannedTopics = topics;
+    fetch(`/api/subjects/${sessionId}/topics`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ topics: scannedTopics }),
+    }).catch(() => {});
+    renderMilestone();
+    loadLernpfad();
+    toast('Lernpfad wurde erstellt!', 'success');
+  } catch (e) {
+    toast('Fehler beim Erkennen: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Themen erkennen';
+  }
+});
+
+document.getElementById('explainer-done-btn')?.addEventListener('click', markTopicDone);
+document.getElementById('explainer-close-btn')?.addEventListener('click', () =>
+  document.getElementById('explainer-overlay').classList.add('hidden'));
+document.getElementById('explainer-bg')?.addEventListener('click', () =>
+  document.getElementById('explainer-overlay').classList.add('hidden'));
 
 // ══ DASHBOARD ════════════════════════════════════════════════════════════
 

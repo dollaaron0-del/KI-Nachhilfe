@@ -454,6 +454,7 @@ app.delete('/api/subjects/:id', authMiddleware, async (req, res) => {
       pool.query('DELETE FROM scanned_topics   WHERE subject_id=$1', [req.params.id]),
       pool.query('DELETE FROM saved_aufgaben   WHERE subject_id=$1', [req.params.id]),
       pool.query('DELETE FROM saved_klausuren  WHERE subject_id=$1', [req.params.id]),
+      pool.query('DELETE FROM learned_topics   WHERE subject_id=$1', [req.params.id]),
     ]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1207,6 +1208,41 @@ app.delete('/api/subjects/:id/klausuren/:klId', authMiddleware, async (req, res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LEARNED TOPICS (Lernpfad progress per user)
+// ═══════════════════════════════════════════════════════════════════════════
+app.get('/api/subjects/:id/learned-topics', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT topic FROM learned_topics WHERE subject_id=$1 AND user_id=$2 ORDER BY learned_at ASC',
+      [req.params.id, req.user.id]
+    );
+    res.json(rows.map(r => r.topic));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/subjects/:id/learned-topics', authMiddleware, async (req, res) => {
+  const { topic } = req.body;
+  if (!topic) return res.status(400).json({ error: 'topic erforderlich' });
+  try {
+    await pool.query(
+      'INSERT INTO learned_topics(subject_id,user_id,topic) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
+      [req.params.id, req.user.id, topic]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/subjects/:id/learned-topics/:topic', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM learned_topics WHERE subject_id=$1 AND user_id=$2 AND topic=$3',
+      [req.params.id, req.user.id, decodeURIComponent(req.params.topic)]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── SPA fallback ───────────────────────────────────────────────────────────
 app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../docs/index.html'));
@@ -1247,6 +1283,13 @@ async function initTables() {
       user_id   INTEGER PRIMARY KEY,
       count     INTEGER DEFAULT 0,
       last_date TEXT
+    );
+    CREATE TABLE IF NOT EXISTS learned_topics (
+      subject_id TEXT NOT NULL,
+      user_id    INTEGER NOT NULL,
+      topic      TEXT NOT NULL,
+      learned_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (subject_id, user_id, topic)
     );
   `);
 }

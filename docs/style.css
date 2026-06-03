@@ -1267,3 +1267,113 @@ html, body {
 .toast-icon    { font-size: 18px; flex-shrink: 0; }
 @keyframes toast-in  { from { opacity:0; transform:translateY(12px) scale(.95); } to { opacity:1; transform:none; } }
 @keyframes toast-out { from { opacity:1; } to { opacity:0; transform:translateY(8px) scale(.95); } }
+
+/* ══ LERNEN TAB (v27) ══════════════════════════════════════════════════════ */
+
+/* Milestone Banner */
+.milestone-banner {
+  background: linear-gradient(135deg, var(--purple) 0%, #007aff 100%);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin: 12px 16px 0;
+  color: #fff;
+}
+.milestone-banner.hidden { display: none !important; }
+.milestone-title { font-size: 17px; font-weight: 700; margin-bottom: 6px; }
+.milestone-bar-wrap { background: rgba(255,255,255,0.3); border-radius: 6px; height: 8px; margin: 8px 0 4px; overflow: hidden; }
+.milestone-bar-fill { height: 100%; background: #fff; border-radius: 6px; transition: width .6s ease; min-width: 4px; }
+.milestone-pct  { font-size: 12px; opacity: 0.85; }
+.milestone-rec  { font-size: 14px; margin-top: 8px; font-weight: 600; }
+
+/* Exam recommendation banner */
+.exam-rec-banner {
+  background: rgba(88,86,214,0.1);
+  border: 1.5px solid var(--purple);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 14px;
+  color: var(--label);
+  margin-bottom: 12px;
+  text-align: center;
+}
+.exam-rec-banner.hidden { display: none !important; }
+.diff-btn.recommended {
+  box-shadow: 0 0 0 2.5px var(--purple);
+  background: rgba(88,86,214,0.08);
+}
+
+/* Lernpfad */
+.lernen-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  padding-bottom: 32px;
+}
+.lernpfad-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--label-secondary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 14px 16px 6px;
+}
+.lernpfad-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px;
+}
+.lernpfad-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1.5px solid transparent;
+  transition: border-color .2s, opacity .2s;
+}
+.lernpfad-item.is-current { border-color: var(--purple); }
+.lernpfad-item.is-done    { opacity: 0.55; }
+.lernpfad-status { font-size: 18px; min-width: 22px; text-align: center; }
+.lernpfad-name   { flex: 1; font-size: 15px; font-weight: 600; color: var(--label); }
+.lernpfad-btn {
+  background: var(--purple);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.lernpfad-btn:active { opacity: 0.75; }
+
+/* Explainer Sheet */
+.explainer-sheet { max-height: 85vh; overflow-y: auto; }
+.explainer-content { padding: 4px 0; }
+.explainer-content h3 { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+.explainer-section { margin-bottom: 16px; }
+.explainer-label  { font-size: 11px; font-weight: 700; color: var(--label-secondary); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px; }
+.explainer-body   { font-size: 15px; line-height: 1.65; color: var(--label); }
+.explainer-question {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--label);
+  border-left: 3px solid var(--purple);
+}
+.explainer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+}
