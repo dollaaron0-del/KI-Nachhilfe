@@ -916,7 +916,7 @@ html, body {
 #math-canvas {
   display: block; width: 100%;
   min-height: 2000px;
-  touch-action: none; /* essential for Apple Pencil pointer events */
+  touch-action: pan-y; /* fingers scroll, pencil draws via pointer events */
   cursor: crosshair; background: #fff;
 }
 [data-theme="dark"] .canvas-scroll-wrap { border-top: 1px solid #444; }

@@ -2037,6 +2037,7 @@ function setupCanvasEvents() {
   const canvas = document.getElementById('math-canvas');
 
   canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch') return; // finger → scroll, not draw
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     isDrawingCanvas = true;
@@ -2063,6 +2064,7 @@ function setupCanvasEvents() {
 
   canvas.addEventListener('pointermove', e => {
     if (!isDrawingCanvas || !mathCtx) return;
+    if (e.pointerType === 'touch') return;
     e.preventDefault();
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
