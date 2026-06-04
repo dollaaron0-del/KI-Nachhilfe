@@ -1514,16 +1514,13 @@ html, body {
 .lernen-text-wrap {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 16px;
-  overflow: hidden;
+  position: relative;
 }
 .lernen-text-answer {
-  flex: 1;
-  min-height: 0;
-  box-sizing: border-box;
+  position: absolute;
+  inset: 14px 16px;
   resize: none;
+  box-sizing: border-box;
   border: 1.5px solid var(--border);
   border-radius: 14px;
   padding: 16px 18px;
@@ -1533,6 +1530,7 @@ html, body {
   background: var(--surface);
   color: var(--text);
   outline: none;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   transition: border-color .2s;
 }
