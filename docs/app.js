@@ -3630,6 +3630,37 @@ document.getElementById('lernen-mode-text')?.addEventListener('click', () => {
   }, 80);
 });
 
+// Task area resize handle
+(function () {
+  const handle = document.getElementById('lernen-task-resize');
+  const wrap   = document.getElementById('lernen-task-bar-wrap');
+  if (!handle || !wrap) return;
+  let startY = 0, startH = 0, dragging = false;
+  handle.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    startY = e.clientY;
+    startH = wrap.offsetHeight;
+    dragging = true;
+  });
+  handle.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const h = Math.max(44, Math.min(320, startH + (e.clientY - startY)));
+    wrap.style.height = h + 'px';
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    localforage.setItem('lernen_taskH', wrap.offsetHeight).catch(() => {});
+  };
+  handle.addEventListener('pointerup',     endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+  // Restore last used height
+  localforage.getItem('lernen_taskH').then(h => {
+    if (h > 40) wrap.style.height = h + 'px';
+  }).catch(() => {});
+}());
+
 // Lernen topic view controls
 document.getElementById('lernen-back-btn')?.addEventListener('click', closeLernenTopic);
 document.getElementById('lernen-to-task-btn')?.addEventListener('click', () => lernenSwitchStep(2));

@@ -1459,9 +1459,35 @@ html, body {
   flex-shrink: 0;
   padding: 10px 14px;
   background: rgba(88,86,214,0.08);
-  border-bottom: 1px solid var(--border);
-  max-height: 80px;
+  height: 88px;         /* default — overridden by drag */
+  min-height: 44px;
+  max-height: 320px;
   overflow-y: auto;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+/* Drag handle between task area and canvas/toolbar */
+.lernen-task-resize {
+  flex-shrink: 0;
+  height: 14px;
+  background: rgba(88,86,214,0.08);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.lernen-task-resize-pip {
+  display: block;
+  width: 36px;
+  height: 3px;
+  background: var(--text2);
+  border-radius: 3px;
+  opacity: 0.35;
 }
 .lernen-task-bar {
   flex: 1;
