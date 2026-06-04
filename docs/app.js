@@ -3555,7 +3555,15 @@ document.getElementById('lernen-mode-text')?.addEventListener('click', () => {
   document.getElementById('lernen-draw-tools').style.display = 'none';
   document.getElementById('lernen-canvas-wrap').classList.add('hidden');
   document.getElementById('lernen-text-wrap').classList.remove('hidden');
-  setTimeout(() => document.getElementById('lernen-text-answer')?.focus(), 100);
+  requestAnimationFrame(() => {
+    const wrap = document.getElementById('lernen-text-wrap');
+    const ta   = document.getElementById('lernen-text-answer');
+    if (wrap && ta && wrap.clientHeight > 60) {
+      // JS fallback: override flex height in case iOS Safari still ignores flex:1
+      ta.style.height = (wrap.clientHeight - 28) + 'px';
+    }
+    ta?.focus();
+  });
 });
 
 // Lernen topic view controls

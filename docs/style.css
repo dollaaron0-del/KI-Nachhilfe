@@ -1514,13 +1514,19 @@ html, body {
 .lernen-text-wrap {
   flex: 1;
   min-height: 0;
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  box-sizing: border-box;
 }
 .lernen-text-answer {
-  position: absolute;
-  inset: 14px 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;                  /* iOS Safari: triggers flex height instead of intrinsic */
+  -webkit-overflow-scrolling: touch;
   resize: none;
   box-sizing: border-box;
+  width: 100%;
   border: 1.5px solid var(--border);
   border-radius: 14px;
   padding: 16px 18px;
@@ -1530,8 +1536,6 @@ html, body {
   background: var(--surface);
   color: var(--text);
   outline: none;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
   transition: border-color .2s;
 }
 .lernen-text-answer:focus { border-color: var(--accent); }
