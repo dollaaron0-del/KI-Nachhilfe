@@ -672,15 +672,25 @@ app.post('/api/local', authMiddleware, async (req, res) => {
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
   }
+  const callHaiku = async () => {
+    const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
+    if (system) params.system = system;
+    return callClaude(params);
+  };
   try {
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
+    // When json_mode was requested, verify Ollama actually returned JSON.
+    // If it returned free text instead, fall through to Haiku silently.
+    if (json_mode && !/\{[\s\S]*\}/.test(text)) {
+      console.warn('Ollama returned non-JSON in json_mode – falling back to Haiku');
+      const response = await callHaiku();
+      return res.json(response);
+    }
     res.json({ content: [{ text }] });
   } catch (e) {
     console.error('Ollama error:', e.message);
     try {
-      const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
-      if (system) params.system = system;
-      const response = await callClaude(params);
+      const response = await callHaiku();
       res.json(response);
     } catch (e2) {
       res.status(500).json({ error: e.message });
