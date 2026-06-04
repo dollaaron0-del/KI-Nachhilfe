@@ -3480,9 +3480,12 @@ async function lernenQaSend() {
   msgs.scrollTop = msgs.scrollHeight;
 
   try {
+    const aufgCtx = lernenTopicData?.aufgabe
+      ? `\n\nAKTUELLE ÜBUNGSAUFGABE DES STUDENTEN:\n"${lernenTopicData.aufgabe}"\nDer Student arbeitet gerade an dieser Aufgabe. Beantworte Fragen dazu direkt und konkret. Korrigiere Rechenfehler präzise, erkläre den richtigen Lösungsweg Schritt für Schritt.`
+      : '';
     const reply = await claudeLocal(
       lernenQaMsgs,
-      sysBlocks(`Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich. Erkläre Schritt für Schritt wenn nötig.`),
+      sysBlocks(`Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich.${aufgCtx}`),
       600
     );
     lernenQaMsgs.push({ role: 'assistant', content: reply });
