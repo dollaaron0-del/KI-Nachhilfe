@@ -3040,19 +3040,41 @@ function renderMilestone() {
   banner.classList.remove('hidden');
   if (title) title.style.display = '';
 
+  const autoIdx  = m.levelNum - 1;
+  const selIdx   = selectedDiffIdx;
+
   const stepsHtml = MILESTONE_LEVELS.map((l, i) => {
-    const isActive = i === m.levelNum - 1;
-    const isPast   = i < m.levelNum - 1;
-    return `<div class="ms-step${isActive ? ' ms-active' : ''}${isPast ? ' ms-past' : ''}">
-      <div class="ms-dot">${isPast ? '✓' : l.emoji}</div>
+    const isManual = selIdx !== null;
+    const isActive = isManual ? i === selIdx : i === autoIdx;
+    const isPast   = isManual ? i < selIdx   : i < autoIdx;
+    const cls = ['ms-step', isActive ? 'ms-active' : '', isPast ? 'ms-past' : '', isManual && isActive ? 'ms-manual' : '']
+                  .filter(Boolean).join(' ');
+    return `<div class="${cls}" data-diffidx="${i}">
+      <div class="ms-dot">${isPast && !isManual ? '✓' : l.emoji}</div>
       <div class="ms-label">${l.name}</div>
     </div>${i < MILESTONE_LEVELS.length - 1 ? '<div class="ms-line"></div>' : ''}`;
   }).join('');
 
+  const infoTxt = selIdx !== null
+    ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · <span class="ms-reset-btn">Zurücksetzen</span>`
+    : `${m.pct}% · ${learnedTopics.length}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
+
   banner.innerHTML = `
     <div class="ms-steps">${stepsHtml}</div>
     <div class="ms-bar-wrap"><div class="ms-bar-fill" style="width:${m.pct}%"></div></div>
-    <div class="ms-info">${m.pct}% · ${learnedTopics.length}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}</div>`;
+    <div class="ms-info">${infoTxt}</div>`;
+
+  banner.querySelectorAll('.ms-step').forEach(el => {
+    el.addEventListener('click', () => {
+      selectedDiffIdx = +el.dataset.diffidx === selectedDiffIdx ? null : +el.dataset.diffidx;
+      renderMilestone();
+    });
+  });
+  banner.querySelector('.ms-reset-btn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    selectedDiffIdx = null;
+    renderMilestone();
+  });
   updateExamRecBanner(m);
 }
 
@@ -3116,6 +3138,7 @@ let lernenPenColor = '#1c1c1e';
 let lernenTool     = 'pen';
 let lernenTopicData = null;
 let lernenQaMsgs   = [];
+let selectedDiffIdx = null; // null = auto from progress, 0-4 = manual override
 
 function openTopicView(topic) {
   currentExplainerTopic = topic;
@@ -3154,13 +3177,23 @@ function lernenSwitchStep(step) {
 
 async function loadTopicContent(topic) {
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
+  const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+  const diffInstr = (() => {
+    switch (effLevel.diff) {
+      case 'leicht':       return 'Niveau: LEICHT. Erkläre sehr einfach, nutze alltagsnahe Beispiele, kleine Zahlen. Aufgabe: einfach, ein Rechenschritt.';
+      case 'mittel':       return 'Niveau: MITTEL. Erkläre klar mit Fachbegriff. Aufgabe: 2-3 Rechenschritte, realistisches Szenario.';
+      case 'schwer':       return 'Niveau: SCHWER. Gehe in die Tiefe, verbinde Konzepte. Aufgabe: komplex, mehrere Teilschritte.';
+      case 'pruefungsnah': return 'Niveau: PRÜFUNGSNAH. Verwende Prüfungssprache, vollständige Lösungswege. Aufgabe: anspruchsvoll wie in einer echten Klausur.';
+      default:             return 'Niveau: EINSTEIGER. Erkläre von Grund auf, kein Vorwissen voraussetzen. Aufgabe: sehr einfach.';
+    }
+  })();
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
       [{ role: 'user', content: `Erkläre das Thema "${topic}" für einen Studenten.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Praxisbeispiel (mit Zahlen)","rechnung":"Schritt-für-Schritt Rechenbeispiel mit konkreten Zahlen (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung.","aufgabe":"Eine konkrete Übungsaufgabe mit Zahlen die der Student jetzt selbst lösen muss"}`,
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Praxisbeispiel (mit Zahlen)","rechnung":"Schritt-für-Schritt Rechenbeispiel mit konkreten Zahlen (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung.","aufgabe":"Eine konkrete Übungsaufgabe mit Zahlen die der Student jetzt selbst lösen muss"}`,
       }],
       1800
     );

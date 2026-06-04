@@ -1500,7 +1500,10 @@ html, body {
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
+.ms-step:hover .ms-dot { border-color: var(--accent); opacity: 0.85; }
 .ms-dot {
   width: 32px; height: 32px;
   border-radius: 50%;
@@ -1520,6 +1523,11 @@ html, body {
   background: rgba(88,86,214,0.12);
   border-color: var(--accent);
   color: var(--accent);
+}
+.ms-step.ms-manual .ms-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 .ms-label {
   font-size: 9px;
@@ -1552,6 +1560,11 @@ html, body {
   font-size: 11px;
   color: var(--text-secondary);
   text-align: center;
+}
+.ms-reset-btn {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 /* Wiederholen button for done topics */
