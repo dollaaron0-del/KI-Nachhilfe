@@ -3517,8 +3517,8 @@ Bewerte SEHR STRENG:
   "score": 0,
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
-  "loesung": "Vollständige Musterlösung als Fließtext – erkläre das korrekte Konzept ausführlich und klar",
-  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein"
+  "loesung": "Vollständige Musterlösung. Bei Teilaufgaben (a/b/c oder 1/2/3) bekommt JEDE Teilaufgabe einen eigenen Absatz, getrennt durch \\n\\n. Beginne jeden Absatz mit der Teilaufgaben-Bezeichnung fett: **a)** ...",
+  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."
 }
 score: 2=vollständig korrekt, 1=Ansatz/Teile richtig aber unvollständig oder Fehler, 0=falsch oder zu wenig
 understood: true NUR wenn score>=2 UND Student zeigt echtes Verständnis des Kernkonzepts.
