@@ -3481,15 +3481,26 @@ function onLernenUp(e) {
 
 async function checkLernenSolution() {
   if (!lernenTopicData) return;
-  const checkBtn = document.getElementById('lernen-check-btn');
-  checkBtn.disabled = true; checkBtn.textContent = '…';
+  const checkBtn  = document.getElementById('lernen-check-btn');
+  const resultBar = document.getElementById('lernen-result-bar');
+  checkBtn.disabled = true;
+  checkBtn.innerHTML = '<span class="lernen-check-spin">⏳</span> Prüfen…';
+  if (resultBar) {
+    resultBar.className = 'lernen-result-bar lernen-result-bar--loading';
+    resultBar.innerHTML =
+      '<span class="lernen-checking-row">' +
+        '<span class="lernen-check-dots"><span></span><span></span><span></span></span>' +
+        'KI prüft deine Antwort…' +
+      '</span>';
+  }
   try {
     let ev;
     if (lernenAnswerMode === 'text') {
       const answerText = document.getElementById('lernen-text-answer').value.trim();
       if (!answerText) {
         toast('Bitte zuerst eine Antwort eingeben.', 'warn', 3000);
-        checkBtn.disabled = false; checkBtn.textContent = '✅ Prüfen';
+        checkBtn.disabled = false; checkBtn.innerHTML = '✅ Prüfen';
+        if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
         return;
       }
       const raw = await claudeLocal(
@@ -3528,8 +3539,11 @@ async function checkLernenSolution() {
         (ev.loesung ? `<span class="lernen-result-solution">📌 <strong>Musterlösung:</strong> ${esc(ev.loesung)}</span>` : '');
     }
     if (ok) document.getElementById('lernen-done-btn').classList.remove('hidden');
-  } catch (e) { toast('Fehler beim Prüfen: ' + e.message, 'error'); }
-  checkBtn.disabled = false; checkBtn.textContent = '✅ Prüfen';
+  } catch (e) {
+    toast('Fehler beim Prüfen: ' + e.message, 'error');
+    if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
+  }
+  checkBtn.disabled = false; checkBtn.innerHTML = '✅ Prüfen';
 }
 
 async function lernenQaSend() {
