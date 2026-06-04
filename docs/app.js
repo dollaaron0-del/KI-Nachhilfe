@@ -3200,11 +3200,26 @@ function lernenCacheKey(topic) {
 
 function getDiffInstr(effLevel) {
   switch (effLevel.diff) {
-    case 'leicht':       return 'Niveau: LEICHT. Erkläre sehr einfach, nutze alltagsnahe Beispiele, kleine Zahlen. Aufgabe: einfach, ein Rechenschritt.';
-    case 'mittel':       return 'Niveau: MITTEL. Erkläre klar mit Fachbegriff. Aufgabe: 2-3 Rechenschritte, realistisches Szenario.';
-    case 'schwer':       return 'Niveau: SCHWER. Gehe in die Tiefe, verbinde Konzepte. Aufgabe: komplex, mehrere Teilschritte.';
-    case 'pruefungsnah': return 'Niveau: PRÜFUNGSNAH. Verwende Prüfungssprache, vollständige Lösungswege. Aufgabe: anspruchsvoll wie in einer echten Klausur.';
-    default:             return 'Niveau: EINSTEIGER. Erkläre von Grund auf, kein Vorwissen voraussetzen. Aufgabe: sehr einfach.';
+    case 'leicht':
+      return `Niveau: LEICHT (Grundlagen).
+ERKLÄRUNG: Erkläre das Konzept von Grund auf. Kein Fachwissen voraussetzen. Nutze alltagsnahe Analogien und sehr einfache Zahlen. "Was ist das?" = intuitive Definition mit Alltagsbeispiel. "Warum wichtig?" = praktischer Nutzen in einfachen Worten. "Beispiel" = konkretes Beispiel mit kleinen, runden Zahlen. Rechenbeispiel: falls vorhanden, nur ein einziger Schritt.
+AUFGABE: Eine sehr einfache Aufgabe, ein Rechenschritt, kleine Zahlen.`;
+    case 'mittel':
+      return `Niveau: MITTEL (Lernender).
+ERKLÄRUNG: Erkläre das Konzept klar mit korrekten Fachbegriffen. "Was ist das?" = präzise Definition + Fachbegriff erläutern. "Warum wichtig?" = Relevanz im Fachkontext, nicht nur Alltag. "Beispiel" = realistisches Szenario mit mehreren Variablen. Rechenbeispiel: 2-3 Rechenschritte mit Zwischenergebnissen.
+AUFGABE: Mittelschwere Aufgabe mit 2-3 Rechenschritten, realistisches Szenario.`;
+    case 'schwer':
+      return `Niveau: SCHWER (Fortgeschritten).
+ERKLÄRUNG: Gehe in die Tiefe. "Was ist das?" = vollständige fachliche Definition inkl. Randfälle und Einschränkungen. "Warum wichtig?" = Verbindung zu anderen Konzepten, theoretischer Hintergrund. "Beispiel" = komplexes Praxisbeispiel mit mehreren Einflussgrößen. Rechenbeispiel: mehrstufig, zeige alle Zwischenschritte und erkläre WARUM jeder Schritt nötig ist.
+AUFGABE: Komplexe Aufgabe mit mehreren Teilschritten, die mehrere Konzepte verknüpft.`;
+    case 'pruefungsnah':
+      return `Niveau: PRÜFUNGSNAH (Experte).
+ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: vollständig ausformuliert mit Formelangaben, Einheiten, Interpretation des Ergebnisses.
+AUFGABE: Klausuraufgabe mit vollständigem erwarteten Lösungsweg, Prüfungssprache.`;
+    default:
+      return `Niveau: EINSTEIGER.
+ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn unbedingt nötig, dann maximal ein Schritt.
+AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.`;
   }
 }
 
@@ -3244,10 +3259,10 @@ async function loadTopicContent(topic) {
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
-      [{ role: 'user', content: `Erkläre das Thema "${topic}" für einen Studenten.` }],
+      [{ role: 'user', content: `Erkläre das Thema "${topic}" auf dem vorgegebenen Niveau.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Was ist das? (2-3 Sätze)","warum":"Warum wichtig? (1-2 Sätze)","beispiel":"Konkretes Praxisbeispiel (mit Zahlen)","rechnung":"Schritt-für-Schritt Rechenbeispiel mit konkreten Zahlen (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung.","aufgabe":"Eine konkrete Übungsaufgabe mit Zahlen die der Student jetzt selbst lösen muss"}`,
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG: Das Niveau beeinflusst ALLE Felder – nicht nur die Aufgabe. "was", "warum", "beispiel" und "rechnung" müssen in Tiefe, Sprache und Komplexität dem Niveau entsprechen.\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Definition entsprechend Niveau","warum":"Relevanz entsprechend Niveau","beispiel":"Beispiel entsprechend Niveau","rechnung":"Rechenbeispiel entsprechend Niveau (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung passt.","aufgabe":"Übungsaufgabe entsprechend Niveau"}`,
       }],
       1800
     );
@@ -3283,7 +3298,7 @@ async function regenLernenTask() {
       [{ role: 'user', content: `Generiere eine neue Übungsaufgabe zum Thema "${topic}".` }],
       [{
         type: 'text',
-        text: `Generiere eine NEUE, andere Übungsaufgabe zum Thema "${topic}".\n${ctx ? `Kontext: ${ctx}\n` : ''}${diffInstr}\n\nAntworte NUR als JSON:\n{"aufgabe":"Eine neue konkrete Übungsaufgabe mit Zahlen"}`,
+        text: `Generiere eine NEUE, andere Übungsaufgabe zum Thema "${topic}".\n${ctx ? `Kontext: ${ctx}\n` : ''}${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\n\nAntworte NUR als JSON:\n{"aufgabe":"Eine neue Übungsaufgabe passend zum Niveau"}`,
       }],
       600
     );
