@@ -1616,6 +1616,8 @@ html, body {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .lernen-tool, .lernen-color {
   width: 34px; height: 34px;
@@ -1624,6 +1626,8 @@ html, body {
   background: transparent; cursor: pointer;
   color: var(--text); font-size: 15px; flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .lernen-tool.active { background: rgba(88,86,214,0.12); color: var(--accent); }
 .lernen-color { padding: 4px; }
