@@ -1353,12 +1353,10 @@ html, body {
 .explainer-content h3 { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
 .explainer-section { margin-bottom: 20px; }
 .explainer-section--deep {
-  background: rgba(88,86,214,0.05);
+  background: rgba(88,86,214,0.06);
   border-left: 3px solid var(--accent);
-  border-radius: 0 10px 10px 0;
+  border-radius: 8px;
   padding: 10px 14px;
-  margin-left: -14px;
-  margin-right: -14px;
 }
 .explainer-label  { font-size: 11px; font-weight: 700; color: var(--label-secondary); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
 .explainer-body   { font-size: 15px; line-height: 1.75; color: var(--label); }

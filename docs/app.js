@@ -521,6 +521,7 @@ document.getElementById('btn-dark-toggle')?.addEventListener('click', async () =
 // ── Screens ────────────────────────────────────────────────────────────────
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.sheet-overlay').forEach(o => o.classList.add('hidden'));
   const el = document.getElementById(id);
   if (el) el.classList.add('active');
   else document.querySelector('.screen')?.classList.add('active');
