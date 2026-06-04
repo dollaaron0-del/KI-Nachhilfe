@@ -657,14 +657,23 @@ async function callOllama(messages, maxTokens = 2000, jsonMode = false) {
     stream: false, options: { num_ctx: 8192 },
   };
   if (jsonMode) body.response_format = { type: 'json_object' };
-  const r = await fetch(OLLAMA_URL, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`Ollama error ${r.status}`);
-  const data = await r.json();
-  return data.choices[0].message.content;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 45_000);
+  try {
+    const r = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    if (!r.ok) throw new Error(`Ollama error ${r.status}`);
+    const data = await r.json();
+    const text = data.choices?.[0]?.message?.content;
+    if (typeof text !== 'string') throw new Error('Ollama returned unexpected response shape');
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 app.post('/api/local', authMiddleware, async (req, res) => {
@@ -1349,6 +1358,11 @@ async function initTables() {
   `);
 }
 initTables().catch(e => console.error('Table init error:', e.message));
+
+// Prevent unhandled promise rejections from crashing the process
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+});
 
 // ── Start ──────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
