@@ -720,7 +720,8 @@ app.post('/api/local', authMiddleware, async (req, res) => {
       const response = await callHaiku();
       res.json(response);
     } catch (e2) {
-      res.status(500).json({ error: e.message });
+      console.error('Haiku fallback also failed:', e2.message);
+      res.status(500).json({ error: `Ollama: ${e.message} | Haiku: ${e2.message}` });
     }
   }
 });
