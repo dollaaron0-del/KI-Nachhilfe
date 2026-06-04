@@ -3117,6 +3117,10 @@ function updateExamRecBanner(m) {
 }
 
 function initLernen() {
+  // If the topic view is open from a previous visit, close it back to the list
+  if (document.getElementById('lernen-topic-view').style.display !== 'none') {
+    closeLernenTopic();
+  }
   renderMilestone();
   loadLernpfad();
   if (sessionId) {
@@ -3177,6 +3181,7 @@ function openTopicView(topic) {
   lernenQaMsgs    = [];
   lernenCtx       = null;
   lernenActivePtr = null;
+  isDrawingLernen = false;
   // Switch views
   document.getElementById('lernen-pfad-view').classList.add('hidden');
   document.getElementById('lernen-topic-view').style.display = 'flex';
@@ -3199,6 +3204,7 @@ function openTopicView(topic) {
   document.getElementById('lernen-text-wrap').classList.add('hidden');
   document.getElementById('lernen-mode-canvas').classList.add('active');
   document.getElementById('lernen-mode-text').classList.remove('active');
+  document.getElementById('lernen-regen-btn').classList.add('hidden');
   // Reset step 1
   document.getElementById('lernen-erkl-loading').style.display = '';
   document.getElementById('lernen-erkl-body').classList.add('hidden');
@@ -3293,6 +3299,8 @@ function renderTopicContent(topic, data) {
 async function loadTopicContent(topic) {
   // Serve from cache if available
   const cached = await localforage.getItem(lernenCacheKey(topic)).catch(() => null);
+  // Stale guard: user may have navigated to a different topic while awaiting cache/AI
+  if (currentExplainerTopic !== topic) return;
   if (cached) {
     lernenTopicData = cached;
     renderTopicContent(topic, cached);
@@ -3311,6 +3319,8 @@ async function loadTopicContent(topic) {
       }],
       1800
     );
+    // Stale guard: discard if user opened a different topic while AI was running
+    if (currentExplainerTopic !== topic) { stopProg(); return; }
     let data = null;
     const m = raw.match(/\{[\s\S]*\}/);
     if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
@@ -3320,6 +3330,8 @@ async function loadTopicContent(topic) {
     stopProg();
     renderTopicContent(topic, data);
   } catch (e) {
+    // Stale guard: don't show error for a topic the user already navigated away from
+    if (currentExplainerTopic !== topic) { stopProg(); return; }
     stopProg();
     document.getElementById('lernen-erkl-loading').style.display = 'none';
     const body = document.getElementById('lernen-erkl-body');
@@ -3356,8 +3368,9 @@ async function regenLernenTask() {
       localforage.setItem(lernenCacheKey(topic), lernenTopicData).catch(() => {});
       // Clear canvas for fresh start
       if (lernenCtx) {
+        const wrap = document.getElementById('lernen-canvas-wrap');
         lernenCtx.fillStyle = '#ffffff';
-        lernenCtx.fillRect(0, 0, lernenCtx.canvas.width, lernenCtx.canvas.height);
+        lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
       }
       document.getElementById('lernen-done-btn').classList.add('hidden');
       const rb = document.getElementById('lernen-result-bar');
@@ -3435,7 +3448,7 @@ function onLernenMove(e) {
 }
 
 function onLernenUp(e) {
-  if (e.pointerId === lernenActivePtr) {
+  if (e.type === 'pointercancel' || e.pointerId === lernenActivePtr) {
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
@@ -3613,8 +3626,9 @@ document.getElementById('lernen-done-btn')?.addEventListener('click', markTopicD
 document.getElementById('lernen-regen-btn')?.addEventListener('click', regenLernenTask);
 document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   if (!lernenCtx) return;
-  const c = document.getElementById('lernen-canvas');
-  lernenCtx.fillStyle = '#fff'; lernenCtx.fillRect(0, 0, c.width, c.height);
+  const wrap = document.getElementById('lernen-canvas-wrap');
+  lernenCtx.fillStyle = '#fff';
+  lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
   if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);
