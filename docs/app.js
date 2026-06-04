@@ -3278,7 +3278,7 @@ function renderTopicContent(topic, data) {
   body.classList.remove('hidden');
   document.getElementById('lernen-step1-footer').classList.remove('hidden');
   if (data.aufgabe && data.aufgabe.trim()) {
-    document.getElementById('lernen-task-bar').textContent = data.aufgabe;
+    document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(data.aufgabe));
     document.getElementById('lernen-tab-aufgabe').disabled = false;
     document.getElementById('lernen-regen-btn').classList.remove('hidden');
   } else {
@@ -3375,7 +3375,7 @@ async function regenLernenTask() {
     if (m) { try { newAufgabe = JSON.parse(m[0]).aufgabe; } catch {} }
     if (newAufgabe && newAufgabe.trim()) {
       lernenTopicData.aufgabe = newAufgabe;
-      document.getElementById('lernen-task-bar').textContent = newAufgabe;
+      document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(newAufgabe));
       localforage.setItem(lernenCacheKey(topic), lernenTopicData).catch(() => {});
       // Clear canvas for fresh start
       if (lernenCtx) {
@@ -3618,15 +3618,7 @@ document.getElementById('lernen-mode-text')?.addEventListener('click', () => {
   document.getElementById('lernen-draw-tools').style.display = 'none';
   document.getElementById('lernen-canvas-wrap').classList.add('hidden');
   document.getElementById('lernen-text-wrap').classList.remove('hidden');
-  requestAnimationFrame(() => {
-    const wrap = document.getElementById('lernen-text-wrap');
-    const ta   = document.getElementById('lernen-text-answer');
-    if (wrap && ta && wrap.clientHeight > 60) {
-      // JS fallback: override flex height in case iOS Safari still ignores flex:1
-      ta.style.height = (wrap.clientHeight - 28) + 'px';
-    }
-    ta?.focus();
-  });
+  setTimeout(() => document.getElementById('lernen-text-answer')?.focus(), 50);
 });
 
 // Lernen topic view controls
