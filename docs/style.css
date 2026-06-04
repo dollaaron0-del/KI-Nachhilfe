@@ -1484,6 +1484,57 @@ html, body {
 }
 .lernen-regen-btn:active { opacity: 0.7; }
 .lernen-regen-btn:disabled { opacity: 0.4; cursor: default; }
+/* Answer mode toggle (✏️ / ⌨️) */
+.lernen-mode-toggle {
+  display: flex;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.lmt-btn {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity .15s, background .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.lmt-btn.active {
+  background: var(--surface);
+  opacity: 1;
+  box-shadow: 0 1px 4px rgba(0,0,0,.12);
+}
+
+/* Text answer area */
+.lernen-text-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  overflow: hidden;
+}
+.lernen-text-answer {
+  flex: 1;
+  resize: none;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-size: 16px;
+  line-height: 1.6;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+  -webkit-overflow-scrolling: touch;
+  transition: border-color .2s;
+}
+.lernen-text-answer:focus { border-color: var(--accent); }
+
 .lernen-canvas-bar {
   display: flex;
   align-items: center;

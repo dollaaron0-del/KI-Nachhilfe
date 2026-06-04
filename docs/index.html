@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=45" />
+  <link rel="stylesheet" href="style.css?v=46" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -656,27 +656,40 @@
         </div>
         <!-- Canvas toolbar -->
         <div class="lernen-canvas-bar">
-          <button class="lernen-tool active" data-ltool="pen" title="Stift">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-          </button>
-          <button class="lernen-tool" data-ltool="eraser" title="Radierer">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
-          </button>
+          <!-- Answer mode toggle -->
+          <div class="lernen-mode-toggle">
+            <button class="lmt-btn active" id="lernen-mode-canvas" title="Zeichnen">✏️</button>
+            <button class="lmt-btn" id="lernen-mode-text" title="Tippen">⌨️</button>
+          </div>
           <div class="canvas-divider"></div>
-          <button class="lernen-color active" data-lcolor="#1c1c1e"><span class="color-dot" style="background:#1c1c1e"></span></button>
-          <button class="lernen-color" data-lcolor="#007aff"><span class="color-dot" style="background:#007aff"></span></button>
-          <button class="lernen-color" data-lcolor="#ff3b30"><span class="color-dot" style="background:#ff3b30"></span></button>
-          <button class="lernen-color" data-lcolor="#34c759"><span class="color-dot" style="background:#34c759"></span></button>
-          <div class="canvas-divider"></div>
-          <button class="lernen-tool" id="lernen-clear-btn" title="Löschen">🗑</button>
+          <!-- Drawing tools (hidden in text mode) -->
+          <div id="lernen-draw-tools" style="display:contents">
+            <button class="lernen-tool active" data-ltool="pen" title="Stift">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </button>
+            <button class="lernen-tool" data-ltool="eraser" title="Radierer">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>
+            </button>
+            <div class="canvas-divider"></div>
+            <button class="lernen-color active" data-lcolor="#1c1c1e"><span class="color-dot" style="background:#1c1c1e"></span></button>
+            <button class="lernen-color" data-lcolor="#007aff"><span class="color-dot" style="background:#007aff"></span></button>
+            <button class="lernen-color" data-lcolor="#ff3b30"><span class="color-dot" style="background:#ff3b30"></span></button>
+            <button class="lernen-color" data-lcolor="#34c759"><span class="color-dot" style="background:#34c759"></span></button>
+            <div class="canvas-divider"></div>
+            <button class="lernen-tool" id="lernen-clear-btn" title="Löschen">🗑</button>
+          </div>
           <div style="flex:1"></div>
           <button class="btn-icon" id="lernen-qa-btn" title="Frage stellen">💬</button>
           <button class="btn-secondary btn-sm" id="lernen-check-btn">✅ Prüfen</button>
           <button class="btn-primary btn-sm hidden" id="lernen-done-btn">🏆 Abschließen</button>
         </div>
-        <!-- Drawing canvas -->
+        <!-- Drawing canvas (canvas mode) -->
         <div class="lernen-canvas-wrap" id="lernen-canvas-wrap">
           <canvas id="lernen-canvas"></canvas>
+        </div>
+        <!-- Text input (text mode) -->
+        <div id="lernen-text-wrap" class="hidden">
+          <textarea id="lernen-text-answer" class="lernen-text-answer" placeholder="Schreib deine Antwort hier…"></textarea>
         </div>
       </div>
     </div>
@@ -756,7 +769,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=45"></script>
+<script src="app.js?v=46"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

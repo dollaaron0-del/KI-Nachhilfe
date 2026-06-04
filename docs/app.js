@@ -3164,9 +3164,10 @@ let lernenCtx      = null;
 let isDrawingLernen = false;
 let lernenLastX    = 0, lernenLastY = 0;
 let lernenPenColor = '#1c1c1e';
-let lernenTool     = 'pen';
+let lernenTool      = 'pen';
 let lernenTopicData = null;
-let lernenQaMsgs   = [];
+let lernenQaMsgs    = [];
+let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
 let selectedDiffIdx = null; // null = auto from progress, 0-4 = manual override
 
 function openTopicView(topic) {
@@ -3186,6 +3187,12 @@ function openTopicView(topic) {
     badge.className = `lernen-diff-badge lernen-diff-badge--${l.diff || 'einsteiger'}`;
   }
   document.getElementById('lernen-qa-msgs').innerHTML = '';
+  lernenAnswerMode = 'canvas';
+  document.getElementById('lernen-draw-tools').style.display = 'contents';
+  document.getElementById('lernen-canvas-wrap').classList.remove('hidden');
+  document.getElementById('lernen-text-wrap').classList.add('hidden');
+  document.getElementById('lernen-mode-canvas').classList.add('active');
+  document.getElementById('lernen-mode-text').classList.remove('active');
   // Reset step 1
   document.getElementById('lernen-erkl-loading').style.display = '';
   document.getElementById('lernen-erkl-body').classList.add('hidden');
@@ -3394,26 +3401,44 @@ function onLernenMove(e) {
 function onLernenUp() { isDrawingLernen = false; }
 
 async function checkLernenSolution() {
-  if (!lernenCtx || !lernenTopicData) return;
+  if (!lernenTopicData) return;
   const checkBtn = document.getElementById('lernen-check-btn');
   checkBtn.disabled = true; checkBtn.textContent = '…';
   try {
-    const canvas = document.getElementById('lernen-canvas');
-    const flat = document.createElement('canvas');
-    flat.width = canvas.width; flat.height = canvas.height;
-    const fc = flat.getContext('2d');
-    fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
-    fc.drawImage(canvas, 0, 0);
-    const base64 = flat.toDataURL('image/png').split(',')[1];
-
-    const result = await claudeLocalVision(
-      base64,
-      `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewertet die handschriftliche Lösung des Studenten. Antworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/fast richtig, 1=Ansatz gut aber Lücken, 0=falsch oder zu wenig`,
-      sysBlocks()
-    );
-    const mv = result.match(/\{[\s\S]*\}/);
-    if (!mv) throw new Error('Keine Auswertung');
-    const ev = JSON.parse(mv[0]);
+    let ev;
+    if (lernenAnswerMode === 'text') {
+      const answerText = document.getElementById('lernen-text-answer').value.trim();
+      if (!answerText) {
+        toast('Bitte zuerst eine Antwort eingeben.', 'warn', 3000);
+        checkBtn.disabled = false; checkBtn.textContent = '✅ Prüfen';
+        return;
+      }
+      const raw = await claudeLocal(
+        [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
+        [{ type: 'text', text: `Bewerte die Antwort des Studenten auf die gestellte Aufgabe.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/vollständig, 1=Ansatz richtig aber Lücken, 0=falsch oder zu wenig` }],
+        600
+      );
+      const mv = raw.match(/\{[\s\S]*\}/);
+      if (!mv) throw new Error('Keine Auswertung');
+      ev = JSON.parse(mv[0]);
+    } else {
+      if (!lernenCtx) return;
+      const canvas = document.getElementById('lernen-canvas');
+      const flat = document.createElement('canvas');
+      flat.width = canvas.width; flat.height = canvas.height;
+      const fc = flat.getContext('2d');
+      fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
+      fc.drawImage(canvas, 0, 0);
+      const base64 = flat.toDataURL('image/png').split(',')[1];
+      const result = await claudeLocalVision(
+        base64,
+        `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewertet die handschriftliche Lösung des Studenten. Antworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/fast richtig, 1=Ansatz gut aber Lücken, 0=falsch oder zu wenig`,
+        sysBlocks()
+      );
+      const mv = result.match(/\{[\s\S]*\}/);
+      if (!mv) throw new Error('Keine Auswertung');
+      ev = JSON.parse(mv[0]);
+    }
     const ok = ev.score >= 1;
     toast((ok ? '✅ ' : '❌ ') + (ev.feedback || ''), ok ? 'success' : 'warn', 5000);
     if (ev.loesung) toast('Musterlösung: ' + ev.loesung, 'info', 6000);
@@ -3499,6 +3524,26 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
   } finally {
     btn.disabled = false; btn.textContent = 'Themen erkennen';
   }
+});
+
+// Answer mode toggle (canvas ↔ text)
+document.getElementById('lernen-mode-canvas')?.addEventListener('click', () => {
+  lernenAnswerMode = 'canvas';
+  document.getElementById('lernen-mode-canvas').classList.add('active');
+  document.getElementById('lernen-mode-text').classList.remove('active');
+  document.getElementById('lernen-draw-tools').style.display = 'contents';
+  document.getElementById('lernen-canvas-wrap').classList.remove('hidden');
+  document.getElementById('lernen-text-wrap').classList.add('hidden');
+  requestAnimationFrame(initLernenCanvas);
+});
+document.getElementById('lernen-mode-text')?.addEventListener('click', () => {
+  lernenAnswerMode = 'text';
+  document.getElementById('lernen-mode-text').classList.add('active');
+  document.getElementById('lernen-mode-canvas').classList.remove('active');
+  document.getElementById('lernen-draw-tools').style.display = 'none';
+  document.getElementById('lernen-canvas-wrap').classList.add('hidden');
+  document.getElementById('lernen-text-wrap').classList.remove('hidden');
+  setTimeout(() => document.getElementById('lernen-text-answer')?.focus(), 100);
 });
 
 // Lernen topic view controls
