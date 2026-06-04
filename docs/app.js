@@ -21,18 +21,25 @@ function startProgress(barId, pctId, durationMs = 20000) {
   const pct = document.getElementById(pctId);
   if (!bar || !pct) return () => {};
   let current = 0;
+  // Disable CSS transition during increments so each tick shows immediately
+  bar.style.transition = 'none';
   bar.style.width = '0%'; pct.textContent = '0%';
-  // Easing: fast at start, slows near 90%
-  const interval = setInterval(() => {
-    const remaining = 90 - current;
-    current += remaining * (100 / durationMs) * 0.25;
+  // Decay factor: reaches ~80% at durationMs, ~60% at half of durationMs
+  const TICK = 200;
+  const ticks = Math.max(durationMs / TICK, 1);
+  const f = 1 - Math.pow(1 / 9, 1 / ticks);
+  const timer = setInterval(() => {
+    current += (90 - current) * f;
     if (current > 89) current = 89;
     bar.style.width = current.toFixed(1) + '%';
     pct.textContent = Math.round(current) + '%';
-  }, 250);
+  }, TICK);
   return () => {
-    clearInterval(interval);
+    clearInterval(timer);
+    // Smooth slide to 100% instead of hard jump
+    bar.style.transition = 'width 0.5s ease-out';
     bar.style.width = '100%'; pct.textContent = '100%';
+    setTimeout(() => { bar.style.transition = 'none'; }, 600);
   };
 }
 
