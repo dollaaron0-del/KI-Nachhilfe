@@ -3420,6 +3420,19 @@ function initLernenCanvas() {
   canvas.addEventListener('pointercancel', onLernenUp);
 }
 
+// Convert a pointer event to canvas context coordinates.
+// Accounts for any mismatch between the canvas buffer size and its CSS display
+// size (e.g. when the task-bar is resized after the canvas was initialised).
+function lernenPos(e, canvas, r) {
+  const dpr = window.devicePixelRatio || 1;
+  const sx = canvas.width  / (r.width  * dpr);
+  const sy = canvas.height / (r.height * dpr);
+  return {
+    x: (e.clientX - r.left) * sx,
+    y: (e.clientY - r.top)  * sy,
+  };
+}
+
 function onLernenDown(e) {
   e.preventDefault();
   // Palm rejection: ignore secondary pointers once a stroke is active
@@ -3427,8 +3440,9 @@ function onLernenDown(e) {
   lernenActivePtr = e.pointerId;
   e.target.setPointerCapture(e.pointerId); // keep events even if pointer leaves canvas
   const r = e.target.getBoundingClientRect();
-  lernenLastX = e.clientX - r.left;
-  lernenLastY = e.clientY - r.top;
+  const p = lernenPos(e, e.target, r);
+  lernenLastX = p.x;
+  lernenLastY = p.y;
   isDrawingLernen = true;
 }
 
@@ -3436,12 +3450,12 @@ function onLernenMove(e) {
   if (!isDrawingLernen || !lernenCtx) return;
   if (e.pointerId !== lernenActivePtr) return; // palm rejection
   e.preventDefault();
-  const r    = e.target.getBoundingClientRect();
+  const canvas = e.target;
+  const r      = canvas.getBoundingClientRect();
   // getCoalescedEvents captures all intermediate points during fast strokes
   const pts  = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
   for (const pt of pts) {
-    const x = pt.clientX - r.left;
-    const y = pt.clientY - r.top;
+    const { x, y } = lernenPos(pt, canvas, r);
     lernenCtx.beginPath();
     lernenCtx.moveTo(lernenLastX, lernenLastY);
     lernenCtx.lineTo(x, y);
