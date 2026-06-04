@@ -3185,18 +3185,61 @@ function lernenSwitchStep(step) {
   if (step === 2) requestAnimationFrame(initLernenCanvas);
 }
 
+// ── Lernen content cache (localStorage) ──────────────────────────────────
+function lernenCacheKey(topic) {
+  const diff = selectedDiffIdx !== null ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger') : 'auto';
+  return `lc_${sessionId}_${topic}_${diff}`;
+}
+function lernenCacheGet(topic) {
+  try { const r = localStorage.getItem(lernenCacheKey(topic)); return r ? JSON.parse(r) : null; } catch { return null; }
+}
+function lernenCacheSet(topic, data) {
+  try { localStorage.setItem(lernenCacheKey(topic), JSON.stringify(data)); } catch {}
+}
+
+function getDiffInstr(effLevel) {
+  switch (effLevel.diff) {
+    case 'leicht':       return 'Niveau: LEICHT. Erkläre sehr einfach, nutze alltagsnahe Beispiele, kleine Zahlen. Aufgabe: einfach, ein Rechenschritt.';
+    case 'mittel':       return 'Niveau: MITTEL. Erkläre klar mit Fachbegriff. Aufgabe: 2-3 Rechenschritte, realistisches Szenario.';
+    case 'schwer':       return 'Niveau: SCHWER. Gehe in die Tiefe, verbinde Konzepte. Aufgabe: komplex, mehrere Teilschritte.';
+    case 'pruefungsnah': return 'Niveau: PRÜFUNGSNAH. Verwende Prüfungssprache, vollständige Lösungswege. Aufgabe: anspruchsvoll wie in einer echten Klausur.';
+    default:             return 'Niveau: EINSTEIGER. Erkläre von Grund auf, kein Vorwissen voraussetzen. Aufgabe: sehr einfach.';
+  }
+}
+
+function renderTopicContent(topic, data) {
+  document.getElementById('lernen-erkl-loading').style.display = 'none';
+  let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>
+    <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${esc(data.was || '')}</div></div>
+    <div class="explainer-section"><div class="explainer-label">Warum wichtig?</div><div class="explainer-body">${esc(data.warum || '')}</div></div>
+    <div class="explainer-section"><div class="explainer-label">Konkretes Beispiel</div><div class="explainer-body">${esc(data.beispiel || '')}</div></div>`;
+  if (data.rechnung && data.rechnung.trim()) {
+    html += `<div class="explainer-section"><div class="explainer-label">📐 Rechenbeispiel</div><div class="explainer-rechnung">${esc(data.rechnung).replace(/\n/g, '<br>')}</div></div>`;
+  }
+  const body = document.getElementById('lernen-erkl-body');
+  body.innerHTML = html;
+  body.classList.remove('hidden');
+  document.getElementById('lernen-step1-footer').classList.remove('hidden');
+  if (data.aufgabe && data.aufgabe.trim()) {
+    document.getElementById('lernen-task-bar').textContent = data.aufgabe;
+    document.getElementById('lernen-tab-aufgabe').disabled = false;
+    document.getElementById('lernen-regen-btn').classList.remove('hidden');
+  } else {
+    document.getElementById('lernen-done-btn').classList.remove('hidden');
+  }
+}
+
 async function loadTopicContent(topic) {
+  // Serve from cache if available
+  const cached = lernenCacheGet(topic);
+  if (cached) {
+    lernenTopicData = cached;
+    renderTopicContent(topic, cached);
+    return;
+  }
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
   const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
-  const diffInstr = (() => {
-    switch (effLevel.diff) {
-      case 'leicht':       return 'Niveau: LEICHT. Erkläre sehr einfach, nutze alltagsnahe Beispiele, kleine Zahlen. Aufgabe: einfach, ein Rechenschritt.';
-      case 'mittel':       return 'Niveau: MITTEL. Erkläre klar mit Fachbegriff. Aufgabe: 2-3 Rechenschritte, realistisches Szenario.';
-      case 'schwer':       return 'Niveau: SCHWER. Gehe in die Tiefe, verbinde Konzepte. Aufgabe: komplex, mehrere Teilschritte.';
-      case 'pruefungsnah': return 'Niveau: PRÜFUNGSNAH. Verwende Prüfungssprache, vollständige Lösungswege. Aufgabe: anspruchsvoll wie in einer echten Klausur.';
-      default:             return 'Niveau: EINSTEIGER. Erkläre von Grund auf, kein Vorwissen voraussetzen. Aufgabe: sehr einfach.';
-    }
-  })();
+  const diffInstr = getDiffInstr(effLevel);
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
@@ -3212,26 +3255,9 @@ async function loadTopicContent(topic) {
     if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
+    lernenCacheSet(topic, data);
     stopProg();
-    document.getElementById('lernen-erkl-loading').style.display = 'none';
-    let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>
-      <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${esc(data.was || '')}</div></div>
-      <div class="explainer-section"><div class="explainer-label">Warum wichtig?</div><div class="explainer-body">${esc(data.warum || '')}</div></div>
-      <div class="explainer-section"><div class="explainer-label">Konkretes Beispiel</div><div class="explainer-body">${esc(data.beispiel || '')}</div></div>`;
-    if (data.rechnung && data.rechnung.trim()) {
-      html += `<div class="explainer-section"><div class="explainer-label">📐 Rechenbeispiel</div><div class="explainer-rechnung">${esc(data.rechnung).replace(/\n/g, '<br>')}</div></div>`;
-    }
-    const body = document.getElementById('lernen-erkl-body');
-    body.innerHTML = html;
-    body.classList.remove('hidden');
-    document.getElementById('lernen-step1-footer').classList.remove('hidden');
-
-    if (data.aufgabe && data.aufgabe.trim()) {
-      document.getElementById('lernen-task-bar').textContent = data.aufgabe;
-      document.getElementById('lernen-tab-aufgabe').disabled = false;
-    } else {
-      document.getElementById('lernen-done-btn').classList.remove('hidden');
-    }
+    renderTopicContent(topic, data);
   } catch (e) {
     stopProg();
     document.getElementById('lernen-erkl-loading').style.display = 'none';
@@ -3241,6 +3267,44 @@ async function loadTopicContent(topic) {
     document.getElementById('lernen-step1-footer').classList.remove('hidden');
     document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
+}
+
+async function regenLernenTask() {
+  const topic = currentExplainerTopic;
+  if (!topic || !lernenTopicData) return;
+  const btn = document.getElementById('lernen-regen-btn');
+  btn.disabled = true; btn.textContent = '⏳';
+  try {
+    const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+    const diffInstr = getDiffInstr(effLevel);
+    const ctx = sessionTxt ? sessionTxt.slice(0, 2000) : '';
+    const raw = await claudeLocal(
+      [{ role: 'user', content: `Generiere eine neue Übungsaufgabe zum Thema "${topic}".` }],
+      [{
+        type: 'text',
+        text: `Generiere eine NEUE, andere Übungsaufgabe zum Thema "${topic}".\n${ctx ? `Kontext: ${ctx}\n` : ''}${diffInstr}\n\nAntworte NUR als JSON:\n{"aufgabe":"Eine neue konkrete Übungsaufgabe mit Zahlen"}`,
+      }],
+      600
+    );
+    const m = raw.match(/\{[\s\S]*\}/);
+    let newAufgabe = null;
+    if (m) { try { newAufgabe = JSON.parse(m[0]).aufgabe; } catch {} }
+    if (newAufgabe && newAufgabe.trim()) {
+      lernenTopicData.aufgabe = newAufgabe;
+      document.getElementById('lernen-task-bar').textContent = newAufgabe;
+      lernenCacheSet(topic, lernenTopicData);
+      // Clear canvas for fresh start
+      if (lernenCtx) {
+        lernenCtx.fillStyle = '#ffffff';
+        lernenCtx.fillRect(0, 0, lernenCtx.canvas.width, lernenCtx.canvas.height);
+      }
+      document.getElementById('lernen-done-btn').classList.add('hidden');
+      toast('Neue Aufgabe generiert', 'success', 2000);
+    } else {
+      toast('Keine neue Aufgabe erhalten', 'warn');
+    }
+  } catch (e) { toast('Fehler: ' + e.message, 'error'); }
+  btn.disabled = false; btn.innerHTML = '🔄 Neue Aufgabe';
 }
 
 function initLernenCanvas() {
@@ -3404,6 +3468,7 @@ document.getElementById('lernen-back-btn')?.addEventListener('click', closeLerne
 document.getElementById('lernen-to-task-btn')?.addEventListener('click', () => lernenSwitchStep(2));
 document.getElementById('lernen-check-btn')?.addEventListener('click', checkLernenSolution);
 document.getElementById('lernen-done-btn')?.addEventListener('click', markTopicDone);
+document.getElementById('lernen-regen-btn')?.addEventListener('click', regenLernenTask);
 document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   if (!lernenCtx) return;
   const c = document.getElementById('lernen-canvas');

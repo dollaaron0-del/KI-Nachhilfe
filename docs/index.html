@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=36" />
+  <link rel="stylesheet" href="style.css?v=37" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -650,7 +650,10 @@
       <!-- Step 2: Aufgabe + Canvas (wie Lösen) -->
       <div id="lernen-step-2" class="lernen-step lernen-step-hidden">
         <!-- Task text bar -->
-        <div class="lernen-task-bar" id="lernen-task-bar"></div>
+        <div class="lernen-task-bar-wrap">
+          <span class="lernen-task-bar" id="lernen-task-bar"></span>
+          <button class="lernen-regen-btn hidden" id="lernen-regen-btn" title="Neue Aufgabe generieren">🔄 Neue Aufgabe</button>
+        </div>
         <!-- Canvas toolbar -->
         <div class="lernen-canvas-bar">
           <button class="lernen-tool active" data-ltool="pen" title="Stift">
@@ -753,7 +756,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=36"></script>
+<script src="app.js?v=37"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
