@@ -684,7 +684,10 @@ app.post('/api/local', authMiddleware, async (req, res) => {
   const callHaiku = async () => {
     const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
     if (system) params.system = system;
-    return callClaude(params);
+    const r = await callClaude(params);
+    const haikuText = r.content?.[0]?.text;
+    if (typeof haikuText !== 'string') throw new Error('Haiku returned unexpected response shape');
+    return haikuText;
   };
   try {
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
@@ -709,16 +712,16 @@ app.post('/api/local', authMiddleware, async (req, res) => {
       if (m) { try { JSON.parse(m[0]); jsonOk = true; } catch { try { JSON.parse(repair(m[0])); jsonOk = true; } catch {} } }
       if (!jsonOk) {
         console.warn('Ollama returned invalid/no JSON in json_mode – falling back to Haiku');
-        const response = await callHaiku();
-        return res.json(response);
+        const haikuText = await callHaiku();
+        return res.json({ content: [{ text: haikuText }] });
       }
     }
     res.json({ content: [{ text }] });
   } catch (e) {
     console.error('Ollama error:', e.message);
     try {
-      const response = await callHaiku();
-      res.json(response);
+      const haikuText = await callHaiku();
+      res.json({ content: [{ text: haikuText }] });
     } catch (e2) {
       console.error('Haiku fallback also failed:', e2.message);
       res.status(500).json({ error: `Ollama: ${e.message} | Haiku: ${e2.message}` });

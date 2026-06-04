@@ -3556,10 +3556,13 @@ Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt.`;
       const raw = await claudeLocal(
         [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
         [{ type: 'text', text: EVAL_SYS }],
-        1100, { json_mode: true }
+        2000, { json_mode: true }
       );
       ev = parseJsonResponse(raw);
-      if (!ev) throw new Error('Keine Auswertung');
+      if (!ev) {
+        console.error('parseJsonResponse failed, raw response:', raw?.slice(0, 300));
+        throw new Error('Keine Auswertung');
+      }
     } else {
       if (!lernenCtx) return;
       const canvas = document.getElementById('lernen-canvas');
