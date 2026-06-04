@@ -1540,6 +1540,25 @@ html, body {
 }
 .lernen-text-answer:focus { border-color: var(--accent); }
 
+/* Permanent result bar after Prüfen */
+.lernen-result-bar {
+  flex-shrink: 0;
+  padding: 9px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lernen-result-bar--ok   { background: rgba(52,199,89,0.10); }
+.lernen-result-bar--fail { background: rgba(255,59,48,0.08); }
+.lernen-result-verdict { font-weight: 700; font-size: 14px; }
+.lernen-result-verdict--ok   { color: var(--green); }
+.lernen-result-verdict--fail { color: var(--red); }
+.lernen-result-solution { color: var(--text2); font-size: 13px; }
+.lernen-result-solution strong { color: var(--text); }
+
 /* Key value chips for math tasks */
 .lernen-task-values {
   display: flex;

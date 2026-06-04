@@ -3191,6 +3191,8 @@ function openTopicView(topic) {
   document.getElementById('lernen-qa-msgs').innerHTML = '';
   const valuesEl = document.getElementById('lernen-task-values');
   if (valuesEl) { valuesEl.innerHTML = ''; valuesEl.classList.add('hidden'); }
+  const resultBar = document.getElementById('lernen-result-bar');
+  if (resultBar) { resultBar.innerHTML = ''; resultBar.className = 'lernen-result-bar hidden'; }
   lernenAnswerMode = 'canvas';
   document.getElementById('lernen-draw-tools').style.display = 'contents';
   document.getElementById('lernen-canvas-wrap').classList.remove('hidden');
@@ -3358,6 +3360,8 @@ async function regenLernenTask() {
         lernenCtx.fillRect(0, 0, lernenCtx.canvas.width, lernenCtx.canvas.height);
       }
       document.getElementById('lernen-done-btn').classList.add('hidden');
+      const rb = document.getElementById('lernen-result-bar');
+      if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
       toast('Neue Aufgabe generiert', 'success', 2000);
     } else {
       toast('Keine neue Aufgabe erhalten', 'warn');
@@ -3452,7 +3456,7 @@ async function checkLernenSolution() {
       }
       const raw = await claudeLocal(
         [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
-        [{ type: 'text', text: `Bewerte die Antwort des Studenten auf die gestellte Aufgabe.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/vollständig, 1=Ansatz richtig aber Lücken, 0=falsch oder zu wenig` }],
+        [{ type: 'text', text: `Bewerte die Antwort des Studenten SEHR STRENG und GENAU. Bei Rechenaufgaben: Berechne das korrekte Ergebnis selbst und vergleiche exakt.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}\nscore: 2=Ergebnis korrekt (Rundungsfehler OK), 1=Ansatz richtig aber Rechenfehler/unvollständig, 0=falsch oder zu wenig` }],
         600
       );
       const mv = raw.match(/\{[\s\S]*\}/);
@@ -3469,7 +3473,7 @@ async function checkLernenSolution() {
       const base64 = flat.toDataURL('image/png').split(',')[1];
       const result = await claudeLocalVision(
         base64,
-        `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewertet die handschriftliche Lösung des Studenten. Antworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/fast richtig, 1=Ansatz gut aber Lücken, 0=falsch oder zu wenig`,
+        `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewerte die handschriftliche Lösung des Studenten SEHR STRENG und GENAU:\n- Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt mit dem Endergebnis im Bild.\n- score:2 NUR wenn das finale Ergebnis korrekt oder mit akzeptablem Rundungsfehler (<1%) übereinstimmt.\n- score:1 wenn der Ansatz/Rechenweg richtig ist, aber das Ergebnis falsch oder unvollständig.\n- score:0 wenn Ansatz falsch oder kein verwertbares Ergebnis.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}`,
         sysBlocks()
       );
       const mv = result.match(/\{[\s\S]*\}/);
@@ -3477,8 +3481,14 @@ async function checkLernenSolution() {
       ev = JSON.parse(mv[0]);
     }
     const ok = ev.score >= 1;
-    toast((ok ? '✅ ' : '❌ ') + (ev.feedback || ''), ok ? 'success' : 'warn', 5000);
-    if (ev.loesung) toast('Musterlösung: ' + ev.loesung, 'info', 6000);
+    // Show permanent result bar
+    const resultBar = document.getElementById('lernen-result-bar');
+    if (resultBar) {
+      resultBar.className = `lernen-result-bar lernen-result-bar--${ok ? 'ok' : 'fail'}`;
+      resultBar.innerHTML =
+        `<span class="lernen-result-verdict lernen-result-verdict--${ok ? 'ok' : 'fail'}">${ok ? '✅' : '❌'} ${esc(ev.feedback || '')}</span>` +
+        (ev.loesung ? `<span class="lernen-result-solution">📌 <strong>Musterlösung:</strong> ${esc(ev.loesung)}</span>` : '');
+    }
     if (ok) document.getElementById('lernen-done-btn').classList.remove('hidden');
   } catch (e) { toast('Fehler beim Prüfen: ' + e.message, 'error'); }
   checkBtn.disabled = false; checkBtn.textContent = '✅ Prüfen';
