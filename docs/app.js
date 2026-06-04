@@ -3187,6 +3187,8 @@ function openTopicView(topic) {
     badge.className = `lernen-diff-badge lernen-diff-badge--${l.diff || 'einsteiger'}`;
   }
   document.getElementById('lernen-qa-msgs').innerHTML = '';
+  const valuesEl = document.getElementById('lernen-task-values');
+  if (valuesEl) { valuesEl.innerHTML = ''; valuesEl.classList.add('hidden'); }
   lernenAnswerMode = 'canvas';
   document.getElementById('lernen-draw-tools').style.display = 'contents';
   document.getElementById('lernen-canvas-wrap').classList.remove('hidden');
@@ -3272,6 +3274,16 @@ function renderTopicContent(topic, data) {
   } else {
     document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
+  const valuesEl = document.getElementById('lernen-task-values');
+  if (valuesEl) {
+    if (Array.isArray(data.werte) && data.werte.length > 0) {
+      valuesEl.innerHTML = data.werte.map(v => `<span class="task-value-chip">${esc(v)}</span>`).join('');
+      valuesEl.classList.remove('hidden');
+    } else {
+      valuesEl.innerHTML = '';
+      valuesEl.classList.add('hidden');
+    }
+  }
 }
 
 async function loadTopicContent(topic) {
@@ -3291,7 +3303,7 @@ async function loadTopicContent(topic) {
       [{ role: 'user', content: `Erkläre das Thema "${topic}" auf dem vorgegebenen Niveau.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Übungsaufgabe passend zum Niveau"}`,
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Übungsaufgabe passend zum Niveau","werte":[]}`,
       }],
       1800
     );

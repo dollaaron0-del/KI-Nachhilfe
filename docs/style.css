@@ -1513,17 +1513,20 @@ html, body {
 /* Text answer area */
 .lernen-text-wrap {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 14px 16px;
   overflow: hidden;
 }
 .lernen-text-answer {
   flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
   resize: none;
   border: 1.5px solid var(--border);
   border-radius: 14px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   font-size: 16px;
   line-height: 1.6;
   font-family: inherit;
@@ -1534,6 +1537,26 @@ html, body {
   transition: border-color .2s;
 }
 .lernen-text-answer:focus { border-color: var(--accent); }
+
+/* Key value chips for math tasks */
+.lernen-task-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 14px 8px;
+  background: rgba(88,86,214,0.05);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.task-value-chip {
+  background: rgba(88,86,214,0.12);
+  color: var(--accent);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
 
 .lernen-canvas-bar {
   display: flex;
