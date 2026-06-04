@@ -3393,12 +3393,14 @@ async function regenLernenTask() {
       lernenTopicData.aufgabe = newAufgabe;
       document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(newAufgabe));
       localforage.setItem(lernenCacheKey(topic), lernenTopicData).catch(() => {});
-      // Clear canvas for fresh start
+      // Clear canvas and textarea for fresh start
       if (lernenCtx) {
         const wrap = document.getElementById('lernen-canvas-wrap');
         lernenCtx.fillStyle = '#ffffff';
         lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
       }
+      const ta = document.getElementById('lernen-text-answer');
+      if (ta) ta.value = '';
       document.getElementById('lernen-done-btn').classList.add('hidden');
       const rb = document.getElementById('lernen-result-bar');
       if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
