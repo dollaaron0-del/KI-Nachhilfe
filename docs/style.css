@@ -1516,15 +1516,20 @@ html, body {
 .lernen-text-wrap {
   flex: 1;
   min-height: 0;
-  position: relative; /* establishes positioning context for absolute textarea */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 14px 16px;
+  box-sizing: border-box;
 }
 .lernen-text-answer {
-  position: absolute;
-  inset: 14px 16px;   /* fills wrap minus padding — no flex needed */
+  flex: 1 1 0%;        /* explicit 0 basis — iOS Safari uses flex size not intrinsic */
+  min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   resize: none;
   box-sizing: border-box;
+  width: 100%;
   border: 1.5px solid var(--border);
   border-radius: 14px;
   padding: 16px 18px;

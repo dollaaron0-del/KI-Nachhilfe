@@ -3617,8 +3617,17 @@ document.getElementById('lernen-mode-text')?.addEventListener('click', () => {
   document.getElementById('lernen-mode-canvas').classList.remove('active');
   document.getElementById('lernen-draw-tools').style.display = 'none';
   document.getElementById('lernen-canvas-wrap').classList.add('hidden');
-  document.getElementById('lernen-text-wrap').classList.remove('hidden');
-  setTimeout(() => document.getElementById('lernen-text-answer')?.focus(), 50);
+  const wrap = document.getElementById('lernen-text-wrap');
+  wrap.classList.remove('hidden');
+  // CSS flex handles height; JS fallback only if flex hasn't settled (iOS)
+  setTimeout(() => {
+    const ta = document.getElementById('lernen-text-answer');
+    if (!ta) return;
+    if (!ta.style.height && wrap.clientHeight > 60) {
+      ta.style.height = (wrap.clientHeight - 28) + 'px';
+    }
+    ta.focus();
+  }, 80);
 });
 
 // Lernen topic view controls
