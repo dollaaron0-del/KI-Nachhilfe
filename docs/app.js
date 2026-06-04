@@ -3511,6 +3511,19 @@ async function checkLernenSolution() {
   }
   try {
     let ev;
+    const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
+Bewerte SEHR STRENG:
+{
+  "score": 0,
+  "understood": false,
+  "feedback": "Ein-Satz-Urteil über die Antwort",
+  "loesung": "Vollständige Musterlösung als Fließtext – erkläre das korrekte Konzept ausführlich und klar",
+  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein"
+}
+score: 2=vollständig korrekt, 1=Ansatz/Teile richtig aber unvollständig oder Fehler, 0=falsch oder zu wenig
+understood: true NUR wenn score>=2 UND Student zeigt echtes Verständnis des Kernkonzepts.
+Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt.`;
+
     if (lernenAnswerMode === 'text') {
       const answerText = document.getElementById('lernen-text-answer').value.trim();
       if (!answerText) {
@@ -3521,8 +3534,8 @@ async function checkLernenSolution() {
       }
       const raw = await claudeLocal(
         [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
-        [{ type: 'text', text: `Bewerte die Antwort des Studenten SEHR STRENG und GENAU. Bei Rechenaufgaben: Berechne das korrekte Ergebnis selbst und vergleiche exakt.\nDu MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}\nscore: 2=Ergebnis korrekt (Rundungsfehler OK), 1=Ansatz richtig aber Rechenfehler/unvollständig, 0=falsch oder zu wenig` }],
-        900, { json_mode: true }
+        [{ type: 'text', text: EVAL_SYS }],
+        1100, { json_mode: true }
       );
       ev = parseJsonResponse(raw);
       if (!ev) throw new Error('Keine Auswertung');
@@ -3537,22 +3550,39 @@ async function checkLernenSolution() {
       const base64 = flat.toDataURL('image/png').split(',')[1];
       const result = await claudeLocalVision(
         base64,
-        `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewerte die handschriftliche Lösung des Studenten SEHR STRENG und GENAU:\n- Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt mit dem Endergebnis im Bild.\n- score:2 NUR wenn das finale Ergebnis korrekt oder mit akzeptablem Rundungsfehler (<1%) übereinstimmt.\n- score:1 wenn der Ansatz/Rechenweg richtig ist, aber das Ergebnis falsch oder unvollständig.\n- score:0 wenn Ansatz falsch oder kein verwertbares Ergebnis.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}`,
+        `Aufgabe: ${lernenTopicData.aufgabe}\n\n${EVAL_SYS}`,
         sysBlocks()
       );
       ev = parseJsonResponse(result);
       if (!ev) throw new Error('Keine Auswertung');
     }
-    const ok = ev.score >= 1;
-    // Show permanent result bar
-    const resultBar = document.getElementById('lernen-result-bar');
+
+    const understood = ev.understood === true;
+    const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
+    const scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '⚠️' : '❌';
+
     if (resultBar) {
-      resultBar.className = `lernen-result-bar lernen-result-bar--${ok ? 'ok' : 'fail'}`;
-      resultBar.innerHTML =
-        `<span class="lernen-result-verdict lernen-result-verdict--${ok ? 'ok' : 'fail'}">${ok ? '✅' : '❌'} ${esc(ev.feedback || '')}</span>` +
-        (ev.loesung ? `<span class="lernen-result-solution">📌 <strong>Musterlösung:</strong> ${esc(ev.loesung)}</span>` : '');
+      resultBar.className = `lernen-result-bar lernen-result-bar--${scoreClass}`;
+      let html =
+        `<div class="lernen-result-verdict lernen-result-verdict--${scoreClass}">${scoreIcon} ${esc(ev.feedback || '')}</div>`;
+      if (ev.loesung) {
+        html += `<div class="lernen-result-prose">` +
+          `<div class="lernen-result-label">📌 Musterlösung</div>` +
+          `<div class="lernen-result-text">${safeHtml(md(ev.loesung))}</div>` +
+          `</div>`;
+      }
+      if (ev.einschaetzung) {
+        html += `<div class="lernen-result-prose">` +
+          `<div class="lernen-result-label">💬 Einschätzung deiner Antwort</div>` +
+          `<div class="lernen-result-text">${safeHtml(md(ev.einschaetzung))}</div>` +
+          `</div>`;
+      }
+      if (!understood) {
+        html += `<button class="btn-secondary btn-sm lernen-result-retry-btn" onclick="regenLernenTask()">🔄 Neue Aufgabe zum Thema</button>`;
+      }
+      resultBar.innerHTML = html;
     }
-    if (ok) document.getElementById('lernen-done-btn').classList.remove('hidden');
+    if (understood) document.getElementById('lernen-done-btn').classList.remove('hidden');
   } catch (e) {
     toast('Fehler beim Prüfen: ' + e.message, 'error');
     if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
