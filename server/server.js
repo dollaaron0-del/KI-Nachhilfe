@@ -679,12 +679,30 @@ app.post('/api/local', authMiddleware, async (req, res) => {
   };
   try {
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
-    // When json_mode was requested, verify Ollama actually returned JSON.
-    // If it returned free text instead, fall through to Haiku silently.
-    if (json_mode && !/\{[\s\S]*\}/.test(text)) {
-      console.warn('Ollama returned non-JSON in json_mode – falling back to Haiku');
-      const response = await callHaiku();
-      return res.json(response);
+    // When json_mode was requested, verify Ollama returned *valid* parseable JSON.
+    // Regex alone is not enough — models often produce { } with literal newlines
+    // inside strings that break JSON.parse.  Fall back to Haiku for any failure.
+    if (json_mode) {
+      const repair = s => {
+        let inStr = false, esc = false, out = '';
+        for (const c of s) {
+          if (esc)        { out += c; esc = false; continue; }
+          if (c === '\\') { out += c; esc = true;  continue; }
+          if (c === '"')  { out += c; inStr = !inStr; continue; }
+          if (inStr && c === '\n') { out += '\\n'; continue; }
+          if (inStr && c === '\r') { out += '\\r'; continue; }
+          out += c;
+        }
+        return out;
+      };
+      const m = text.match(/\{[\s\S]*\}/);
+      let jsonOk = false;
+      if (m) { try { JSON.parse(m[0]); jsonOk = true; } catch { try { JSON.parse(repair(m[0])); jsonOk = true; } catch {} } }
+      if (!jsonOk) {
+        console.warn('Ollama returned invalid/no JSON in json_mode – falling back to Haiku');
+        const response = await callHaiku();
+        return res.json(response);
+      }
     }
     res.json({ content: [{ text }] });
   } catch (e) {
