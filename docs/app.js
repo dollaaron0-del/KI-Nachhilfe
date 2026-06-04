@@ -3053,13 +3053,14 @@ function renderMilestone() {
   const stepsHtml = MILESTONE_LEVELS.map((l, i) => {
     const isManual = selIdx !== null;
     const isActive = isManual ? i === selIdx : i === autoIdx;
-    const isPast   = isManual ? i < selIdx   : i < autoIdx;
-    const cls = ['ms-step', isActive ? 'ms-active' : '', isPast ? 'ms-past' : '', isManual && isActive ? 'ms-manual' : '']
+    const isPast   = i < autoIdx; // always based on real progress
+    const cls = ['ms-step', isActive ? (isManual ? 'ms-manual' : 'ms-active') : '', isPast ? 'ms-past' : '']
                   .filter(Boolean).join(' ');
+    const lineClass = isPast ? 'ms-line ms-line-done' : 'ms-line';
     return `<div class="${cls}" data-diffidx="${i}">
-      <div class="ms-dot">${isPast && !isManual ? '✓' : l.emoji}</div>
+      <div class="ms-dot">${isPast ? '✓' : l.emoji}</div>
       <div class="ms-label">${l.name}</div>
-    </div>${i < MILESTONE_LEVELS.length - 1 ? '<div class="ms-line"></div>' : ''}`;
+    </div>${i < MILESTONE_LEVELS.length - 1 ? `<div class="${lineClass}"></div>` : ''}`;
   }).join('');
 
   const infoTxt = selIdx !== null
