@@ -3226,12 +3226,16 @@ AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.`;
 
 function renderTopicContent(topic, data) {
   document.getElementById('lernen-erkl-loading').style.display = 'none';
+  const fmtText = s => esc(s || '').replace(/\n/g, '<br>');
   let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>
-    <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${esc(data.was || '')}</div></div>
-    <div class="explainer-section"><div class="explainer-label">Warum wichtig?</div><div class="explainer-body">${esc(data.warum || '')}</div></div>
-    <div class="explainer-section"><div class="explainer-label">Konkretes Beispiel</div><div class="explainer-body">${esc(data.beispiel || '')}</div></div>`;
+    <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${fmtText(data.was)}</div></div>
+    <div class="explainer-section"><div class="explainer-label">Warum wichtig?</div><div class="explainer-body">${fmtText(data.warum)}</div></div>`;
+  if (data.vertiefung && data.vertiefung.trim()) {
+    html += `<div class="explainer-section explainer-section--deep"><div class="explainer-label">🔍 Vertiefung</div><div class="explainer-body">${fmtText(data.vertiefung)}</div></div>`;
+  }
+  html += `<div class="explainer-section"><div class="explainer-label">Konkretes Beispiel</div><div class="explainer-body">${fmtText(data.beispiel)}</div></div>`;
   if (data.rechnung && data.rechnung.trim()) {
-    html += `<div class="explainer-section"><div class="explainer-label">📐 Rechenbeispiel</div><div class="explainer-rechnung">${esc(data.rechnung).replace(/\n/g, '<br>')}</div></div>`;
+    html += `<div class="explainer-section"><div class="explainer-label">📐 Rechenbeispiel</div><div class="explainer-rechnung">${fmtText(data.rechnung)}</div></div>`;
   }
   const body = document.getElementById('lernen-erkl-body');
   body.innerHTML = html;
@@ -3263,7 +3267,7 @@ async function loadTopicContent(topic) {
       [{ role: 'user', content: `Erkläre das Thema "${topic}" auf dem vorgegebenen Niveau.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG: Das Niveau beeinflusst ALLE Felder – nicht nur die Aufgabe. "was", "warum", "beispiel" und "rechnung" müssen in Tiefe, Sprache und Komplexität dem Niveau entsprechen.\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach):\n{"was":"Definition entsprechend Niveau","warum":"Relevanz entsprechend Niveau","beispiel":"Beispiel entsprechend Niveau","rechnung":"Rechenbeispiel entsprechend Niveau (nutze \\n zwischen Schritten). Leer lassen wenn keine Berechnung passt.","aufgabe":"Übungsaufgabe entsprechend Niveau"}`,
+        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Übungsaufgabe passend zum Niveau"}`,
       }],
       1800
     );
