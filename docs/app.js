@@ -3185,16 +3185,10 @@ function lernenSwitchStep(step) {
   if (step === 2) requestAnimationFrame(initLernenCanvas);
 }
 
-// ── Lernen content cache (localStorage) ──────────────────────────────────
+// ── Lernen content cache (localforage / IndexedDB) ───────────────────────
 function lernenCacheKey(topic) {
   const diff = selectedDiffIdx !== null ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger') : 'auto';
   return `lc_${sessionId}_${topic}_${diff}`;
-}
-function lernenCacheGet(topic) {
-  try { const r = localStorage.getItem(lernenCacheKey(topic)); return r ? JSON.parse(r) : null; } catch { return null; }
-}
-function lernenCacheSet(topic, data) {
-  try { localStorage.setItem(lernenCacheKey(topic), JSON.stringify(data)); } catch {}
 }
 
 function getDiffInstr(effLevel) {
@@ -3231,7 +3225,7 @@ function renderTopicContent(topic, data) {
 
 async function loadTopicContent(topic) {
   // Serve from cache if available
-  const cached = lernenCacheGet(topic);
+  const cached = await localforage.getItem(lernenCacheKey(topic)).catch(() => null);
   if (cached) {
     lernenTopicData = cached;
     renderTopicContent(topic, cached);
@@ -3255,7 +3249,7 @@ async function loadTopicContent(topic) {
     if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
-    lernenCacheSet(topic, data);
+    localforage.setItem(lernenCacheKey(topic), data).catch(() => {});
     stopProg();
     renderTopicContent(topic, data);
   } catch (e) {
@@ -3292,7 +3286,7 @@ async function regenLernenTask() {
     if (newAufgabe && newAufgabe.trim()) {
       lernenTopicData.aufgabe = newAufgabe;
       document.getElementById('lernen-task-bar').textContent = newAufgabe;
-      lernenCacheSet(topic, lernenTopicData);
+      localforage.setItem(lernenCacheKey(topic), lernenTopicData).catch(() => {});
       // Clear canvas for fresh start
       if (lernenCtx) {
         lernenCtx.fillStyle = '#ffffff';
