@@ -3317,7 +3317,7 @@ async function loadTopicContent(topic) {
         type: 'text',
         text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Übungsaufgabe passend zum Niveau","werte":[]}`,
       }],
-      1800
+      2500
     );
     // Stale guard: discard if user opened a different topic while AI was running
     if (currentExplainerTopic !== topic) { stopProg(); return; }
@@ -3335,11 +3335,22 @@ async function loadTopicContent(topic) {
     stopProg();
     document.getElementById('lernen-erkl-loading').style.display = 'none';
     const body = document.getElementById('lernen-erkl-body');
-    body.innerHTML = `<p style="color:var(--red);padding:16px">Fehler: ${esc(e.message)}</p>`;
+    body.innerHTML = `<p style="color:var(--red);padding:16px;margin:0">⚠️ ${esc(e.message)}</p>
+      <div style="padding:8px 16px 16px">
+        <button class="btn-secondary" onclick="retryLernenTopic()">🔄 Erneut versuchen</button>
+      </div>`;
     body.classList.remove('hidden');
-    document.getElementById('lernen-step1-footer').classList.remove('hidden');
-    document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
+}
+
+function retryLernenTopic() {
+  const topic = currentExplainerTopic;
+  if (!topic) return;
+  document.getElementById('lernen-erkl-loading').style.display = '';
+  document.getElementById('lernen-erkl-body').classList.add('hidden');
+  document.getElementById('lernen-step1-footer').classList.add('hidden');
+  document.getElementById('lernen-done-btn').classList.add('hidden');
+  loadTopicContent(topic);
 }
 
 async function regenLernenTask() {
