@@ -3651,16 +3651,33 @@ document.getElementById('lernen-mode-text')?.addEventListener('click', () => {
   document.getElementById('lernen-canvas-wrap').classList.add('hidden');
   const wrap = document.getElementById('lernen-text-wrap');
   wrap.classList.remove('hidden');
-  // CSS flex handles height; JS fallback only if flex hasn't settled (iOS)
   setTimeout(() => {
-    const ta = document.getElementById('lernen-text-answer');
-    if (!ta) return;
-    if (!ta.style.height && wrap.clientHeight > 60) {
-      ta.style.height = (wrap.clientHeight - 28) + 'px';
-    }
-    ta.focus();
+    adjustLernenTextHeight(); // size before keyboard to avoid layout jump
+    document.getElementById('lernen-text-answer')?.focus();
   }, 80);
 });
+
+// Size the textarea to fill exactly the visible area above the iOS keyboard.
+// Called once on switch-to-text and again whenever the visual viewport resizes
+// (i.e. when the software keyboard appears/disappears/resizes).
+function adjustLernenTextHeight() {
+  const ta   = document.getElementById('lernen-text-answer');
+  const wrap = document.getElementById('lernen-text-wrap');
+  if (!ta || !wrap || wrap.classList.contains('hidden')) return;
+  const vv = window.visualViewport;
+  if (vv) {
+    // vv.height is the visible height excluding the keyboard
+    const wrapTop = wrap.getBoundingClientRect().top;
+    const available = vv.height - wrapTop - 8; // 8 px bottom gap
+    ta.style.height = Math.max(80, available) + 'px';
+  } else if (!ta.style.height && wrap.clientHeight > 60) {
+    // Fallback for browsers without visualViewport
+    ta.style.height = (wrap.clientHeight - 28) + 'px';
+  }
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', adjustLernenTextHeight);
+}
 
 // Task area resize handle
 (function () {
