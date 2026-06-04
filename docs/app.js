@@ -372,17 +372,29 @@ async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
 }
 
 // ── Local model via Ollama (free, for batch tasks) ────────────────────────
-async function claudeLocal(messages, systemBlocks, maxTokens = 2000) {
+async function claudeLocal(messages, systemBlocks, maxTokens = 2000, opts = {}) {
   const r = await fetch('/api/local', {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, ...opts }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || `Serverfehler ${r.status}`);
   }
   return (await r.json()).content[0].text;
+}
+
+// Extract and parse the first JSON object from a model response.
+// Handles plain JSON, code-fenced ```json...``` blocks, and truncated output.
+function parseJsonResponse(raw) {
+  // 1) try code block: ```json { ... } ```
+  const cb = raw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+  if (cb) { try { return JSON.parse(cb[1]); } catch {} }
+  // 2) try first { ... } in the response
+  const ob = raw.match(/\{[\s\S]*\}/);
+  if (ob) { try { return JSON.parse(ob[0]); } catch {} }
+  return null;
 }
 
 async function claudeLocalStream(messages, systemBlocks, maxTokens = 3000, onToken) {
@@ -3509,12 +3521,11 @@ async function checkLernenSolution() {
       }
       const raw = await claudeLocal(
         [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
-        [{ type: 'text', text: `Bewerte die Antwort des Studenten SEHR STRENG und GENAU. Bei Rechenaufgaben: Berechne das korrekte Ergebnis selbst und vergleiche exakt.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}\nscore: 2=Ergebnis korrekt (Rundungsfehler OK), 1=Ansatz richtig aber Rechenfehler/unvollständig, 0=falsch oder zu wenig` }],
-        600
+        [{ type: 'text', text: `Bewerte die Antwort des Studenten SEHR STRENG und GENAU. Bei Rechenaufgaben: Berechne das korrekte Ergebnis selbst und vergleiche exakt.\nDu MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}\nscore: 2=Ergebnis korrekt (Rundungsfehler OK), 1=Ansatz richtig aber Rechenfehler/unvollständig, 0=falsch oder zu wenig` }],
+        900, { json_mode: true }
       );
-      const mv = raw.match(/\{[\s\S]*\}/);
-      if (!mv) throw new Error('Keine Auswertung');
-      ev = JSON.parse(mv[0]);
+      ev = parseJsonResponse(raw);
+      if (!ev) throw new Error('Keine Auswertung');
     } else {
       if (!lernenCtx) return;
       const canvas = document.getElementById('lernen-canvas');
@@ -3529,9 +3540,8 @@ async function checkLernenSolution() {
         `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewerte die handschriftliche Lösung des Studenten SEHR STRENG und GENAU:\n- Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt mit dem Endergebnis im Bild.\n- score:2 NUR wenn das finale Ergebnis korrekt oder mit akzeptablem Rundungsfehler (<1%) übereinstimmt.\n- score:1 wenn der Ansatz/Rechenweg richtig ist, aber das Ergebnis falsch oder unvollständig.\n- score:0 wenn Ansatz falsch oder kein verwertbares Ergebnis.\nAntworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback was richtig/falsch war","loesung":"Vollständiger Rechenweg mit Ergebnis"}`,
         sysBlocks()
       );
-      const mv = result.match(/\{[\s\S]*\}/);
-      if (!mv) throw new Error('Keine Auswertung');
-      ev = JSON.parse(mv[0]);
+      ev = parseJsonResponse(result);
+      if (!ev) throw new Error('Keine Auswertung');
     }
     const ok = ev.score >= 1;
     // Show permanent result bar

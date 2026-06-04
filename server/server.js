@@ -651,14 +651,16 @@ function ollamaMsgs(system, messages) {
   return sysText ? [{ role: 'system', content: sysText }, ...messages] : messages;
 }
 
-async function callOllama(messages, maxTokens = 2000) {
+async function callOllama(messages, maxTokens = 2000, jsonMode = false) {
+  const body = {
+    model: OLLAMA_MODEL, messages, max_tokens: maxTokens,
+    stream: false, options: { num_ctx: 8192 },
+  };
+  if (jsonMode) body.response_format = { type: 'json_object' };
   const r = await fetch(OLLAMA_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL, messages, max_tokens: maxTokens,
-      stream: false, options: { num_ctx: 8192 },
-    }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`Ollama error ${r.status}`);
   const data = await r.json();
@@ -666,12 +668,12 @@ async function callOllama(messages, maxTokens = 2000) {
 }
 
 app.post('/api/local', authMiddleware, async (req, res) => {
-  const { messages, system, max_tokens } = req.body;
+  const { messages, system, max_tokens, json_mode } = req.body;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
   }
   try {
-    const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000);
+    const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
     res.json({ content: [{ text }] });
   } catch (e) {
     console.error('Ollama error:', e.message);
