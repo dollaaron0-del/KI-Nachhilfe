@@ -3489,7 +3489,8 @@ async function lernenQaSend() {
       600
     );
     lernenQaMsgs.push({ role: 'assistant', content: reply });
-    aEl.textContent = reply;
+    aEl.innerHTML = safeHtml(md(reply));
+    if (window.mermaid) mermaid.run({ nodes: aEl.querySelectorAll('.mermaid') }).catch(() => {});
   } catch (e) { aEl.textContent = '⚠️ ' + e.message; }
   msgs.scrollTop = msgs.scrollHeight;
 }
