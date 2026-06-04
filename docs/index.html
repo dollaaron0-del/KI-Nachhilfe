@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=33" />
+  <link rel="stylesheet" href="style.css?v=34" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -633,9 +633,11 @@
       <!-- Step 1: Erklärung (scrollable) -->
       <div id="lernen-step-1" class="lernen-step">
         <div class="lernen-erkl-scroll">
-          <div id="lernen-erkl-loading" style="text-align:center;padding:48px 16px">
+          <div id="lernen-erkl-loading" style="text-align:center;padding:40px 16px">
             <div class="big-icon spin">📖</div>
             <p>Thema wird erklärt…</p>
+            <div class="ai-progress-wrap"><div class="ai-progress-bar" id="lernen-prog-bar"></div></div>
+            <p class="ai-progress-pct" id="lernen-prog-pct">0%</p>
           </div>
           <div id="lernen-erkl-body" class="hidden"></div>
         </div>
@@ -750,7 +752,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=33"></script>
+<script src="app.js?v=34"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

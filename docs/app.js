@@ -3002,28 +3002,28 @@ document.getElementById('karten-gen-btn')?.addEventListener('click', generateKar
 document.getElementById('karten-review-btn')?.addEventListener('click', startReview);
 document.getElementById('karten-done-btn')?.addEventListener('click', initKarten);
 
+// ── Milestone levels (shared between calculateMilestone + renderMilestone) ──
+const MILESTONE_LEVELS = [
+  { min: 0,  emoji: '🌱', name: 'Einsteiger',     rec: null,          diff: null },
+  { min: 20, emoji: '📖', name: 'Grundlagen',      rec: 'Leicht',      diff: 'leicht' },
+  { min: 40, emoji: '🎓', name: 'Lernender',       rec: 'Mittel',      diff: 'mittel' },
+  { min: 60, emoji: '💪', name: 'Fortgeschritten', rec: 'Schwer',      diff: 'schwer' },
+  { min: 80, emoji: '🏆', name: 'Experte',         rec: 'Prüfungsnah', diff: 'pruefungsnah' },
+];
+
 // ══ LERNEN (Lernpfad + Meilensteine) ═════════════════════════════════════
 
 function calculateMilestone() {
-  const total = scannedTopics.length;
+  const total    = scannedTopics.length;
   const topicPct = total > 0 ? learnedTopics.length / total : 0;
-  const q = sessionMeta?.quizStats?.questions || [];
-  const quizAvg = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
-  const score = topicPct * 0.7 + quizAvg * 0.3;
-  const pct = Math.round(score * 100);
-
-  const LEVELS = [
-    { min: 0,  emoji: '🌱', name: 'Einsteiger',      rec: null,           diff: null },
-    { min: 20, emoji: '📖', name: 'Grundlagen',       rec: 'Leicht',       diff: 'leicht' },
-    { min: 40, emoji: '🎓', name: 'Lernender',        rec: 'Mittel',       diff: 'mittel' },
-    { min: 60, emoji: '💪', name: 'Fortgeschritten',  rec: 'Schwer',       diff: 'schwer' },
-    { min: 80, emoji: '🏆', name: 'Prüfungsbereit',   rec: 'Prüfungsnah',  diff: 'pruefungsnah' },
-  ];
-  let level = LEVELS[0], levelIdx = 0;
-  for (let i = 0; i < LEVELS.length; i++) {
-    if (pct >= LEVELS[i].min) { level = LEVELS[i]; levelIdx = i; }
+  const q        = sessionMeta?.quizStats?.questions || [];
+  const quizAvg  = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
+  const pct      = Math.round((topicPct * 0.7 + quizAvg * 0.3) * 100);
+  let level = MILESTONE_LEVELS[0], levelIdx = 0;
+  for (let i = 0; i < MILESTONE_LEVELS.length; i++) {
+    if (pct >= MILESTONE_LEVELS[i].min) { level = MILESTONE_LEVELS[i]; levelIdx = i; }
   }
-  return { ...level, pct, levelNum: levelIdx + 1, totalLevels: LEVELS.length };
+  return { ...level, pct, levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length };
 }
 
 function renderMilestone() {
@@ -3039,16 +3039,20 @@ function renderMilestone() {
   const m = calculateMilestone();
   banner.classList.remove('hidden');
   if (title) title.style.display = '';
+
+  const stepsHtml = MILESTONE_LEVELS.map((l, i) => {
+    const isActive = i === m.levelNum - 1;
+    const isPast   = i < m.levelNum - 1;
+    return `<div class="ms-step${isActive ? ' ms-active' : ''}${isPast ? ' ms-past' : ''}">
+      <div class="ms-dot">${isPast ? '✓' : l.emoji}</div>
+      <div class="ms-label">${l.name}</div>
+    </div>${i < MILESTONE_LEVELS.length - 1 ? '<div class="ms-line"></div>' : ''}`;
+  }).join('');
+
   banner.innerHTML = `
-    <div class="milestone-title">${m.emoji} Meilenstein: ${m.name} (Level ${m.levelNum}/${m.totalLevels})</div>
-    <div class="milestone-bar-wrap">
-      <div class="milestone-bar-fill" style="width:${m.pct}%"></div>
-    </div>
-    <div class="milestone-pct">${m.pct}% Fortschritt · ${learnedTopics.length}/${scannedTopics.length} Themen gelernt</div>
-    <div class="milestone-rec">${m.rec
-      ? `📋 Empfohlene Klausur: ${m.rec}`
-      : 'Lerne einige Themen um Klausur-Empfehlungen freizuschalten.'
-    }</div>`;
+    <div class="ms-steps">${stepsHtml}</div>
+    <div class="ms-bar-wrap"><div class="ms-bar-fill" style="width:${m.pct}%"></div></div>
+    <div class="ms-info">${m.pct}% · ${learnedTopics.length}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}</div>`;
   updateExamRecBanner(m);
 }
 
@@ -3093,13 +3097,13 @@ function loadLernpfad() {
     if (isCurrent) foundCurrent = true;
     const item = document.createElement('div');
     item.className = `lernpfad-item${isDone ? ' is-done' : ''}${isCurrent ? ' is-current' : ''}`;
+    const btnLabel = isDone ? 'Wiederholen' : 'Lernen →';
+    const btnClass = isDone ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
     item.innerHTML = `
       <span class="lernpfad-status">${isDone ? '✅' : isCurrent ? '▶' : '○'}</span>
       <span class="lernpfad-name">${esc(topic)}</span>
-      ${!isDone ? `<button class="lernpfad-btn">${isCurrent ? 'Lernen →' : 'Anzeigen'}</button>` : ''}`;
-    if (!isDone) {
-      item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
-    }
+      <button class="${btnClass}">${btnLabel}</button>`;
+    item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
     list.appendChild(item);
   });
 }
@@ -3149,6 +3153,7 @@ function lernenSwitchStep(step) {
 }
 
 async function loadTopicContent(topic) {
+  const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
@@ -3164,7 +3169,7 @@ async function loadTopicContent(topic) {
     if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
-
+    stopProg();
     document.getElementById('lernen-erkl-loading').style.display = 'none';
     let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>
       <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${esc(data.was || '')}</div></div>
@@ -3185,6 +3190,7 @@ async function loadTopicContent(topic) {
       document.getElementById('lernen-done-btn').classList.remove('hidden');
     }
   } catch (e) {
+    stopProg();
     document.getElementById('lernen-erkl-loading').style.display = 'none';
     const body = document.getElementById('lernen-erkl-body');
     body.innerHTML = `<p style="color:var(--red);padding:16px">Fehler: ${esc(e.message)}</p>`;
