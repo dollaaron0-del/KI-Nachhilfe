@@ -3262,17 +3262,21 @@ AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.`;
 
 function renderTopicContent(topic, data) {
   document.getElementById('lernen-erkl-loading').style.display = 'none';
-  const fmtText = s => esc(s || '').replace(/\n/g, '<br>');
-  let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>
-    <div class="explainer-section"><div class="explainer-label">Was ist das?</div><div class="explainer-body">${fmtText(data.was)}</div></div>
-    <div class="explainer-section"><div class="explainer-label">Warum wichtig?</div><div class="explainer-body">${fmtText(data.warum)}</div></div>`;
-  if (data.vertiefung && data.vertiefung.trim()) {
-    html += `<div class="explainer-section explainer-section--deep"><div class="explainer-label">🔍 Vertiefung</div><div class="explainer-body">${fmtText(data.vertiefung)}</div></div>`;
-  }
-  html += `<div class="explainer-section"><div class="explainer-label">Konkretes Beispiel</div><div class="explainer-body">${fmtText(data.beispiel)}</div></div>`;
-  if (data.rechnung && data.rechnung.trim()) {
-    html += `<div class="explainer-section"><div class="explainer-label">📐 Rechenbeispiel</div><div class="explainer-rechnung">${fmtText(data.rechnung)}</div></div>`;
-  }
+  const fmtMd   = s => safeHtml(md(s || ''));
+  const fmtPre  = s => esc(s || '').replace(/\n/g, '<br>'); // keep for monospace rechnung
+  const section = (icon, label, cls, inner) =>
+    `<div class="explainer-section${cls ? ' ' + cls : ''}">` +
+      `<div class="explainer-label"><span class="explainer-licon">${icon}</span>${label}</div>` +
+      inner +
+    `</div>`;
+  let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>`;
+  if (data.was)    html += section('💡', 'Was ist das?',       '',                    `<div class="explainer-body">${fmtMd(data.was)}</div>`);
+  if (data.warum)  html += section('🎯', 'Warum wichtig?',     '',                    `<div class="explainer-body">${fmtMd(data.warum)}</div>`);
+  if (data.vertiefung && data.vertiefung.trim())
+                   html += section('🔍', 'Vertiefung',         'explainer-section--deep', `<div class="explainer-body">${fmtMd(data.vertiefung)}</div>`);
+  if (data.beispiel) html += section('📋', 'Konkretes Beispiel', '',                  `<div class="explainer-body">${fmtMd(data.beispiel)}</div>`);
+  if (data.rechnung && data.rechnung.trim())
+                   html += section('📐', 'Rechenbeispiel',     '',                    `<div class="explainer-rechnung">${fmtPre(data.rechnung)}</div>`);
   const body = document.getElementById('lernen-erkl-body');
   body.innerHTML = html;
   body.classList.remove('hidden');

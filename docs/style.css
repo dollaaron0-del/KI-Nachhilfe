@@ -1351,15 +1351,38 @@ html, body {
 .explainer-sheet { max-height: 85vh; overflow-y: auto; }
 .explainer-content { padding: 4px 0; }
 .explainer-content h3 { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
-.explainer-section { margin-bottom: 20px; }
+.explainer-section {
+  margin-bottom: 0;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+.explainer-section:last-child { border-bottom: none; padding-bottom: 8px; }
 .explainer-section--deep {
   background: rgba(88,86,214,0.06);
-  border-left: 3px solid var(--accent);
-  border-radius: 8px;
-  padding: 10px 14px;
+  border: 1px solid rgba(88,86,214,0.18);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 0;
 }
-.explainer-label  { font-size: 11px; font-weight: 700; color: var(--label-secondary); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
-.explainer-body   { font-size: 15px; line-height: 1.75; color: var(--label); }
+.explainer-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 9px;
+}
+.explainer-licon { font-size: 13px; }
+/* Markdown prose inside explainer */
+.explainer-body { font-size: 15px; line-height: 1.8; color: var(--text); }
+.explainer-body p  { margin: 0 0 10px; }
+.explainer-body p:last-child { margin-bottom: 0; }
+.explainer-body strong { font-weight: 700; }
+.explainer-body em { font-style: italic; }
+.explainer-body ul, .explainer-body ol { padding-left: 22px; margin: 6px 0 10px; }
+.explainer-body li { margin-bottom: 5px; line-height: 1.65; }
+.explainer-body h1,.explainer-body h2,.explainer-body h3 { font-weight: 700; margin: 14px 0 6px; }
+.explainer-body h3 { font-size: 15px; }
+.explainer-body code { font-family: 'SF Mono',monospace; font-size: 13px; background: var(--surface); padding: 1px 5px; border-radius: 4px; }
 .explainer-question {
   background: var(--surface);
   border-radius: 10px;
@@ -1442,7 +1465,7 @@ html, body {
   padding: 16px;
   -webkit-overflow-scrolling: touch;
 }
-.lernen-erkl-title { font-size: 22px; font-weight: 700; margin-bottom: 18px; }
+.lernen-erkl-title { font-size: 22px; font-weight: 700; margin-bottom: 0; padding-bottom: 16px; border-bottom: 2px solid var(--border); }
 .lernen-step1-footer {
   flex-shrink: 0;
   padding: 12px 16px;
