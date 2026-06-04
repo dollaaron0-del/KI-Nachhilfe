@@ -1567,6 +1567,36 @@ html, body {
   text-decoration: underline;
 }
 
+/* Difficulty badge in topic header */
+.lernen-diff-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(88,86,214,0.12);
+  color: var(--accent);
+  border: 1px solid rgba(88,86,214,0.25);
+}
+.lernen-diff-badge--schwer       { background: rgba(255,149,0,0.12); color: #ff9500; border-color: rgba(255,149,0,0.3); }
+.lernen-diff-badge--pruefungsnah { background: rgba(255,59,48,0.10); color: #ff3b30; border-color: rgba(255,59,48,0.25); }
+.lernen-diff-badge--einsteiger   { background: rgba(52,199,89,0.10); color: #34c759; border-color: rgba(52,199,89,0.25); }
+.lernen-diff-badge--leicht       { background: rgba(52,199,89,0.10); color: #34c759; border-color: rgba(52,199,89,0.25); }
+
+/* Difficulty pill on topic list items */
+.lernpfad-diff-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(88,86,214,0.12);
+  color: var(--accent);
+  vertical-align: middle;
+}
+
 /* Wiederholen button for done topics */
 .lernpfad-btn-repeat {
   background: transparent !important;

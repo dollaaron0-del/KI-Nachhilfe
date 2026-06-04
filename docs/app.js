@@ -3068,12 +3068,14 @@ function renderMilestone() {
     el.addEventListener('click', () => {
       selectedDiffIdx = +el.dataset.diffidx === selectedDiffIdx ? null : +el.dataset.diffidx;
       renderMilestone();
+      loadLernpfad();
     });
   });
   banner.querySelector('.ms-reset-btn')?.addEventListener('click', e => {
     e.stopPropagation();
     selectedDiffIdx = null;
     renderMilestone();
+    loadLernpfad();
   });
   updateExamRecBanner(m);
 }
@@ -3119,11 +3121,13 @@ function loadLernpfad() {
     if (isCurrent) foundCurrent = true;
     const item = document.createElement('div');
     item.className = `lernpfad-item${isDone ? ' is-done' : ''}${isCurrent ? ' is-current' : ''}`;
+    const diffLvl = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : null;
+    const diffTag = diffLvl && !isDone ? ` <span class="lernpfad-diff-tag">${diffLvl.emoji} ${diffLvl.name}</span>` : '';
     const btnLabel = isDone ? 'Wiederholen' : 'Lernen →';
     const btnClass = isDone ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
     item.innerHTML = `
       <span class="lernpfad-status">${isDone ? '✅' : isCurrent ? '▶' : '○'}</span>
-      <span class="lernpfad-name">${esc(topic)}</span>
+      <span class="lernpfad-name">${esc(topic)}${diffTag}</span>
       <button class="${btnClass}">${btnLabel}</button>`;
     item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
     list.appendChild(item);
@@ -3150,6 +3154,12 @@ function openTopicView(topic) {
   document.getElementById('lernen-topic-view').style.display = 'flex';
   document.getElementById('lernen-topic-name').textContent = topic;
   document.getElementById('lernen-qa-title').textContent = 'Fragen zu: ' + topic;
+  const badge = document.getElementById('lernen-diff-badge');
+  if (badge) {
+    const l = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+    badge.textContent = `${l.emoji} ${l.name}`;
+    badge.className = `lernen-diff-badge lernen-diff-badge--${l.diff || 'einsteiger'}`;
+  }
   document.getElementById('lernen-qa-msgs').innerHTML = '';
   // Reset step 1
   document.getElementById('lernen-erkl-loading').style.display = '';
