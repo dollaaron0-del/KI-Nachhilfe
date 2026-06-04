@@ -386,14 +386,33 @@ async function claudeLocal(messages, systemBlocks, maxTokens = 2000, opts = {}) 
 }
 
 // Extract and parse the first JSON object from a model response.
-// Handles plain JSON, code-fenced ```json...``` blocks, and truncated output.
+// Handles plain JSON, code-fenced ```json...``` blocks, and the most common
+// local-model failure mode: literal newline/CR characters inside string values.
 function parseJsonResponse(raw) {
-  // 1) try code block: ```json { ... } ```
+  function repair(s) {
+    let inStr = false, esc = false, out = '';
+    for (const c of s) {
+      if (esc)        { out += c; esc = false; continue; }
+      if (c === '\\') { out += c; esc = true;  continue; }
+      if (c === '"')  { out += c; inStr = !inStr; continue; }
+      if (inStr) {
+        if (c === '\n') { out += '\\n'; continue; }
+        if (c === '\r') { out += '\\r'; continue; }
+        if (c === '\t') { out += '\\t'; continue; }
+      }
+      out += c;
+    }
+    return out;
+  }
+  function tryParse(s) {
+    try { return JSON.parse(s); } catch {}
+    try { return JSON.parse(repair(s)); } catch {}
+    return null;
+  }
   const cb = raw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (cb) { try { return JSON.parse(cb[1]); } catch {} }
-  // 2) try first { ... } in the response
+  if (cb) { const r = tryParse(cb[1]); if (r) return r; }
   const ob = raw.match(/\{[\s\S]*\}/);
-  if (ob) { try { return JSON.parse(ob[0]); } catch {} }
+  if (ob) { const r = tryParse(ob[0]); if (r) return r; }
   return null;
 }
 
