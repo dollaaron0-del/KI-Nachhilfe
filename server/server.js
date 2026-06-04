@@ -640,8 +640,9 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // OLLAMA PROXY (local model — free, for batch tasks)
 // ═══════════════════════════════════════════════════════════════════════════
-const OLLAMA_MODEL = 'phi4:14b';
-const OLLAMA_URL   = 'http://localhost:11434/v1/chat/completions';
+const OLLAMA_MODEL        = process.env.OLLAMA_MODEL        || 'phi4:14b';
+const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'llava:7b';
+const OLLAMA_URL          = 'http://localhost:11434/v1/chat/completions';
 
 function ollamaMsgs(system, messages) {
   const sysText = Array.isArray(system)
@@ -723,6 +724,35 @@ app.post('/api/local/stream', authMiddleware, async (req, res) => {
   } catch (e) {
     res.write(`data: ${JSON.stringify({ error: e.message })}\n\n`);
     res.end();
+  }
+});
+
+app.post('/api/local/vision', authMiddleware, async (req, res) => {
+  const { base64, media_type = 'image/png', text, system, max_tokens = 1500 } = req.body;
+  if (!base64 || !text) return res.status(400).json({ error: 'base64 und text erforderlich' });
+  const sysText = Array.isArray(system) ? system.map(b => b.text || '').join('\n') : (system || '');
+  const messages = [
+    ...(sysText ? [{ role: 'system', content: sysText }] : []),
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text },
+        { type: 'image_url', image_url: { url: `data:${media_type};base64,${base64}` } },
+      ],
+    },
+  ];
+  try {
+    const r = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_VISION_MODEL, messages, max_tokens, stream: false }),
+    });
+    if (!r.ok) throw new Error(`Ollama vision ${r.status}: ${await r.text()}`);
+    const data = await r.json();
+    res.json({ content: [{ text: data.choices[0].message.content }] });
+  } catch (e) {
+    console.error('Ollama vision error:', e.message);
+    res.status(503).json({ error: e.message });
   }
 });
 

@@ -412,6 +412,22 @@ async function claudeLocalStream(messages, systemBlocks, maxTokens = 3000, onTok
   return full;
 }
 
+// ── Local vision via Ollama (falls back to cloud if model not available) ──
+async function claudeLocalVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
+  try {
+    const r = await fetch('/api/local/vision', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ base64, media_type: 'image/png', text: textPrompt,
+                             system: systemBlocks, max_tokens: maxTokens }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status}`);
+    return (await r.json()).content[0].text;
+  } catch {
+    return claudeVision(base64, textPrompt, systemBlocks, maxTokens);
+  }
+}
+
 // ── Anthropic Vision API (via server proxy) ────────────────────────────────
 async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
   const messages = [{
@@ -2564,7 +2580,7 @@ Vollständiger korrekter Lösungsweg mit LaTeX-Notation ($$...$$).
 Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was du erkennst.`;
 
   try {
-    const feedback = await claudeVision(base64, checkPrompt, sysBlocks(), 1800);
+    const feedback = await claudeLocalVision(base64, checkPrompt, sysBlocks(), 1800);
     checkDone();
     document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(feedback));
     document.getElementById('rechnen-sheet-loading').classList.add('hidden');
@@ -3390,7 +3406,7 @@ async function checkLernenSolution() {
     fc.drawImage(canvas, 0, 0);
     const base64 = flat.toDataURL('image/png').split(',')[1];
 
-    const result = await claudeVision(
+    const result = await claudeLocalVision(
       base64,
       `Aufgabe: ${lernenTopicData.aufgabe}\n\nBewertet die handschriftliche Lösung des Studenten. Antworte NUR als JSON:\n{"score":0,"feedback":"Kurzes Feedback (1-2 Sätze)","loesung":"Musterlösung kurz"}\nscore: 2=richtig/fast richtig, 1=Ansatz gut aber Lücken, 0=falsch oder zu wenig`,
       sysBlocks()
