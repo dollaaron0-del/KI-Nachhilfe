@@ -3160,11 +3160,12 @@ function loadLernpfad() {
 }
 
 // ── Lernen canvas state ────────────────────────────────────────────────────
-let lernenCtx      = null;
+let lernenCtx       = null;
 let isDrawingLernen = false;
-let lernenLastX    = 0, lernenLastY = 0;
-let lernenPenColor = '#1c1c1e';
+let lernenLastX     = 0, lernenLastY = 0;
+let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
+let lernenActivePtr = null; // palm rejection: track active pointer ID
 let lernenTopicData = null;
 let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
@@ -3175,6 +3176,7 @@ function openTopicView(topic) {
   lernenTopicData = null;
   lernenQaMsgs    = [];
   lernenCtx       = null;
+  lernenActivePtr = null;
   // Switch views
   document.getElementById('lernen-pfad-view').classList.add('hidden');
   document.getElementById('lernen-topic-view').style.display = 'flex';
@@ -3368,13 +3370,22 @@ function initLernenCanvas() {
   const canvas = document.getElementById('lernen-canvas');
   const wrap   = document.getElementById('lernen-canvas-wrap');
   if (!canvas || !wrap || lernenCtx) return;
-  canvas.width  = wrap.clientWidth  || 800;
-  canvas.height = wrap.clientHeight || 600;
+  const dpr = window.devicePixelRatio || 1;
+  const w   = wrap.clientWidth  || 800;
+  const h   = wrap.clientHeight || 600;
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
   lernenCtx = canvas.getContext('2d');
+  lernenCtx.scale(dpr, dpr);
   lernenCtx.fillStyle = '#ffffff';
-  lernenCtx.fillRect(0, 0, canvas.width, canvas.height);
+  lernenCtx.fillRect(0, 0, w, h);
   lernenCtx.lineCap  = 'round';
   lernenCtx.lineJoin = 'round';
+  // Remove any old listeners first (prevent accumulation across topic switches)
+  canvas.removeEventListener('pointerdown',   onLernenDown);
+  canvas.removeEventListener('pointermove',   onLernenMove);
+  canvas.removeEventListener('pointerup',     onLernenUp);
+  canvas.removeEventListener('pointercancel', onLernenUp);
   canvas.addEventListener('pointerdown',   onLernenDown,   { passive: false });
   canvas.addEventListener('pointermove',   onLernenMove,   { passive: false });
   canvas.addEventListener('pointerup',     onLernenUp);
@@ -3383,6 +3394,10 @@ function initLernenCanvas() {
 
 function onLernenDown(e) {
   e.preventDefault();
+  // Palm rejection: ignore secondary pointers once a stroke is active
+  if (lernenActivePtr !== null) return;
+  lernenActivePtr = e.pointerId;
+  e.target.setPointerCapture(e.pointerId); // keep events even if pointer leaves canvas
   const r = e.target.getBoundingClientRect();
   lernenLastX = e.clientX - r.left;
   lernenLastY = e.clientY - r.top;
@@ -3391,26 +3406,36 @@ function onLernenDown(e) {
 
 function onLernenMove(e) {
   if (!isDrawingLernen || !lernenCtx) return;
+  if (e.pointerId !== lernenActivePtr) return; // palm rejection
   e.preventDefault();
-  const r = e.target.getBoundingClientRect();
-  const x = e.clientX - r.left;
-  const y = e.clientY - r.top;
-  lernenCtx.beginPath();
-  lernenCtx.moveTo(lernenLastX, lernenLastY);
-  lernenCtx.lineTo(x, y);
-  if (lernenTool === 'eraser') {
-    lernenCtx.globalCompositeOperation = 'destination-out';
-    lernenCtx.lineWidth = 22;
-  } else {
-    lernenCtx.globalCompositeOperation = 'source-over';
-    lernenCtx.strokeStyle = lernenPenColor;
-    lernenCtx.lineWidth   = 2.5;
+  const r    = e.target.getBoundingClientRect();
+  // getCoalescedEvents captures all intermediate points during fast strokes
+  const pts  = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
+  for (const pt of pts) {
+    const x = pt.clientX - r.left;
+    const y = pt.clientY - r.top;
+    lernenCtx.beginPath();
+    lernenCtx.moveTo(lernenLastX, lernenLastY);
+    lernenCtx.lineTo(x, y);
+    if (lernenTool === 'eraser') {
+      lernenCtx.globalCompositeOperation = 'destination-out';
+      lernenCtx.lineWidth = 22;
+    } else {
+      lernenCtx.globalCompositeOperation = 'source-over';
+      lernenCtx.strokeStyle = lernenPenColor;
+      lernenCtx.lineWidth   = 2.5;
+    }
+    lernenCtx.stroke();
+    lernenLastX = x; lernenLastY = y;
   }
-  lernenCtx.stroke();
-  lernenLastX = x; lernenLastY = y;
 }
 
-function onLernenUp() { isDrawingLernen = false; }
+function onLernenUp(e) {
+  if (e.pointerId === lernenActivePtr) {
+    lernenActivePtr = null;
+    isDrawingLernen = false;
+  }
+}
 
 async function checkLernenSolution() {
   if (!lernenTopicData) return;

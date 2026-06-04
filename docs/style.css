@@ -1586,8 +1586,17 @@ html, body {
   background: #fff;
   touch-action: none;
   min-height: 0;
+  -webkit-user-select: none;
+  user-select: none;
 }
-#lernen-canvas { display: block; width: 100%; height: 100%; }
+#lernen-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* ── Milestone stepper ───────────────────────────────────────────────────── */
 .milestone-banner {
