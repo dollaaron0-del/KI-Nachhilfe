@@ -945,8 +945,9 @@ document.getElementById('btn-settings')?.addEventListener('click', () => {
   updateCalcChip();
   document.getElementById('settings-sheet').classList.remove('hidden');
 });
-document.getElementById('settings-bg')?.addEventListener('click', () =>
-  document.getElementById('settings-sheet').classList.add('hidden'));
+document.getElementById('settings-sheet')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('settings-sheet').classList.add('hidden');
+});
 document.getElementById('settings-close-btn')?.addEventListener('click', () =>
   document.getElementById('settings-sheet').classList.add('hidden'));
 document.getElementById('settings-save-btn')?.addEventListener('click', async () => {
