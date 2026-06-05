@@ -1220,6 +1220,14 @@ html, body {
 }
 .settings-ta:focus { outline: none; border-color: var(--accent); }
 .settings-ta::placeholder { color: var(--text2); }
+.settings-input {
+  width: 100%; padding: 11px 14px;
+  background: var(--surface); color: var(--text);
+  border: 1.5px solid var(--border); border-radius: 12px;
+  font-size: 14px; font-family: inherit; box-sizing: border-box;
+}
+.settings-input:focus { outline: none; border-color: var(--accent); }
+.settings-input::placeholder { color: var(--text2); }
 .settings-actions {
   display: flex; gap: 10px; padding: 0 16px 16px;
 }

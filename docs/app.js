@@ -205,6 +205,7 @@ let sessionId      = null;
 let sessionMeta    = null;
 let sessionTxt     = '';
 let customPrompt   = '';
+let prefCalculator = '';
 let selIcon      = ICONS[0];
 let selColor     = COLORS[0];
 let selDiff      = 'mittel';
@@ -537,7 +538,7 @@ MATHEMATIK: Für mathematische Formeln und Gleichungen verwende LaTeX-Notation.
 Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$
 Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
 
-Antworte immer auf Deutsch.${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}${extra ? '\n\n' + extra : ''}`,
+Antworte immer auf Deutsch.${prefCalculator ? `\n\nTASCHENRECHNER: Der Student nutzt einen ${prefCalculator}. Gib bei Rechenaufgaben gezielte Tipps wie man die Berechnung auf diesem Modell effizient eingibt — Tasten, Menüpfade, Modi, nützliche eingebaute Funktionen. Erwähne konkrete Schritte (z.B. "Drücke MENU → 4 → 2" beim Casio).` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}${extra ? '\n\n' + extra : ''}`,
       cache_control: { type: 'ephemeral' },
     },
   ];
@@ -928,6 +929,7 @@ function showWeakTopicsNote() {
 
 document.getElementById('btn-settings')?.addEventListener('click', () => {
   document.getElementById('custom-prompt-ta').value = customPrompt;
+  document.getElementById('calc-model-input').value = prefCalculator;
   document.getElementById('settings-sheet').classList.remove('hidden');
 });
 document.getElementById('settings-bg')?.addEventListener('click', () =>
@@ -935,16 +937,21 @@ document.getElementById('settings-bg')?.addEventListener('click', () =>
 document.getElementById('settings-close-btn')?.addEventListener('click', () =>
   document.getElementById('settings-sheet').classList.add('hidden'));
 document.getElementById('settings-save-btn')?.addEventListener('click', async () => {
-  const val = document.getElementById('custom-prompt-ta').value.trim();
+  const val   = document.getElementById('custom-prompt-ta').value.trim();
+  const calc  = document.getElementById('calc-model-input').value.trim();
   try {
-    await fetch(`/api/subjects/${sessionId}`, {
-      method: 'PATCH',
-      headers: authHeaders(),
-      body: JSON.stringify({ custom_prompt: val }),
-    });
-    customPrompt = val;
+    await Promise.all([
+      fetch(`/api/subjects/${sessionId}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ custom_prompt: val }),
+      }),
+      localforage.setItem('pref_calculator', calc),
+    ]);
+    customPrompt   = val;
+    prefCalculator = calc;
     document.getElementById('settings-sheet').classList.add('hidden');
-    toast('Anweisungen gespeichert.', 'success');
+    toast('Einstellungen gespeichert.', 'success');
     updateSettingsBadge();
   } catch (e) {
     toast('Fehler beim Speichern: ' + e.message, 'error');
@@ -3901,6 +3908,7 @@ async function initDashboard() {
 (async () => {
   try { await initDarkMode(); } catch (_) { applyDarkMode(false); }
   try { renderStreak(); } catch (_) {}
+  try { prefCalculator = (await localforage.getItem('pref_calculator')) || ''; } catch (_) {}
   try {
     await checkAuth();
   } catch (_) {
