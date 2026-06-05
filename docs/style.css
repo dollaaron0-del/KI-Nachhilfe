@@ -432,6 +432,7 @@ html, body {
   border-radius: 12px; padding: 14px 24px; font-size: 16px; font-weight: 600;
   cursor: pointer; transition: background .15s, transform .1s;
   -webkit-tap-highlight-color: transparent; min-height: 50px;
+  touch-action: manipulation;
 }
 .btn-primary:active   { background: var(--acc-dk); transform: scale(.97); }
 .btn-primary:disabled { background: var(--border); color: var(--text2); cursor: default; transform: none; }
@@ -440,6 +441,7 @@ html, body {
   background: var(--bg); color: var(--accent); border: 1.5px solid var(--border);
   border-radius: 10px; padding: 10px 18px; font-size: 15px; font-weight: 500; cursor: pointer;
   transition: background .15s; -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .btn-secondary:active { background: var(--border); }
 
@@ -468,7 +470,7 @@ html, body {
   position: relative; background: var(--surface);
   border-radius: 22px 22px 0 0; padding: 16px 20px calc(20px + var(--safe-b));
   display: flex; flex-direction: column; gap: 16px;
-  max-height: 90dvh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  max-height: 90dvh; overflow-y: auto;
   animation: slideUp .3s cubic-bezier(.32,1,.5,1);
 }
 

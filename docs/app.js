@@ -951,27 +951,24 @@ document.getElementById('settings-sheet')?.addEventListener('click', e => {
 });
 document.getElementById('settings-close-btn')?.addEventListener('click', () =>
   document.getElementById('settings-sheet').classList.add('hidden'));
-document.getElementById('settings-save-btn')?.addEventListener('click', async () => {
-  const val   = document.getElementById('custom-prompt-ta').value.trim();
-  const calc  = document.getElementById('calc-model-input').value.trim();
-  try {
-    await Promise.all([
-      fetch(`/api/subjects/${sessionId}`, {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify({ custom_prompt: val }),
-      }),
-      localforage.setItem('pref_calculator', calc),
-    ]);
-    customPrompt   = val;
-    prefCalculator = calc;
-    updateCalcChip();
-    document.getElementById('settings-sheet').classList.add('hidden');
-    toast(calc ? `✅ ${calc} gespeichert.` : 'Einstellungen gespeichert.', 'success');
-    updateSettingsBadge();
-  } catch (e) {
-    toast('Fehler beim Speichern: ' + e.message, 'error');
-  }
+document.getElementById('settings-save-btn')?.addEventListener('click', () => {
+  const val  = document.getElementById('custom-prompt-ta').value.trim();
+  const calc = document.getElementById('calc-model-input').value.trim();
+  // Close sheet immediately so the tap feels instant on iOS
+  customPrompt   = val;
+  prefCalculator = calc;
+  document.getElementById('settings-sheet').classList.add('hidden');
+  toast(calc ? `✅ ${calc} gespeichert.` : 'Einstellungen gespeichert.', 'success');
+  updateSettingsBadge();
+  // Save async in background — don't block the UI
+  Promise.all([
+    fetch(`/api/subjects/${sessionId}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify({ custom_prompt: val }),
+    }),
+    localforage.setItem('pref_calculator', calc),
+  ]).catch(e => toast('Speichern fehlgeschlagen: ' + e.message, 'error'));
 });
 
 function updateSettingsBadge() {
