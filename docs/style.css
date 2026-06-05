@@ -466,7 +466,7 @@ html, body {
 }
 
 .sheet {
-  position: relative; background: var(--surface);
+  position: relative; z-index: 1; background: var(--surface);
   border-radius: 22px 22px 0 0; padding: 16px 20px calc(20px + var(--safe-b));
   display: flex; flex-direction: column; gap: 16px;
   max-height: 90dvh; overflow-y: auto; -webkit-overflow-scrolling: touch;
@@ -1228,6 +1228,12 @@ html, body {
 }
 .settings-input:focus { outline: none; border-color: var(--accent); }
 .settings-input::placeholder { color: var(--text2); }
+.calc-saved-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 8px; padding: 5px 10px;
+  background: rgba(52,199,89,0.12); border: 1px solid rgba(52,199,89,0.35);
+  border-radius: 20px; font-size: 12px; font-weight: 600; color: #34c759;
+}
 .settings-actions {
   display: flex; gap: 10px; padding: 0 16px 16px;
 }

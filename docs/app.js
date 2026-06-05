@@ -927,9 +927,22 @@ function showWeakTopicsNote() {
 
 // ══ SETTINGS SHEET ═════════════════════════════════════════════════════════
 
+function updateCalcChip() {
+  const chip = document.getElementById('calc-saved-chip');
+  const name = document.getElementById('calc-saved-name');
+  if (!chip || !name) return;
+  if (prefCalculator) {
+    name.textContent = prefCalculator;
+    chip.classList.remove('hidden');
+  } else {
+    chip.classList.add('hidden');
+  }
+}
+
 document.getElementById('btn-settings')?.addEventListener('click', () => {
   document.getElementById('custom-prompt-ta').value = customPrompt;
   document.getElementById('calc-model-input').value = prefCalculator;
+  updateCalcChip();
   document.getElementById('settings-sheet').classList.remove('hidden');
 });
 document.getElementById('settings-bg')?.addEventListener('click', () =>
@@ -950,8 +963,9 @@ document.getElementById('settings-save-btn')?.addEventListener('click', async ()
     ]);
     customPrompt   = val;
     prefCalculator = calc;
+    updateCalcChip();
     document.getElementById('settings-sheet').classList.add('hidden');
-    toast('Einstellungen gespeichert.', 'success');
+    toast(calc ? `✅ ${calc} gespeichert.` : 'Einstellungen gespeichert.', 'success');
     updateSettingsBadge();
   } catch (e) {
     toast('Fehler beim Speichern: ' + e.message, 'error');

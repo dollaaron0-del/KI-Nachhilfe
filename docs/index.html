@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=74" />
+  <link rel="stylesheet" href="style.css?v=75" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -775,7 +775,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=74"></script>
+<script src="app.js?v=75"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
@@ -806,6 +806,7 @@
       </label>
       <input id="calc-model-input" class="settings-input" type="text"
         placeholder="z.B. Casio fx-CG50, TI-84 Plus CE, HP Prime …" />
+      <div id="calc-saved-chip" class="calc-saved-chip hidden">✅ <span id="calc-saved-name"></span> erkannt</div>
     </div>
     <div class="settings-section">
       <label class="settings-label" for="custom-prompt-ta">
