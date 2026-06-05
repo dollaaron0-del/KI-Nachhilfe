@@ -457,14 +457,12 @@ html, body {
 .sheet-overlay {
   position: fixed; inset: 0; z-index: 100;
   display: flex; flex-direction: column; justify-content: flex-end;
+  background: rgba(0,0,0,.45);
+  animation: fadeIn .2s ease;
 }
 .sheet-overlay.hidden { display: none !important; }
 
-.sheet-bg {
-  position: absolute; inset: 0; background: rgba(0,0,0,.45);
-  animation: fadeIn .2s ease;
-  pointer-events: none; /* visually only – click-to-close is on the overlay */
-}
+.sheet-bg { display: none; } /* background now on .sheet-overlay – no blocking element */
 
 .sheet {
   position: relative; background: var(--surface);

@@ -617,8 +617,8 @@ document.getElementById('admin-users-btn')?.addEventListener('click', () => {
   document.getElementById('admin-users-sheet').classList.remove('hidden');
   loadAdminUsers();
 });
-document.getElementById('admin-users-bg')?.addEventListener('click', () => {
-  document.getElementById('admin-users-sheet').classList.add('hidden');
+document.getElementById('admin-users-sheet')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('admin-users-sheet').classList.add('hidden');
 });
 
 async function loadAdminUsers() {
@@ -779,8 +779,9 @@ function showSubjModal() {
   setTimeout(() => document.getElementById('subj-name').focus(), 350);
 }
 
-document.getElementById('subj-modal-bg')?.addEventListener('click', () =>
-  document.getElementById('subj-modal').classList.add('hidden'));
+document.getElementById('subj-modal')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('subj-modal').classList.add('hidden');
+});
 
 document.getElementById('subj-create-btn')?.addEventListener('click', createSubject);
 document.getElementById('subj-name')?.addEventListener('keydown', e => {
@@ -993,7 +994,9 @@ document.getElementById('back-btn')?.addEventListener('click', () => {
 });
 document.getElementById('btn-add-docs')?.addEventListener('click', showUploadSheet);
 document.getElementById('no-docs-btn')?.addEventListener('click', showUploadSheet);
-document.getElementById('upload-bg')?.addEventListener('click', hideUploadSheet);
+document.getElementById('upload-sheet')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) hideUploadSheet();
+});
 
 function showUploadSheet() {
   document.getElementById('upload-status').classList.add('hidden');
@@ -2494,8 +2497,8 @@ document.getElementById('rechnen-sheet-retry-btn')?.addEventListener('click', ()
   document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
   clearCanvas();
 });
-document.getElementById('rechnen-feedback-bg')?.addEventListener('click', () => {
-  document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
+document.getElementById('rechnen-feedback-overlay')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
 });
 
 // Ask sheet buttons
@@ -2503,8 +2506,8 @@ document.getElementById('rechnen-ask-btn')?.addEventListener('click', openAskShe
 document.getElementById('rechnen-ask-close-btn')?.addEventListener('click', () => {
   document.getElementById('rechnen-ask-overlay').classList.add('hidden');
 });
-document.getElementById('rechnen-ask-bg')?.addEventListener('click', () => {
-  document.getElementById('rechnen-ask-overlay').classList.add('hidden');
+document.getElementById('rechnen-ask-overlay')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('rechnen-ask-overlay').classList.add('hidden');
 });
 document.getElementById('rechnen-ask-send-btn')?.addEventListener('click', sendAskQuestion);
 document.getElementById('rechnen-ask-input')?.addEventListener('keydown', e => {
@@ -3829,8 +3832,9 @@ document.getElementById('lernen-qa-btn')?.addEventListener('click', () => {
 });
 document.getElementById('lernen-qa-close-btn')?.addEventListener('click', () =>
   document.getElementById('lernen-qa-overlay').classList.add('hidden'));
-document.getElementById('lernen-qa-bg')?.addEventListener('click', () =>
-  document.getElementById('lernen-qa-overlay').classList.add('hidden'));
+document.getElementById('lernen-qa-overlay')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('lernen-qa-overlay').classList.add('hidden');
+});
 document.getElementById('lernen-qa-send-btn')?.addEventListener('click', lernenQaSend);
 document.getElementById('lernen-qa-input')?.addEventListener('keydown', e => {
   if (e.key === 'Enter') lernenQaSend();
