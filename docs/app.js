@@ -204,8 +204,9 @@ async function checkAuth() {
 let sessionId      = null;
 let sessionMeta    = null;
 let sessionTxt     = '';
-let customPrompt   = '';
-let prefCalculator = '';
+let customPrompt    = '';
+let prefCalculator  = '';
+let currentFeature  = 'chat';
 let selIcon      = ICONS[0];
 let selColor     = COLORS[0];
 let selDiff      = 'mittel';
@@ -349,7 +350,7 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
   const r = await fetch('/api/claude', {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, subject_id: sessionId }),
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, subject_id: sessionId, feature: currentFeature }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -377,7 +378,7 @@ async function claudeLocal(messages, systemBlocks, maxTokens = 2000, opts = {}) 
   const r = await fetch('/api/local', {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, ...opts }),
+    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, feature: currentFeature, ...opts }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -599,7 +600,79 @@ async function loadUsage() {
     document.getElementById('usage-bar').style.background = color;
     const inp = document.getElementById('admin-limit-input');
     if (inp && !inp.value) inp.value = u.limit_eur.toFixed(2);
+    loadAdminUserStats();
   } catch { /* ignore */ }
+}
+
+function adminSwitchTab(tab) {
+  const isKosten = tab === 'kosten';
+  document.getElementById('admin-tab-kosten').classList.toggle('hidden', !isKosten);
+  document.getElementById('admin-tab-analytics').classList.toggle('hidden', isKosten);
+  const btnK = document.getElementById('admin-tab-kosten-btn');
+  const btnA = document.getElementById('admin-tab-analytics-btn');
+  btnK.style.background    = isKosten ? 'var(--accent)' : 'transparent';
+  btnK.style.color         = isKosten ? '#fff' : 'var(--text2)';
+  btnK.style.fontWeight    = isKosten ? '600' : '500';
+  btnA.style.background    = !isKosten ? 'var(--accent)' : 'transparent';
+  btnA.style.color         = !isKosten ? '#fff' : 'var(--text2)';
+  btnA.style.fontWeight    = !isKosten ? '600' : '500';
+  if (!isKosten) loadAdminAnalytics();
+}
+
+async function loadAdminUserStats() {
+  const el = document.getElementById('admin-user-stats');
+  if (!el) return;
+  try {
+    const { users, limit } = await api('/api/admin/user-stats');
+    if (!users.length) { el.innerHTML = '<span style="font-size:13px;color:var(--text2);">Keine Nutzer</span>'; return; }
+    el.innerHTML = users.map(u => {
+      const pct = Math.min(100, (u.today_cost / limit) * 100);
+      const col  = pct >= 90 ? 'var(--red)' : pct >= 60 ? 'var(--yellow)' : 'var(--accent)';
+      const status = !u.approved ? '⏳' : '✅';
+      return `<div style="background:var(--bg);border-radius:10px;padding:8px 10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-weight:600;font-size:13px;">${status} ${esc(u.username)}</span>
+          <span style="font-size:12px;color:var(--text2);">${u.today_cost.toFixed(3)}€ heute · ${u.total_cost.toFixed(2)}€ gesamt</span>
+        </div>
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+          <div style="height:100%;width:${pct.toFixed(1)}%;background:${col};border-radius:2px;transition:width .4s;"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;">${u.today_calls} Aufrufe heute · ${u.total_calls} gesamt</div>
+      </div>`;
+    }).join('');
+  } catch (e) { if (el) el.innerHTML = `<span style="color:var(--red);font-size:13px;">${e.message}</span>`; }
+}
+
+const FEATURE_LABELS = {
+  chat: '💬 Chat', quiz: '❓ Quiz', exam: '📋 Klausur',
+  lernen: '📖 Lernen', ueben: '✏️ Üben', karten: '🃏 Karten',
+  material: '📄 Material', analyse: '📊 Analyse',
+};
+
+async function loadAdminAnalytics() {
+  const featEl = document.getElementById('admin-analytics');
+  const dauEl  = document.getElementById('admin-dau');
+  if (!featEl || !dauEl) return;
+  try {
+    const { features, dau } = await api('/api/admin/analytics');
+    const maxCalls = features.reduce((m, f) => Math.max(m, f.total), 1);
+    featEl.innerHTML = features.length ? features.map(f => {
+      const pct  = Math.round((f.total / maxCalls) * 100);
+      const name = FEATURE_LABELS[f.feature] || f.feature;
+      return `<div style="display:flex;align-items:center;gap:8px;">
+        <span style="min-width:90px;font-size:13px;">${name}</span>
+        <div style="flex:1;height:12px;background:var(--border);border-radius:6px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:6px;"></div>
+        </div>
+        <span style="font-size:12px;color:var(--text2);min-width:50px;text-align:right;">${f.today}h · ${f.week}w · ${f.total}</span>
+      </div>`;
+    }).join('') : '<span style="font-size:13px;color:var(--text2);">Noch keine Daten (werden ab jetzt gesammelt)</span>';
+    dauEl.innerHTML = dau.length ? dau.map(d =>
+      `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);">
+        <span>${d.date}</span><span style="font-weight:600;">${d.users} aktive Nutzer</span>
+      </div>`
+    ).join('') : '<span style="font-size:13px;color:var(--text2);">Noch keine Daten</span>';
+  } catch (e) { if (featEl) featEl.innerHTML = `<span style="color:var(--red);font-size:13px;">${e.message}</span>`; }
 }
 
 document.getElementById('admin-set-limit-btn')?.addEventListener('click', async () => {
@@ -1117,6 +1190,7 @@ document.querySelectorAll('.tab').forEach(b =>
   b.addEventListener('click', () => switchMode(b.dataset.mode)));
 
 function switchMode(mode) {
+  currentFeature = mode;
   // Save canvas if it's been initialized
   if (mathCtx) {
     const canvas = document.getElementById('math-canvas');
