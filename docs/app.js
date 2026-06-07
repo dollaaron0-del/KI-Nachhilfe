@@ -3140,7 +3140,8 @@ const MILESTONE_LEVELS = [
 
 function calculateMilestone() {
   const total    = scannedTopics.length;
-  const topicPct = total > 0 ? learnedTopics.length / total : 0;
+  const uniqueDone = new Set(learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t)).size;
+  const topicPct = total > 0 ? uniqueDone / total : 0;
   const q        = sessionMeta?.quizStats?.questions || [];
   const quizAvg  = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
   const pct      = Math.round((topicPct * 0.7 + quizAvg * 0.3) * 100);
@@ -3183,7 +3184,7 @@ function renderMilestone() {
 
   const infoTxt = selIdx !== null
     ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · <span class="ms-reset-btn">Zurücksetzen</span>`
-    : `${m.pct}% · ${learnedTopics.length}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
+    : `${m.pct}% · ${new Set(learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t)).size}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
 
   banner.innerHTML = `
     <div class="ms-steps">${stepsHtml}</div>
@@ -3243,10 +3244,14 @@ function loadLernpfad() {
   empty.classList.add('hidden');
   list.classList.remove('hidden');
   list.innerHTML = '';
+  const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+  const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
   let foundCurrent = false;
   scannedTopics.forEach(topic => {
-    const isDone    = learnedSet.has(topic);
+    // Check new format (topic::diff) and old format (plain topic name = einsteiger)
+    const isDone = learnedSet.has(topic + '::' + activeDiff) ||
+                   (activeDiff === 'einsteiger' && learnedSet.has(topic));
     const isCurrent = !isDone && !foundCurrent;
     if (isCurrent) foundCurrent = true;
     const item = document.createElement('div');
@@ -3274,7 +3279,8 @@ let lernenActivePtr = null; // palm rejection: track active pointer ID
 let lernenTopicData = null;
 let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
-let selectedDiffIdx = null; // null = auto from progress, 0-4 = manual override
+let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual override
+let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 
 function openTopicView(topic) {
   currentExplainerTopic = topic;
@@ -3289,10 +3295,13 @@ function openTopicView(topic) {
   document.getElementById('lernen-topic-name').textContent = topic;
   document.getElementById('lernen-qa-title').textContent = 'Fragen zu: ' + topic;
   const badge = document.getElementById('lernen-diff-badge');
-  if (badge) {
+  {
     const l = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
-    badge.textContent = `${l.emoji} ${l.name}`;
-    badge.className = `lernen-diff-badge lernen-diff-badge--${l.diff || 'einsteiger'}`;
+    lernenCurrentDiff = l.diff || 'einsteiger';
+    if (badge) {
+      badge.textContent = `${l.emoji} ${l.name}`;
+      badge.className = `lernen-diff-badge lernen-diff-badge--${lernenCurrentDiff}`;
+    }
   }
   document.getElementById('lernen-qa-msgs').innerHTML = '';
   const valuesEl = document.getElementById('lernen-task-values');
@@ -3725,11 +3734,12 @@ async function markTopicDone() {
   const topic = currentExplainerTopic;
   if (!topic || !sessionId) return;
   closeLernenTopic();
-  if (!learnedTopics.includes(topic)) {
-    learnedTopics.push(topic);
+  const key = topic + '::' + lernenCurrentDiff;
+  if (!learnedTopics.includes(key)) {
+    learnedTopics.push(key);
     fetch(`/api/subjects/${sessionId}/learned-topics`, {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ topic }),
+      body: JSON.stringify({ topic: key }),
     }).catch(() => {});
   }
   renderMilestone();

@@ -1,6 +1,6 @@
 'use strict';
-const CACHE = 'ki-tutor-v84';
-const STATIC = ['./', './index.html', './app.js?v=84', './style.css?v=84', './icon.svg', './manifest.json'];
+const CACHE = 'ki-tutor-v85';
+const STATIC = ['./', './index.html', './app.js?v=85', './style.css?v=85', './icon.svg', './manifest.json'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();
