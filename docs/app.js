@@ -601,6 +601,12 @@ async function loadUsage() {
     const inp = document.getElementById('admin-limit-input');
     if (inp && !inp.value) inp.value = u.limit_eur.toFixed(2);
     loadAdminUserStats();
+    // Show pending user count badge
+    api('/api/admin/pending-count').then(r => {
+      const btn = document.getElementById('admin-users-btn');
+      if (btn && r.count > 0) btn.textContent = `👥 Benutzer verwalten · ${r.count} ausstehend ⚠️`;
+      else if (btn) btn.textContent = '👥 Benutzer verwalten';
+    }).catch(() => {});
   } catch { /* ignore */ }
 }
 
@@ -1013,11 +1019,25 @@ function updateCalcChip() {
   }
 }
 
-document.getElementById('btn-settings')?.addEventListener('click', () => {
+document.getElementById('btn-settings')?.addEventListener('click', async () => {
   document.getElementById('custom-prompt-ta').value = customPrompt;
   document.getElementById('calc-model-input').value = prefCalculator;
   updateCalcChip();
   document.getElementById('settings-sheet').classList.remove('hidden');
+  // Load user's own daily usage
+  try {
+    const u = await api('/api/my-usage');
+    const el = document.getElementById('settings-usage-bar-fill');
+    const lbl = document.getElementById('settings-usage-label');
+    const section = document.getElementById('settings-usage-section');
+    if (el && lbl && section) {
+      const pct = Math.min(100, (u.cost_eur / u.limit) * 100);
+      el.style.width = pct.toFixed(1) + '%';
+      el.style.background = pct >= 90 ? 'var(--red)' : pct >= 60 ? 'var(--yellow)' : 'var(--accent)';
+      lbl.textContent = `${u.cost_eur.toFixed(3)}€ / ${u.limit.toFixed(2)}€ heute`;
+      section.style.display = '';
+    }
+  } catch (_) {}
 });
 document.getElementById('settings-sheet')?.addEventListener('click', e => {
   if (!e.target.closest('.sheet')) document.getElementById('settings-sheet').classList.add('hidden');

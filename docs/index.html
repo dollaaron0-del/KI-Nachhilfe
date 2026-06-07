@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=81" />
+  <link rel="stylesheet" href="style.css?v=82" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -804,7 +804,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=81"></script>
+<script src="app.js?v=82"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
@@ -845,6 +845,13 @@
       <textarea id="custom-prompt-ta" class="settings-ta"
         placeholder="Beispiel: Der Professor bewertet besonders das formale Vorgehen beim Beweisführen. Taschenrechner sind in der Prüfung nicht erlaubt. Fokus liegt auf Kapitel 3–6 des Skripts. Prüfungsdauer: 90 Minuten…"
         rows="7"></textarea>
+    </div>
+    <div class="settings-section" id="settings-usage-section" style="display:none">
+      <label class="settings-label">📊 Mein Tagesverbrauch</label>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin:6px 0 4px;">
+        <div id="settings-usage-bar-fill" style="height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width .4s;"></div>
+      </div>
+      <div id="settings-usage-label" style="font-size:12px;color:var(--text2);"></div>
     </div>
     <div class="settings-actions">
       <button class="btn-primary" id="settings-save-btn" onclick="settingsSave()">Speichern</button>

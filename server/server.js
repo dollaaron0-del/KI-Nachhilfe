@@ -334,11 +334,11 @@ app.post('/api/auth/register', async (req, res) => {
   if (password.length < 6)  return res.status(400).json({ error: 'Passwort mindestens 6 Zeichen' });
   const uname = username.trim().toLowerCase();
   try {
-    // First user or ADMIN_USERNAME → auto-approved
+    // First user or ADMIN_USERNAME → auto-approved; everyone else needs manual approval
     const { rows: existing } = await pool.query('SELECT COUNT(*) FROM users');
     const isFirst   = parseInt(existing[0].count) === 0;
     const isAdmin   = ADMIN_USER && uname === ADMIN_USER;
-    const approved  = isFirst || isAdmin || !TG_TOKEN;
+    const approved  = isFirst || isAdmin;
     const approvalToken = approved ? null : require('crypto').randomBytes(24).toString('hex');
 
     const isAdminUser = isFirst || isAdmin;
@@ -1080,6 +1080,27 @@ app.get('/api/subjects/:id/stats', authMiddleware, async (req, res) => {
       docCount: parseInt(docsRes.rows[0].count),
       messageCount: parseInt(msgsRes.rows[0].count),
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── User: own daily usage ──────────────────────────────────────────────────
+app.get('/api/my-usage', authMiddleware, async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const { rows } = await pool.query(
+      'SELECT cost_eur, calls FROM user_usage WHERE user_id=$1 AND date=$2',
+      [req.user.id, today]
+    );
+    res.json({ cost_eur: parseFloat(rows[0]?.cost_eur || 0), calls: rows[0]?.calls || 0, limit: 1.0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Admin: pending user count ──────────────────────────────────────────────
+app.get('/api/admin/pending-count', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM users WHERE approved=false');
+    res.json({ count: rows[0].count });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
