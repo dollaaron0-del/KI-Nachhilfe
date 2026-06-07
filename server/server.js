@@ -255,7 +255,7 @@ async function checkDailyLimit() {
   return { today, cost: rows[0]?.cost_eur || 0, calls: rows[0]?.calls || 0 };
 }
 
-async function recordUsage(today, model, inputTokens, outputTokens) {
+async function recordUsage(today, model, inputTokens, outputTokens, userId = null, feature = null) {
   const mc = TOKEN_COST[model] || TOKEN_COST['claude-sonnet-4-6'];
   const cost = inputTokens * mc.in + outputTokens * mc.out;
   const { rows } = await pool.query(`
@@ -268,6 +268,22 @@ async function recordUsage(today, model, inputTokens, outputTokens) {
       tokens_out = daily_usage.tokens_out + $4
     RETURNING cost_eur
   `, [today, cost, inputTokens, outputTokens]);
+  if (userId) {
+    await pool.query(`
+      INSERT INTO user_usage (user_id, date, cost_eur, calls)
+      VALUES ($1, $2, $3, 1)
+      ON CONFLICT (user_id, date) DO UPDATE SET
+        cost_eur = user_usage.cost_eur + $3,
+        calls    = user_usage.calls + 1
+    `, [userId, today, cost]).catch(() => {});
+  }
+  if (feature) {
+    await pool.query(`
+      INSERT INTO feature_usage (feature, date, calls)
+      VALUES ($1, $2, 1)
+      ON CONFLICT (feature, date) DO UPDATE SET calls = feature_usage.calls + 1
+    `, [feature, today]).catch(() => {});
+  }
   return rows[0]?.cost_eur || 0;
 }
 
@@ -621,12 +637,29 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
       });
     }
 
+    // Per-user daily limit (1€)
+    const USER_DAILY_LIMIT = 1.0;
+    try {
+      const { rows: uRows } = await pool.query(
+        'SELECT cost_eur FROM user_usage WHERE user_id=$1 AND date=$2',
+        [req.user.id, today]
+      );
+      const userCost = parseFloat(uRows[0]?.cost_eur || 0);
+      if (userCost >= USER_DAILY_LIMIT) {
+        return res.status(429).json({
+          error: `Dein persönliches Tageslimit (${USER_DAILY_LIMIT.toFixed(2)}€) ist aufgebraucht. Morgen wieder verfügbar.`,
+        });
+      }
+    } catch (_) {}
+
     const response = await callClaude(params);
+    const feature = req.body.feature || null;
 
     // Record usage then check 90% threshold (non-blocking)
     recordUsage(today, params.model,
       response.usage?.input_tokens || 0,
       response.usage?.output_tokens || 0,
+      req.user.id, feature,
     ).then(newCost => checkAndNotify90pct(today, newCost))
      .catch(e => console.error('Usage tracking error:', e.message));
 
@@ -677,7 +710,7 @@ async function callOllama(messages, maxTokens = 2000, jsonMode = false) {
 }
 
 app.post('/api/local', authMiddleware, async (req, res) => {
-  const { messages, system, max_tokens, json_mode } = req.body;
+  const { messages, system, max_tokens, json_mode, feature } = req.body;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
   }
@@ -713,6 +746,8 @@ app.post('/api/local', authMiddleware, async (req, res) => {
       if (!jsonOk) {
         console.warn('Ollama returned invalid/no JSON in json_mode – falling back to Haiku');
         const haikuText = await callHaiku();
+        const today2 = new Date().toISOString().slice(0, 10);
+        recordUsage(today2, 'claude-haiku-4-5-20251001', 0, 0, req.user.id, feature).catch(() => {});
         return res.json({ content: [{ text: haikuText }] });
       }
     }
@@ -721,6 +756,8 @@ app.post('/api/local', authMiddleware, async (req, res) => {
     console.error('Ollama error:', e.message);
     try {
       const haikuText = await callHaiku();
+      const today3 = new Date().toISOString().slice(0, 10);
+      recordUsage(today3, 'claude-haiku-4-5-20251001', 0, 0, req.user.id, feature).catch(() => {});
       res.json({ content: [{ text: haikuText }] });
     } catch (e2) {
       console.error('Haiku fallback also failed:', e2.message);
@@ -1316,6 +1353,54 @@ app.get('/{*path}', (req, res) => {
   res.sendFile(path.join(__dirname, '../docs/index.html'));
 });
 
+// ── Admin: per-user stats ──────────────────────────────────────────────────
+app.get('/api/admin/user-stats', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const { rows } = await pool.query(`
+      SELECT u.id, u.username, u.approved,
+        COALESCE(ud.cost_eur, 0)::float   AS today_cost,
+        COALESCE(ud.calls, 0)::int         AS today_calls,
+        COALESCE(ut.total_cost, 0)::float  AS total_cost,
+        COALESCE(ut.total_calls, 0)::int   AS total_calls
+      FROM users u
+      LEFT JOIN user_usage ud ON ud.user_id = u.id AND ud.date = $1
+      LEFT JOIN (
+        SELECT user_id, SUM(cost_eur)::float AS total_cost, SUM(calls)::int AS total_calls
+        FROM user_usage GROUP BY user_id
+      ) ut ON ut.user_id = u.id
+      ORDER BY today_cost DESC, u.username ASC
+    `, [today]);
+    res.json({ users: rows, limit: 1.0 });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Admin: anonymous analytics ─────────────────────────────────────────────
+app.get('/api/admin/analytics', authMiddleware, async (req, res) => {
+  if (!await requireAdmin(req, res)) return;
+  try {
+    const { rows: features } = await pool.query(`
+      SELECT feature,
+        SUM(calls)::int AS total,
+        SUM(CASE WHEN date = CURRENT_DATE THEN calls ELSE 0 END)::int AS today,
+        SUM(CASE WHEN date >= CURRENT_DATE - 6 THEN calls ELSE 0 END)::int AS week
+      FROM feature_usage
+      GROUP BY feature ORDER BY total DESC
+    `);
+    const { rows: dau } = await pool.query(`
+      SELECT date::text, COUNT(DISTINCT user_id)::int AS users
+      FROM user_usage WHERE calls > 0
+      GROUP BY date ORDER BY date DESC LIMIT 14
+    `);
+    const { rows: costs } = await pool.query(`
+      SELECT date::text, cost_eur::float, calls::int
+      FROM daily_usage ORDER BY date DESC LIMIT 14
+    `);
+    res.json({ features, dau, costs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── DB Table Init ──────────────────────────────────────────────────────────
 async function initTables() {
   await pool.query(`
@@ -1358,6 +1443,19 @@ async function initTables() {
       topic      TEXT NOT NULL,
       learned_at TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (subject_id, user_id, topic)
+    );
+    CREATE TABLE IF NOT EXISTS user_usage (
+      user_id  INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      date     DATE NOT NULL,
+      cost_eur DECIMAL(10,6) DEFAULT 0,
+      calls    INTEGER DEFAULT 0,
+      PRIMARY KEY(user_id, date)
+    );
+    CREATE TABLE IF NOT EXISTS feature_usage (
+      feature  VARCHAR(50) NOT NULL,
+      date     DATE NOT NULL,
+      calls    INTEGER DEFAULT 0,
+      PRIMARY KEY(feature, date)
     );
   `);
 }
