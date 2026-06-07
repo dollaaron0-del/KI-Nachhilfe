@@ -3611,9 +3611,10 @@ Bewerte SEHR STRENG:
   "loesung": "Vollständige Musterlösung. Bei Teilaufgaben (a/b/c oder 1/2/3) bekommt JEDE Teilaufgabe einen eigenen Absatz, getrennt durch \\n\\n. Beginne jeden Absatz mit der Teilaufgaben-Bezeichnung fett: **a)** ...",
   "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."
 }
-score: 2=vollständig korrekt, 1=Ansatz/Teile richtig aber unvollständig oder Fehler, 0=falsch oder zu wenig
-understood: true NUR wenn score>=2 UND Student zeigt echtes Verständnis des Kernkonzepts.
-Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt.`;
+score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
+KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
+understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
+Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.`;
 
     if (lernenAnswerMode === 'text') {
       const answerText = document.getElementById('lernen-text-answer').value.trim();
