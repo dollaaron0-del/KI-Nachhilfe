@@ -610,20 +610,6 @@ async function loadUsage() {
   } catch { /* ignore */ }
 }
 
-function adminSwitchTab(tab) {
-  const isKosten = tab === 'kosten';
-  document.getElementById('admin-tab-kosten').classList.toggle('hidden', !isKosten);
-  document.getElementById('admin-tab-analytics').classList.toggle('hidden', isKosten);
-  const btnK = document.getElementById('admin-tab-kosten-btn');
-  const btnA = document.getElementById('admin-tab-analytics-btn');
-  btnK.style.background    = isKosten ? 'var(--accent)' : 'transparent';
-  btnK.style.color         = isKosten ? '#fff' : 'var(--text2)';
-  btnK.style.fontWeight    = isKosten ? '600' : '500';
-  btnA.style.background    = !isKosten ? 'var(--accent)' : 'transparent';
-  btnA.style.color         = !isKosten ? '#fff' : 'var(--text2)';
-  btnA.style.fontWeight    = !isKosten ? '600' : '500';
-  if (!isKosten) loadAdminAnalytics();
-}
 
 async function loadAdminUserStats() {
   const el = document.getElementById('admin-user-stats');
@@ -649,37 +635,6 @@ async function loadAdminUserStats() {
   } catch (e) { if (el) el.innerHTML = `<span style="color:var(--red);font-size:13px;">${e.message}</span>`; }
 }
 
-const FEATURE_LABELS = {
-  chat: '💬 Chat', quiz: '❓ Quiz', exam: '📋 Klausur',
-  lernen: '📖 Lernen', ueben: '✏️ Üben', karten: '🃏 Karten',
-  material: '📄 Material', analyse: '📊 Analyse',
-};
-
-async function loadAdminAnalytics() {
-  const featEl = document.getElementById('admin-analytics');
-  const dauEl  = document.getElementById('admin-dau');
-  if (!featEl || !dauEl) return;
-  try {
-    const { features, dau } = await api('/api/admin/analytics');
-    const maxCalls = features.reduce((m, f) => Math.max(m, f.total), 1);
-    featEl.innerHTML = features.length ? features.map(f => {
-      const pct  = Math.round((f.total / maxCalls) * 100);
-      const name = FEATURE_LABELS[f.feature] || f.feature;
-      return `<div style="display:flex;align-items:center;gap:8px;">
-        <span style="min-width:90px;font-size:13px;">${name}</span>
-        <div style="flex:1;height:12px;background:var(--border);border-radius:6px;overflow:hidden;">
-          <div style="height:100%;width:${pct}%;background:var(--accent);border-radius:6px;"></div>
-        </div>
-        <span style="font-size:12px;color:var(--text2);min-width:50px;text-align:right;">${f.today}h · ${f.week}w · ${f.total}</span>
-      </div>`;
-    }).join('') : '<span style="font-size:13px;color:var(--text2);">Noch keine Daten (werden ab jetzt gesammelt)</span>';
-    dauEl.innerHTML = dau.length ? dau.map(d =>
-      `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);">
-        <span>${d.date}</span><span style="font-weight:600;">${d.users} aktive Nutzer</span>
-      </div>`
-    ).join('') : '<span style="font-size:13px;color:var(--text2);">Noch keine Daten</span>';
-  } catch (e) { if (featEl) featEl.innerHTML = `<span style="color:var(--red);font-size:13px;">${e.message}</span>`; }
-}
 
 document.getElementById('admin-set-limit-btn')?.addEventListener('click', async () => {
   const val = parseFloat(document.getElementById('admin-limit-input')?.value);

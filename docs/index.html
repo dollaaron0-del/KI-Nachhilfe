@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=82" />
+  <link rel="stylesheet" href="style.css?v=83" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -63,52 +63,28 @@
             <span style="font-weight:700;font-size:15px;">⚙️ Admin Dashboard</span>
             <span style="font-size:11px;background:#5856d6;color:#fff;border-radius:6px;padding:2px 7px;">Admin</span>
           </div>
-          <!-- Tabs -->
-          <div style="display:flex;background:var(--bg);border-radius:10px;padding:3px;margin-bottom:12px;">
-            <button id="admin-tab-kosten-btn" onclick="adminSwitchTab('kosten')"
-              style="flex:1;padding:7px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff;transition:all .15s;">
-              💰 Kosten
-            </button>
-            <button id="admin-tab-analytics-btn" onclick="adminSwitchTab('analytics')"
-              style="flex:1;padding:7px;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;background:transparent;color:var(--text2);transition:all .15s;">
-              📊 Analysen
-            </button>
+          <!-- Kosten -->
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text2);">
+            <span>Heute gesamt</span><span id="usage-cost" style="font-weight:700;color:var(--text);">Lädt…</span>
           </div>
-          <!-- Kosten Tab -->
-          <div id="admin-tab-kosten">
-            <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text2);">
-              <span>Heute gesamt</span><span id="usage-cost" style="font-weight:700;color:var(--text);">Lädt…</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text2);margin-top:3px;">
-              <span>Globales Tageslimit</span><span id="usage-limit">–</span>
-            </div>
-            <div style="margin:8px 0;height:5px;background:var(--border);border-radius:3px;overflow:hidden;">
-              <div id="usage-bar" style="height:100%;background:var(--green);border-radius:3px;width:0%;transition:width .4s;"></div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
-              <input id="admin-limit-input" type="number" step="0.5" min="0.1" placeholder="Globales Limit €"
-                style="flex:1;padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;" />
-              <button id="admin-set-limit-btn" class="btn-secondary" style="padding:7px 12px;font-size:13px;white-space:nowrap;">Setzen</button>
-            </div>
-            <p style="margin:5px 0 10px;font-size:11px;color:var(--text2);">Telegram: <code>/setlimit 2.00</code> · <code>/status</code></p>
-            <!-- Per-user table -->
-            <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Nutzerverbrauch (1€/Tag pro Nutzer)</div>
-            <div id="admin-user-stats" style="display:flex;flex-direction:column;gap:6px;">
-              <span style="font-size:13px;color:var(--text2);">Lädt…</span>
-            </div>
-            <button id="admin-users-btn" class="btn-secondary" style="width:100%;margin-top:10px;font-size:13px;">👥 Benutzer verwalten</button>
+          <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text2);margin-top:3px;">
+            <span>Globales Tageslimit</span><span id="usage-limit">–</span>
           </div>
-          <!-- Analytics Tab -->
-          <div id="admin-tab-analytics" class="hidden">
-            <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Feature-Nutzung (anonym)</div>
-            <div id="admin-analytics" style="display:flex;flex-direction:column;gap:6px;">
-              <span style="font-size:13px;color:var(--text2);">Lädt…</span>
-            </div>
-            <div style="margin-top:14px;font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Aktive Nutzer (14 Tage)</div>
-            <div id="admin-dau" style="display:flex;flex-direction:column;gap:4px;">
-              <span style="font-size:13px;color:var(--text2);">Lädt…</span>
-            </div>
+          <div style="margin:8px 0;height:5px;background:var(--border);border-radius:3px;overflow:hidden;">
+            <div id="usage-bar" style="height:100%;background:var(--green);border-radius:3px;width:0%;transition:width .4s;"></div>
           </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+            <input id="admin-limit-input" type="number" step="0.5" min="0.1" placeholder="Globales Limit €"
+              style="flex:1;padding:7px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;" />
+            <button id="admin-set-limit-btn" class="btn-secondary" style="padding:7px 12px;font-size:13px;white-space:nowrap;">Setzen</button>
+          </div>
+          <p style="margin:5px 0 10px;font-size:11px;color:var(--text2);">Telegram: <code>/setlimit 2.00</code> · <code>/status</code></p>
+          <!-- Per-user table -->
+          <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Nutzerverbrauch (1€/Tag pro Nutzer)</div>
+          <div id="admin-user-stats" style="display:flex;flex-direction:column;gap:6px;">
+            <span style="font-size:13px;color:var(--text2);">Lädt…</span>
+          </div>
+          <button id="admin-users-btn" class="btn-secondary" style="width:100%;margin-top:10px;font-size:13px;">👥 Benutzer verwalten</button>
         </div>
       </div>
       <div id="setup-error" class="sheet-status error hidden"></div>
@@ -804,7 +780,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=82"></script>
+<script src="app.js?v=83"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
