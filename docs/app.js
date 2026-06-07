@@ -3602,7 +3602,7 @@ Bei Rechenaufgaben: Berechne die korrekte Antwort selbst und vergleiche exakt.`;
       if (!ev) throw new Error('Keine Auswertung');
     }
 
-    const understood = ev.understood === true;
+    const understood = ev.understood === true && ev.score >= 2;
     const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
     const scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '⚠️' : '❌';
 
