@@ -951,16 +951,14 @@ document.getElementById('settings-sheet')?.addEventListener('click', e => {
 });
 document.getElementById('settings-close-btn')?.addEventListener('click', () =>
   document.getElementById('settings-sheet').classList.add('hidden'));
-document.getElementById('settings-save-btn')?.addEventListener('click', () => {
+function settingsSave() {
   const val  = document.getElementById('custom-prompt-ta').value.trim();
   const calc = document.getElementById('calc-model-input').value.trim();
-  // Close sheet immediately so the tap feels instant on iOS
   customPrompt   = val;
   prefCalculator = calc;
   document.getElementById('settings-sheet').classList.add('hidden');
   toast(calc ? `✅ ${calc} gespeichert.` : 'Einstellungen gespeichert.', 'success');
   updateSettingsBadge();
-  // Save async in background — don't block the UI
   Promise.all([
     fetch(`/api/subjects/${sessionId}`, {
       method: 'PATCH',
@@ -969,7 +967,8 @@ document.getElementById('settings-save-btn')?.addEventListener('click', () => {
     }),
     localforage.setItem('pref_calculator', calc),
   ]).catch(e => toast('Speichern fehlgeschlagen: ' + e.message, 'error'));
-});
+}
+document.getElementById('settings-save-btn')?.addEventListener('click', settingsSave);
 
 function updateSettingsBadge() {
   const btn = document.getElementById('btn-settings');
