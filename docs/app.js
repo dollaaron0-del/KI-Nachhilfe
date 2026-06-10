@@ -499,6 +499,24 @@ async function extractPDF(file, onProgress) {
 }
 
 // ── System prompt builder ──────────────────────────────────────────────────
+// Liefert den Lernstoff für Prompts. Bei sehr großem Material (viele Dokumente)
+// wird gleichmäßig über Anfang, Mitte und Ende gesampelt, damit ALLE Themen
+// abgedeckt sind – nicht nur die ersten Seiten des ersten Dokuments.
+function docsForPrompt(limit = 40000) {
+  if (!sessionTxt) {
+    return '(noch keine Dokumente hochgeladen – weise den Studenten darauf hin, Unterlagen hochzuladen)';
+  }
+  if (sessionTxt.length <= limit) return sessionTxt;
+  const headLen = Math.floor(limit * 0.45);
+  const midLen  = Math.floor(limit * 0.30);
+  const tailLen = limit - headLen - midLen;
+  const midStart = Math.floor(sessionTxt.length / 2 - midLen / 2);
+  const head = sessionTxt.slice(0, headLen);
+  const mid  = sessionTxt.slice(midStart, midStart + midLen);
+  const tail = sessionTxt.slice(sessionTxt.length - tailLen);
+  return `${head}\n\n[…Auszug aus der Mitte der Unterlagen…]\n\n${mid}\n\n[…Auszug vom Ende der Unterlagen…]\n\n${tail}`;
+}
+
 function sysBlocks(extra = '') {
   return [
     {
@@ -530,7 +548,7 @@ ANTWORTFORMAT IM CHAT:
 4. Optional: eine einprägsame Eselsbrücke oder Verknüpfung zu anderen Konzepten
 
 --- UNTERLAGEN (einzige erlaubte Wissensquelle) ---
-${sessionTxt ? sessionTxt.slice(0, 6000) + (sessionTxt.length > 6000 ? '\n[…gekürzt]' : '') : '(noch keine Dokumente hochgeladen – weise den Studenten darauf hin, Unterlagen hochzuladen)'}
+${docsForPrompt()}
 --- ENDE DER UNTERLAGEN ---
 
 DIAGRAMME: Wenn es das Verständnis fördert, erstelle Mermaid-Diagramme in \`\`\`mermaid ... \`\`\` Blöcken.
@@ -2145,18 +2163,23 @@ async function scanTopics() {
   selTopic = null;
   document.getElementById('aufgaben-gen-btn').disabled = true;
 
-  const prompt = `Analysiere den folgenden Lernstoff und erstelle eine Liste der wichtigsten Themen und Unterthemen.
-Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter je Thema):
+  const prompt = `Analysiere den GESAMTEN folgenden Lernstoff und erstelle eine vollständige Themenliste.
+
+WICHTIG: Die Unterlagen bestehen aus mehreren Dokumenten und decken viele verschiedene Themengebiete ab.
+Verteile die Themen gleichmäßig über den GESAMTEN Stoff – von Anfang bis Ende, über alle Dokumente hinweg.
+Konzentriere dich NICHT nur auf die ersten Seiten oder ein einzelnes Kapitel. Erfasse die ganze Breite des Fachs.
+
+Antworte NUR als JSON-Array mit 15–20 kurzen Thema-Strings (max. 4 Wörter je Thema):
 ["Thema 1", "Thema 2", "Thema 3", ...]`;
 
   try {
     const raw = await claudeLocal(
-      [{ role: 'user', content: 'Welche Hauptthemen gibt es in den Unterlagen?' }],
-      sysBlocks(prompt), 400,
+      [{ role: 'user', content: 'Liste alle Hauptthemen aus dem gesamten Stoff auf – über alle Dokumente und Kapitel verteilt, nicht nur den Anfang.' }],
+      sysBlocks(prompt), 700,
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
-    scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
+    scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 20);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/topics`, {
@@ -3794,12 +3817,15 @@ async function loadTopicContent(topic) {
   const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
   const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '');
   try {
-    const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
       [{ role: 'user', content: `Erkläre das Thema "${topic}" auf dem vorgegebenen Niveau.` }],
       [{
         type: 'text',
-        text: `Du erklärst das Thema "${topic}" aus folgenden Unterlagen:\n${ctx || '(keine Unterlagen)'}\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
+        text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
+        cache_control: { type: 'ephemeral' },
+      }, {
+        type: 'text',
+        text: `Erkläre das Thema "${topic}" AUSSCHLIESSLICH auf Basis der obigen Unterlagen. Suche die zum Thema passenden Stellen im gesamten Material.\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
       }],
       2500
     );
@@ -3846,12 +3872,15 @@ async function regenLernenTask() {
     const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
     const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '');
-    const ctx = sessionTxt ? sessionTxt.slice(0, 2000) : '';
     const raw = await claudeLocal(
       [{ role: 'user', content: `Generiere eine neue Übungsaufgabe zum Thema "${topic}".` }],
       [{
         type: 'text',
-        text: `Generiere eine NEUE, andere Übungsaufgabe zum Thema "${topic}".\n${ctx ? `Kontext: ${ctx}\n` : ''}${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
+        text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
+        cache_control: { type: 'ephemeral' },
+      }, {
+        type: 'text',
+        text: `Generiere eine NEUE, andere Übungsaufgabe zum Thema "${topic}" – ausschließlich auf Basis der obigen Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
       }],
       600
     );
@@ -4176,8 +4205,8 @@ async function scanModuleStructure(btn) {
       sysBlocks(`Analysiere den Lernstoff und strukturiere ihn als Lernreise in didaktischer Reihenfolge: Grundlagen zuerst, darauf aufbauende Konzepte danach.
 Antworte NUR als JSON:
 {"kapitel":[{"titel":"Kurzer Kapiteltitel (max 5 Wörter)","lernziel":"Nach diesem Kapitel kannst du …(ein Satz, konkret)","themen":["Thema 1","Thema 2"]}]}
-Regeln: 3-6 Kapitel, je 2-4 Themen, Themennamen max. 4 Wörter, insgesamt max. 14 Themen. Jedes Thema nur einmal.`),
-      900
+Regeln: 4-8 Kapitel, je 2-5 Themen, Themennamen max. 4 Wörter, insgesamt max. 24 Themen. Decke die GANZE Breite des Stoffs ab (alle Dokumente/Kapitel), nicht nur den Anfang. Jedes Thema nur einmal.`),
+      1300
     );
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Keine Struktur erkannt');
@@ -4188,7 +4217,7 @@ Regeln: 3-6 Kapitel, je 2-4 Themen, Themennamen max. 4 Wörter, insgesamt max. 1
     const seen = new Set();
     kapitel.forEach(k => { k.themen = k.themen.filter(t => typeof t === 'string' && !seen.has(t) && seen.add(t)); });
     moduleStructure = { kapitel: kapitel.filter(k => k.themen.length) };
-    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 16);
+    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 24);
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/structure`, {

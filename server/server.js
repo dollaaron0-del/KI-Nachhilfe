@@ -717,11 +717,11 @@ function ollamaMsgs(system, messages) {
 async function callOllama(messages, maxTokens = 2000, jsonMode = false) {
   const body = {
     model: OLLAMA_MODEL, messages, max_tokens: maxTokens,
-    stream: false, options: { num_ctx: 8192 },
+    stream: false, options: { num_ctx: 16384 },
   };
   if (jsonMode) body.response_format = { type: 'json_object' };
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 45_000);
+  const timer = setTimeout(() => ac.abort(), 60_000);
   try {
     const r = await fetch(OLLAMA_URL, {
       method: 'POST',
@@ -810,7 +810,7 @@ app.post('/api/local/stream', authMiddleware, async (req, res) => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model: OLLAMA_MODEL, messages: ollamaMsgs(system, messages),
-        max_tokens: max_tokens || 3000, stream: true, options: { num_ctx: 8192 },
+        max_tokens: max_tokens || 3000, stream: true, options: { num_ctx: 16384 },
       }),
     });
     if (!r.ok) throw new Error(`Ollama ${r.status}`);
