@@ -272,6 +272,11 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   showScreen('setup-screen');
 });
 
+document.getElementById('btn-settings-subj').addEventListener('click', () => {
+  document.getElementById('api-key-input').value = '';
+  showScreen('setup-screen');
+});
+
 // ══ SUBJECTS SCREEN ════════════════════════════════════════════════════════
 
 async function loadSubjects() {
