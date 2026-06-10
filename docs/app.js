@@ -2028,17 +2028,12 @@ document.getElementById('karten-done-btn').addEventListener('click', initKarten)
 (async () => {
   await initDarkMode();
   renderStreak();
-  const key      = await DB.apiKey();
-  const subjects = await DB.subjects();
-  if (key && subjects.length > 0) {
-    showScreen('subjects-screen');
-    loadSubjects();
-  } else if (key) {
-    // Key vorhanden aber keine Fächer → Setup zeigen damit Key bestätigt werden kann
+  const key = await DB.apiKey();
+  if (key) {
+    // Key vorausfüllen damit der Nutzer nur einmal "Speichern" tippt
     document.getElementById('api-key-input').value = key;
-    document.getElementById('setup-error').classList.add('hidden');
   }
-  // Kein Key → Setup-Screen bleibt aktiv (Standard)
+  // Setup-Screen immer zuerst zeigen – Nutzer bestätigt Key und gelangt dann zu den Fächern
 })();
 
 // ── Service Worker ─────────────────────────────────────────────────────────
