@@ -1453,6 +1453,7 @@ Antworte NUR als JSON:
 
     showQuizState(document.getElementById('quiz-fb'));
     refreshAnalysisState();
+    sessionTick('quiz');
   } catch (e) {
     document.getElementById('quiz-submit').disabled = false;
     document.getElementById('q-box').textContent = '⚠️ ' + e.message;
@@ -1547,6 +1548,7 @@ function endBlitz() {
       `<div class="blitz-row ${r.correct ? 'ok' : 'fail'}">${r.correct ? '✅' : '❌'} Frage ${i + 1}</div>`
     ).join('')}</div>`;
   showQuizState(document.getElementById('quiz-blitz-done'));
+  sessionTick('quiz-complete');
 }
 
 document.getElementById('blitz-again-btn')?.addEventListener('click', startBlitz);
@@ -3145,6 +3147,7 @@ function endReview() {
     </div>
     <div class="done-pct" style="color:${pct>=70?'var(--green)':pct>=50?'var(--yellow)':'var(--red)'}">${pct}% gewusst</div>`;
   showKartenState(document.getElementById('karten-done'));
+  sessionTick('karten');
 }
 
 document.getElementById('karten-gen-btn')?.addEventListener('click', generateKarten);
@@ -3253,6 +3256,9 @@ function initLernen() {
     api(`/api/subjects/${sessionId}/learned-topics`)
       .then(t => { learnedTopics = Array.isArray(t) ? t : []; renderMilestone(); loadLernpfad(); })
       .catch(() => {});
+    localforage.getItem(`lsession_${sessionId}`)
+      .then(s => { currentSession = s || null; renderSessionBanner(); })
+      .catch(() => renderSessionBanner());
   }
 }
 
@@ -3322,6 +3328,158 @@ function loadLernpfad() {
     scannedTopics.forEach(topic => list.appendChild(makeItem(topic)));
   }
 }
+
+// ══ LERN-SESSION (Zeitbudget-Planer) ═══════════════════════════════════════
+let currentSession = null;
+
+const SESSION_SPECS = {
+  '30m':        { topics: 1, quiz: 0, pauses: 0, label: '⚡ 30-Minuten-Session' },
+  '1h':         { topics: 2, quiz: 3, pauses: 0, label: '⏱️ 1-Stunden-Session' },
+  'halbtag':    { topics: 4, quiz: 5, pauses: 2, label: '🌤️ Halbtags-Session' },
+  'wochenende': { topics: 6, quiz: 8, pauses: 3, label: '🏕️ Wochenend-Etappe' },
+};
+
+function sessionStoreKey() { return `lsession_${sessionId}`; }
+
+async function buildSessionPlan(budget) {
+  const spec = SESSION_SPECS[budget];
+  const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+  const activeDiff = activeLvl.diff || 'einsteiger';
+  const learnedSet = new Set(learnedTopics);
+  const isDone = t => learnedSet.has(t + '::' + activeDiff) ||
+                      (activeDiff === 'einsteiger' && learnedSet.has(t));
+  const open = scannedTopics.filter(t => !isDone(t));
+  const done = scannedTopics.filter(isDone);
+
+  const items = [];
+  let pausesLeft = spec.pauses;
+  let topicCount = 0;
+  const pushTopic = (t, repeat) => {
+    items.push({ type: 'topic', label: `${repeat ? '🔁' : '📖'} ${t}`, target: t, done: false });
+    topicCount++;
+    if (pausesLeft > 0 && topicCount % 2 === 0 && topicCount < spec.topics) {
+      items.push({ type: 'pause', label: '☕ Kurze Pause (10 Min)', done: false });
+      pausesLeft--;
+    }
+  };
+  open.slice(0, spec.topics).forEach(t => pushTopic(t, false));
+  if (topicCount < spec.topics) {
+    done.slice(0, spec.topics - topicCount).forEach(t => pushTopic(t, true));
+  }
+
+  try {
+    const cards = await DB.cards(sessionId);
+    const due = cards.filter(c => c.due <= Date.now()).length;
+    if (due > 0) items.push({ type: 'karten', label: `🃏 ${due} Karten wiederholen`, done: false });
+  } catch (_) {}
+
+  if (spec.quiz > 0) {
+    items.push({ type: 'quiz', label: `❓ ${spec.quiz} Quiz-Fragen beantworten`, need: spec.quiz, got: 0, done: false });
+  }
+  return { budget, label: spec.label, startedAt: new Date().toISOString(), items };
+}
+
+function saveSession() {
+  if (!sessionId) return;
+  if (currentSession) localforage.setItem(sessionStoreKey(), currentSession).catch(() => {});
+  else localforage.removeItem(sessionStoreKey()).catch(() => {});
+}
+
+function sessionTick(kind, target) {
+  if (!currentSession) return;
+  let item = null;
+  if (kind === 'topic')  item = currentSession.items.find(i => !i.done && i.type === 'topic' && i.target === target);
+  if (kind === 'karten') item = currentSession.items.find(i => !i.done && i.type === 'karten');
+  if (kind === 'quiz' || kind === 'quiz-complete') {
+    item = currentSession.items.find(i => !i.done && i.type === 'quiz');
+    if (item && kind === 'quiz') {
+      item.got = (item.got || 0) + 1;
+      if (item.got < item.need) { saveSession(); renderSessionBanner(); return; }
+    }
+  }
+  if (!item) return;
+  item.done = true;
+  saveSession();
+  renderSessionBanner();
+  const left = currentSession.items.filter(i => !i.done).length;
+  if (left > 0) toast(`✓ Session: noch ${left} Schritt${left === 1 ? '' : 'e'}`, 'success', 2000);
+}
+
+function renderSessionBanner() {
+  const el = document.getElementById('session-banner');
+  if (!el) return;
+  if (!scannedTopics.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+
+  if (!currentSession) {
+    el.innerHTML = `<button class="btn-primary btn-sm" id="session-start-btn">▶️ Lern-Session starten</button>
+      <span class="session-hint">Sag mir wie viel Zeit du hast – ich plane den Rest.</span>`;
+    el.querySelector('#session-start-btn').addEventListener('click', () =>
+      document.getElementById('session-sheet').classList.remove('hidden'));
+    return;
+  }
+
+  const items = currentSession.items;
+  const doneN = items.filter(i => i.done).length;
+  const allDone = doneN === items.length;
+
+  if (allDone) {
+    const mins = Math.max(1, Math.round((Date.now() - new Date(currentSession.startedAt)) / 60000));
+    const topics = items.filter(i => i.type === 'topic').length;
+    el.innerHTML = `
+      <div class="session-done-card">
+        <div class="session-done-title">🎉 Session geschafft!</div>
+        <div class="session-done-stats">${topics} Themen · ${items.length} Schritte · ${mins} Min</div>
+        <button class="btn-primary btn-sm" id="session-finish-btn">Abschließen</button>
+      </div>`;
+    el.querySelector('#session-finish-btn').addEventListener('click', () => {
+      currentSession = null; saveSession(); renderSessionBanner();
+    });
+    return;
+  }
+
+  const pct = Math.round((doneN / items.length) * 100);
+  const rows = items.map((i, idx) => {
+    const sub = i.type === 'quiz' && !i.done && i.got > 0 ? ` <span class="session-item-sub">${i.got}/${i.need}</span>` : '';
+    return `<div class="session-item${i.done ? ' done' : ''}" data-idx="${idx}">
+      <span class="session-item-check">${i.done ? '✅' : '○'}</span>
+      <span class="session-item-label">${esc(i.label)}${sub}</span>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="session-head">
+      <span class="session-title">${currentSession.label}</span>
+      <span class="session-count">${doneN}/${items.length}</span>
+      <button class="session-abort" title="Session beenden">✕</button>
+    </div>
+    <div class="session-bar"><div class="session-bar-fill" style="width:${pct}%"></div></div>
+    <div class="session-items">${rows}</div>`;
+  el.querySelector('.session-abort').addEventListener('click', () => {
+    if (!confirm('Session wirklich beenden?')) return;
+    currentSession = null; saveSession(); renderSessionBanner();
+  });
+  el.querySelectorAll('.session-item').forEach(row => row.addEventListener('click', () => {
+    const item = currentSession.items[+row.dataset.idx];
+    if (!item || item.done) return;
+    if (item.type === 'topic')  openTopicView(item.target);
+    if (item.type === 'karten') switchMode('karten');
+    if (item.type === 'quiz')   switchMode('quiz');
+    if (item.type === 'pause')  { item.done = true; saveSession(); renderSessionBanner(); }
+  }));
+}
+
+document.querySelectorAll('.session-budget-btn').forEach(b => b.addEventListener('click', async () => {
+  document.getElementById('session-sheet').classList.add('hidden');
+  currentSession = await buildSessionPlan(b.dataset.budget);
+  saveSession();
+  renderSessionBanner();
+  toast('Session geplant – tippe den ersten Schritt an!', 'success', 3000);
+}));
+document.getElementById('session-sheet-close')?.addEventListener('click', () =>
+  document.getElementById('session-sheet').classList.add('hidden'));
+document.getElementById('session-sheet')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('session-sheet').classList.add('hidden');
+});
 
 // ── Lernen canvas state ────────────────────────────────────────────────────
 let lernenCtx       = null;
@@ -3835,6 +3993,7 @@ async function markTopicDone() {
   }
   renderMilestone();
   loadLernpfad();
+  sessionTick('topic', topic);
   toast(`✅ "${topic}" als gelernt markiert`, 'success', 2500);
 }
 

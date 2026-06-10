@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=89" />
+  <link rel="stylesheet" href="style.css?v=90" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -609,6 +609,7 @@
   <div id="panel-lernen" class="panel">
     <!-- View 1: Lernpfad list -->
     <div id="lernen-pfad-view" class="lernen-content">
+      <div id="session-banner" class="session-banner hidden"></div>
       <div id="milestone-banner" class="milestone-banner hidden"></div>
       <div class="lernpfad-section-title" id="lernpfad-title" style="display:none">Lernpfad</div>
       <div id="lernpfad-empty" class="cx-state">
@@ -780,7 +781,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=89"></script>
+<script src="app.js?v=90"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->
@@ -796,6 +797,35 @@
     <div id="admin-users-list" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
       <p style="color:var(--label-secondary);text-align:center;">Lädt…</p>
     </div>
+  </div>
+</div>
+
+<!-- ══ SESSION SHEET ══════════════════════════════════════════════════════ -->
+<div id="session-sheet" class="sheet-overlay hidden">
+  <div class="sheet-bg" id="session-bg"></div>
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">▶️ Lern-Session planen</h2>
+    <p style="margin:0;font-size:14px;color:var(--text2);">Wie viel Zeit hast du? Ich stelle dir den passenden Mix zusammen.</p>
+    <div class="session-budget-grid">
+      <button class="session-budget-btn" data-budget="30m">
+        <span class="sb-emoji">⚡</span><span class="sb-name">30 Minuten</span>
+        <span class="sb-desc">1 Thema + fällige Karten</span>
+      </button>
+      <button class="session-budget-btn" data-budget="1h">
+        <span class="sb-emoji">⏱️</span><span class="sb-name">1 Stunde</span>
+        <span class="sb-desc">2 Themen, Karten &amp; kurzes Quiz</span>
+      </button>
+      <button class="session-budget-btn" data-budget="halbtag">
+        <span class="sb-emoji">🌤️</span><span class="sb-name">Halbtag</span>
+        <span class="sb-desc">4 Themen mit Pausen, Karten &amp; Quiz</span>
+      </button>
+      <button class="session-budget-btn" data-budget="wochenende">
+        <span class="sb-emoji">🏕️</span><span class="sb-name">Wochenend-Etappe</span>
+        <span class="sb-desc">6 Themen, Pausen, Karten &amp; großes Quiz</span>
+      </button>
+    </div>
+    <button class="btn-secondary btn-sm" id="session-sheet-close">Abbrechen</button>
   </div>
 </div>
 
