@@ -875,9 +875,20 @@ async function openSubject(subj) {
   sessionTxt = await DB.content(subj.id);
   examDocContext = await loadExamDocContext(subj.id);
   customPrompt = subj.custom_prompt || '';
-  scannedTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => []);
-  moduleStructure = await api(`/api/subjects/${subj.id}/structure`).catch(() => null);
-  learnedTopics = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => []);
+  const serverTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => null);
+  scannedTopics = (serverTopics && serverTopics.length)
+    ? serverTopics
+    : (await localforage.getItem(`st_${subj.id}`).catch(() => null)) || [];
+
+  const serverStruct = await api(`/api/subjects/${subj.id}/structure`).catch(() => null);
+  moduleStructure = serverStruct || (await localforage.getItem(`ms_${subj.id}`).catch(() => null));
+
+  const serverLearned = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => null);
+  const rawLearned = (serverLearned && serverLearned.length)
+    ? serverLearned
+    : (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
+  // Normalize old-format entries (plain topic name) → topic::einsteiger
+  learnedTopics = rawLearned.map(t => (t.includes('::') ? t : t + '::einsteiger'));
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
@@ -1165,6 +1176,8 @@ async function handleUpload(files) {
     if (scannedTopics.length || moduleStructure) {
       scannedTopics = [];
       moduleStructure = null;
+      localforage.removeItem(`st_${sessionId}`).catch(() => {});
+      localforage.removeItem(`ms_${sessionId}`).catch(() => {});
       fetch(`/api/subjects/${sessionId}/topics`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
     }
 
@@ -2110,6 +2123,7 @@ Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter 
     if (!m) throw new Error('Keine Themen erkannt');
     scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
+    localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/topics`, {
       method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ topics: scannedTopics }),
@@ -3261,7 +3275,13 @@ function initLernen() {
   loadLernpfad();
   if (sessionId) {
     api(`/api/subjects/${sessionId}/learned-topics`)
-      .then(t => { learnedTopics = Array.isArray(t) ? t : []; renderMilestone(); loadLernpfad(); })
+      .then(t => {
+        const raw = Array.isArray(t) && t.length ? t
+          : learnedTopics; // keep in-memory if server empty
+        learnedTopics = raw.map(e => e.includes('::') ? e : e + '::einsteiger');
+        localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
+        renderMilestone(); loadLernpfad();
+      })
       .catch(() => {});
     localforage.getItem(`lsession_${sessionId}`)
       .then(s => { currentSession = s || null; renderSessionBanner(); })
@@ -3284,9 +3304,7 @@ function loadLernpfad() {
   const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
-  // Check new format (topic::diff) and old format (plain topic name = einsteiger)
-  const isTopicDone = topic => learnedSet.has(topic + '::' + activeDiff) ||
-                               (activeDiff === 'einsteiger' && learnedSet.has(topic));
+  const isTopicDone = topic => learnedSet.has(topic + '::' + activeDiff);
   let foundCurrent = false;
   const makeItem = topic => {
     const isDone    = isTopicDone(topic);
@@ -3415,8 +3433,7 @@ async function buildSessionPlan(budget) {
   const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
-  const isDone = t => learnedSet.has(t + '::' + activeDiff) ||
-                      (activeDiff === 'einsteiger' && learnedSet.has(t));
+  const isDone = t => learnedSet.has(t + '::' + activeDiff);
   const open = scannedTopics.filter(t => !isDone(t));
   const done = scannedTopics.filter(isDone);
 
@@ -3499,8 +3516,7 @@ function renderSessionBanner() {
     const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const activeDiff = activeLvl.diff || 'einsteiger';
     const lSet = new Set(learnedTopics);
-    const next = scannedTopics.find(t => !lSet.has(t + '::' + activeDiff) &&
-                 !(activeDiff === 'einsteiger' && lSet.has(t)));
+    const next = scannedTopics.find(t => !lSet.has(t + '::' + activeDiff));
     el.innerHTML = `
       <div class="session-done-card">
         <div class="session-done-title">🎉 Session geschafft!</div>
@@ -4082,6 +4098,7 @@ async function markTopicDone() {
   const key = topic + '::' + lernenCurrentDiff;
   if (!learnedTopics.includes(key)) {
     learnedTopics.push(key);
+    localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/learned-topics`, {
       method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ topic: key }),
@@ -4094,8 +4111,7 @@ async function markTopicDone() {
   // Kapitel komplett? → Konfetti
   if (moduleStructure?.kapitel) {
     const learnedSet = new Set(learnedTopics);
-    const tDone = t => learnedSet.has(t + '::' + lernenCurrentDiff) ||
-                       (lernenCurrentDiff === 'einsteiger' && learnedSet.has(t));
+    const tDone = t => learnedSet.has(t + '::' + lernenCurrentDiff);
     const kap = moduleStructure.kapitel.find(k => k.themen.includes(topic));
     if (kap && kap.themen.every(tDone)) {
       confettiBurst();
@@ -4127,6 +4143,8 @@ Regeln: 3-6 Kapitel, je 2-4 Themen, Themennamen max. 4 Wörter, insgesamt max. 1
     kapitel.forEach(k => { k.themen = k.themen.filter(t => typeof t === 'string' && !seen.has(t) && seen.add(t)); });
     moduleStructure = { kapitel: kapitel.filter(k => k.themen.length) };
     scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 16);
+    localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
+    localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/structure`, {
       method: 'POST', headers: authHeaders(),
       body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
