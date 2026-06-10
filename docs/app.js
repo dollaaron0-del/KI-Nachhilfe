@@ -3701,8 +3701,8 @@ Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exak
             `</details>`;
         }
         html += `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">` +
-          `<button class="btn-primary btn-sm" onclick="retryLernenSameTask()">🔁 Nochmal, gleiche Aufgabe</button>` +
-          `<button class="btn-secondary btn-sm" onclick="regenLernenTask()">→ Neue Aufgabe</button>` +
+          `<button class="btn-primary btn-sm" onclick="regenLernenTask()">→ Neue Aufgabe zum Thema</button>` +
+          `<button class="btn-secondary btn-sm" onclick="retryLernenSameTask()">🔁 Gleiche Aufgabe</button>` +
           `</div>`;
       } else {
         if (ev.loesung) {
