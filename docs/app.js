@@ -3493,10 +3493,17 @@ function renderSessionBanner() {
   if (allDone) {
     const mins = Math.max(1, Math.round((Date.now() - new Date(currentSession.startedAt)) / 60000));
     const topics = items.filter(i => i.type === 'topic').length;
+    // Ausblick: nächstes offenes Thema als Köder für morgen
+    const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+    const activeDiff = activeLvl.diff || 'einsteiger';
+    const lSet = new Set(learnedTopics);
+    const next = scannedTopics.find(t => !lSet.has(t + '::' + activeDiff) &&
+                 !(activeDiff === 'einsteiger' && lSet.has(t)));
     el.innerHTML = `
       <div class="session-done-card">
         <div class="session-done-title">🎉 Session geschafft!</div>
         <div class="session-done-stats">${topics} Themen · ${items.length} Schritte · ${mins} Min</div>
+        ${next ? `<div class="session-next-teaser">Als Nächstes wartet: <strong>${esc(next)}</strong></div>` : ''}
         <button class="btn-primary btn-sm" id="session-finish-btn">Abschließen</button>
       </div>`;
     el.querySelector('#session-finish-btn').addEventListener('click', () => {
