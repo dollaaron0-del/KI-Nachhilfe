@@ -1082,12 +1082,27 @@ const DOC_TYPES = [
   { value: 'lehrbuch',        label: '📚 Lehrbuch' },
 ];
 
+// ── Doc-meta localforage helpers ──────────────────────────────────────────
+function docMetaKey() { return `docmeta_${sessionId}`; }
+async function loadDocMeta() {
+  return (await localforage.getItem(docMetaKey()).catch(() => null)) || [];
+}
+async function saveDocMeta(meta) {
+  await localforage.setItem(docMetaKey(), meta).catch(() => {});
+}
+
 async function renderDocList() {
   const wrap = document.getElementById('doc-list-wrap');
   const list = document.getElementById('doc-list');
   if (!sessionId) return;
 
-  const docs = await api(`/api/subjects/${sessionId}/documents`).catch(() => []);
+  // Try server first; fall back to localforage docmeta
+  let docs = await api(`/api/subjects/${sessionId}/documents`).catch(() => []);
+  let fromServer = docs.length > 0;
+  if (!fromServer) {
+    const meta = await loadDocMeta();
+    docs = meta.map(m => ({ id: m.localId, filename: m.name, doc_type: m.docType, uploaded_at: m.uploadedAt }));
+  }
   if (!docs.length) { wrap.classList.add('hidden'); return; }
 
   wrap.classList.remove('hidden');
@@ -1112,14 +1127,30 @@ async function renderDocList() {
       <select class="doc-type-sel" title="Dokumenttyp">${optionsHtml}</select>
       <button class="doc-del-btn" title="Löschen">🗑</button>`;
     row.querySelector('.doc-type-sel').addEventListener('change', async e => {
-      await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, {
-        method: 'PATCH', headers: authHeaders(),
-        body: JSON.stringify({ doc_type: e.target.value }),
-      });
+      const newType = e.target.value;
+      // Update server if doc has a real server ID
+      if (fromServer) {
+        await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, {
+          method: 'PATCH', headers: authHeaders(),
+          body: JSON.stringify({ doc_type: newType }),
+        }).catch(() => {});
+      }
+      // Always update localforage docmeta
+      const meta = await loadDocMeta();
+      const entry = meta.find(m => m.name === doc.filename);
+      if (entry) { entry.docType = newType; await saveDocMeta(meta); }
+      // Refresh exam context so new tag is used immediately in task generation
+      examDocContext = await loadExamDocContext(sessionId);
     });
     row.querySelector('.doc-del-btn').addEventListener('click', async () => {
       if (!confirm(`"${doc.filename}" löschen?`)) return;
-      await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });
+      if (fromServer) {
+        await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });
+      }
+      // Remove from localforage docmeta
+      const meta = await loadDocMeta();
+      const idx = meta.findIndex(m => m.name === doc.filename);
+      if (idx !== -1) { meta.splice(idx, 1); await saveDocMeta(meta); }
       renderDocList();
     });
     list.appendChild(row);
@@ -1160,7 +1191,14 @@ async function handleUpload(files) {
         bar.style.width = p + '%'; pct.textContent = p + '%';
       });
       added += '\n\n' + text;
-      newFiles.push({ name, pages, uploadedAt: new Date().toISOString() });
+      const uploadedAt = new Date().toISOString();
+      newFiles.push({ name, pages, uploadedAt });
+      // Save snippet to localforage docmeta for doc-type filtering
+      const meta = await loadDocMeta();
+      if (!meta.find(m => m.name === name)) {
+        meta.push({ localId: `local_${Date.now()}_${name}`, name, uploadedAt, docType: '', snippet: text.slice(0, 2000) });
+        await saveDocMeta(meta);
+      }
       // Save to server for RAG + auto-card generation
       fetch(`/api/subjects/${sessionId}/documents/text`, {
         method: 'POST', headers: authHeaders(),
@@ -1173,12 +1211,9 @@ async function handleUpload(files) {
     updatePruefungsnahBtns();
     renderRechnenDocs();
 
+    // Keep existing topics/structure – user can re-scan manually if needed
     if (scannedTopics.length || moduleStructure) {
-      scannedTopics = [];
-      moduleStructure = null;
-      localforage.removeItem(`st_${sessionId}`).catch(() => {});
-      localforage.removeItem(`ms_${sessionId}`).catch(() => {});
-      fetch(`/api/subjects/${sessionId}/topics`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
+      toast('Neues Dokument hinzugefügt. Themen neu erkennen? → Lernen-Tab → "Themen erkennen"', 'info', 5000);
     }
 
     await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
@@ -3654,15 +3689,26 @@ function lernenCacheKey(topic) {
 }
 
 async function loadExamDocContext(subjId) {
+  const examTypes = new Set(['klausur', 'altklausur', 'uebungsblatt']);
+  const docLabel = d => {
+    const found = DOC_TYPES.find(t => t.value === (d.doc_type || d.docType));
+    return found ? found.label : (d.doc_type || d.docType || '');
+  };
   try {
     const docs = await api(`/api/subjects/${subjId}/documents/typed?types=klausur,altklausur,uebungsblatt`);
-    if (!docs || !docs.length) return '';
-    const docLabel = d => {
-      const found = DOC_TYPES.find(t => t.value === d.doc_type);
-      return found ? found.label : d.doc_type;
-    };
-    return docs.map(d => `[${docLabel(d)}: ${d.filename}]\n${d.content}`).join('\n\n---\n\n');
-  } catch { return ''; }
+    if (docs && docs.length) {
+      return docs.map(d => `[${docLabel(d)}: ${d.filename}]\n${d.content}`).join('\n\n---\n\n');
+    }
+  } catch {}
+  // Fallback: use localforage docmeta snippets
+  try {
+    const meta = (await localforage.getItem(`docmeta_${subjId}`).catch(() => null)) || [];
+    const examDocs = meta.filter(m => examTypes.has(m.docType));
+    if (examDocs.length) {
+      return examDocs.map(d => `[${docLabel(d)}: ${d.name}]\n${d.snippet || ''}`).join('\n\n---\n\n');
+    }
+  } catch {}
+  return '';
 }
 
 function getDiffInstr(effLevel, examCtx) {
