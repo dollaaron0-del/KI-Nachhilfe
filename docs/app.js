@@ -3281,11 +3281,13 @@ let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
 let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual override
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
+let lernenAttempts    = 0;            // reset per task, shown in success toast
 
 function openTopicView(topic) {
   currentExplainerTopic = topic;
   lernenTopicData = null;
   lernenQaMsgs    = [];
+  lernenAttempts  = 0;
   lernenCtx       = null;
   lernenActivePtr = null;
   isDrawingLernen = false;
@@ -3502,12 +3504,25 @@ async function regenLernenTask() {
       document.getElementById('lernen-done-btn').classList.add('hidden');
       const rb = document.getElementById('lernen-result-bar');
       if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
+      lernenAttempts = 0;
       toast('Neue Aufgabe generiert', 'success', 2000);
     } else {
       toast('Keine neue Aufgabe erhalten', 'warn');
     }
   } catch (e) { toast('Fehler: ' + e.message, 'error'); }
   btn.disabled = false; btn.innerHTML = '🔄 Neue Aufgabe';
+}
+
+function retryLernenSameTask() {
+  if (lernenCtx) {
+    const wrap = document.getElementById('lernen-canvas-wrap');
+    lernenCtx.fillStyle = '#ffffff';
+    lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
+  }
+  const ta = document.getElementById('lernen-text-answer');
+  if (ta) ta.value = '';
+  const rb = document.getElementById('lernen-result-bar');
+  if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
 }
 
 function initLernenCanvas() {
@@ -3661,32 +3676,54 @@ Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exak
       if (!ev) throw new Error('Keine Auswertung');
     }
 
+    lernenAttempts++;
     const understood = ev.understood === true && ev.score >= 2;
     const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
-    const scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '⚠️' : '❌';
+    const scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '💪' : '🔁';
 
     if (resultBar) {
       resultBar.className = `lernen-result-bar lernen-result-bar--${scoreClass}`;
-      let html =
-        `<div class="lernen-result-verdict lernen-result-verdict--${scoreClass}">${scoreIcon} ${esc(ev.feedback || '')}</div>`;
-      if (ev.loesung) {
-        html += `<div class="lernen-result-prose">` +
-          `<div class="lernen-result-label">📌 Musterlösung</div>` +
-          `<div class="lernen-result-text">${safeHtml(md(ev.loesung))}</div>` +
+      let html = `<div class="lernen-result-verdict lernen-result-verdict--${scoreClass}">${scoreIcon} ${esc(ev.feedback || '')}</div>`;
+
+      if (ev.score < 2) {
+        // Einschätzung zuerst – was konkret falsch war, kurz und direkt
+        if (ev.einschaetzung) {
+          html += `<div class="lernen-result-prose">` +
+            `<div class="lernen-result-label">💬 Was war leicht daneben</div>` +
+            `<div class="lernen-result-text">${safeHtml(md(ev.einschaetzung))}</div>` +
+            `</div>`;
+        }
+        // Musterlösung eingeklappt – nur bei Bedarf aufklappen
+        if (ev.loesung) {
+          html += `<details class="lernen-result-details">` +
+            `<summary>📌 Musterlösung anzeigen</summary>` +
+            `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(ev.loesung))}</div>` +
+            `</details>`;
+        }
+        html += `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">` +
+          `<button class="btn-primary btn-sm" onclick="retryLernenSameTask()">🔁 Nochmal, gleiche Aufgabe</button>` +
+          `<button class="btn-secondary btn-sm" onclick="regenLernenTask()">→ Neue Aufgabe</button>` +
           `</div>`;
-      }
-      if (ev.einschaetzung) {
-        html += `<div class="lernen-result-prose">` +
-          `<div class="lernen-result-label">💬 Einschätzung deiner Antwort</div>` +
-          `<div class="lernen-result-text">${safeHtml(md(ev.einschaetzung))}</div>` +
-          `</div>`;
-      }
-      if (!understood) {
-        html += `<button class="btn-secondary btn-sm lernen-result-retry-btn" onclick="regenLernenTask()">🔄 Neue Aufgabe zum Thema</button>`;
+      } else {
+        if (ev.loesung) {
+          html += `<div class="lernen-result-prose">` +
+            `<div class="lernen-result-label">📌 Musterlösung</div>` +
+            `<div class="lernen-result-text">${safeHtml(md(ev.loesung))}</div>` +
+            `</div>`;
+        }
+        if (ev.einschaetzung) {
+          html += `<div class="lernen-result-prose">` +
+            `<div class="lernen-result-label">💬 Einschätzung deiner Antwort</div>` +
+            `<div class="lernen-result-text">${safeHtml(md(ev.einschaetzung))}</div>` +
+            `</div>`;
+        }
       }
       resultBar.innerHTML = html;
     }
-    if (understood) document.getElementById('lernen-done-btn').classList.remove('hidden');
+    if (understood) {
+      document.getElementById('lernen-done-btn').classList.remove('hidden');
+      if (lernenAttempts > 1) toast(`🎯 Beim ${lernenAttempts}. Versuch geschafft!`, 'success', 3500);
+    }
   } catch (e) {
     toast('Fehler beim Prüfen: ' + e.message, 'error');
     if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
