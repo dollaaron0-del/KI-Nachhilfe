@@ -24,6 +24,7 @@ let blitzResults   = [];
 let scannedTopics  = [];
 let selTopic       = null;
 let selAufgabenType = 'uebung';
+let selAufgabenDiff = 'mittel';
 let aufgabenAnsVis  = false;
 let currentAufgabe  = '';
 let rechnenDiff     = 'mittel';
@@ -1266,18 +1267,22 @@ async function scanTopics() {
   selTopic = null;
   document.getElementById('aufgaben-gen-btn').disabled = true;
 
-  const prompt = `Analysiere den folgenden Lernstoff und erstelle eine Liste der wichtigsten Themen und Unterthemen.
-Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter je Thema):
+  const prompt = `Analysiere den folgenden Lernstoff und erstelle eine vollständige Themenliste.
+
+WICHTIG: Scanne ALLE hochgeladenen Dokumente gleichmäßig – verteile die Themen proportional über den gesamten Stoff, nicht nur über die ersten Seiten oder ein einzelnes Dokument.
+Erfasse alle Haupt- und wichtigen Unterthemen aus dem gesamten Material.
+
+Antworte NUR als JSON-Array mit maximal 25 kurzen Thema-Strings (max. 4 Wörter je Thema):
 ["Thema 1", "Thema 2", "Thema 3", ...]`;
 
   try {
     const raw = await claude(
-      [{ role: 'user', content: 'Welche Hauptthemen gibt es in den Unterlagen?' }],
-      sysBlocks(prompt), 400,
+      [{ role: 'user', content: 'Bitte alle Themen aus ALLEN Dokumenten vollständig auflisten – jeden Teilbereich berücksichtigen.' }],
+      sysBlocks(prompt), 800,
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
-    scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
+    scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 25);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     renderTopicChips();
     showAufgabenState(document.getElementById('aufgaben-topics'));
@@ -1310,6 +1315,12 @@ document.querySelectorAll('.aufg-type-btn').forEach(b => b.addEventListener('cli
   b.classList.add('active');
 }));
 
+document.querySelectorAll('.diff-btn-a').forEach(b => b.addEventListener('click', () => {
+  selAufgabenDiff = b.dataset.adiff;
+  document.querySelectorAll('.diff-btn-a').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+}));
+
 document.getElementById('aufgaben-gen-btn').addEventListener('click', generateAufgaben);
 document.getElementById('aufgaben-back-btn').addEventListener('click', () => {
   showAufgabenState(document.getElementById('aufgaben-topics'));
@@ -1330,33 +1341,45 @@ async function generateAufgaben() {
 
   const isKlausur = selAufgabenType === 'klausur';
 
+  const diffDesc = {
+    einsteiger: 'Einsteiger – nur Grundbegriffe und einfache Definitionen, kein Vorwissen nötig, kurze klare Fragen',
+    leicht:     'Leicht – Grundverständnis, einfache Zusammenhänge erklären',
+    mittel:     'Mittel – Anwendung und Analyse, typisches Klausurniveau',
+    schwer:     'Schwer – tiefes Verständnis, komplexe Zusammenhänge, kritisches Denken erforderlich',
+    pruefungsnah: 'Prüfungsnah – exakt wie in echten Klausuren formuliert, präzise Sprache, alle Teilbereiche des Themas',
+  }[selAufgabenDiff] || 'Mittel';
+
   const prompt = isKlausur
     ? `Erstelle eine kompakte Mini-Klausur NUR zum Thema "${selTopic}" aus dem Fach "${sessionMeta.name}".
+Schwierigkeit: ${diffDesc}
 
 # Mini-Klausur: ${selTopic}
-**Punkte:** XX | **Zeit:** ca. XX Min
+**Schwierigkeit:** ${selAufgabenDiff} | **Punkte:** XX | **Zeit:** ca. XX Min
 
 ## Teil A – Multiple Choice (je 1 Punkt)
-[3 MC-Fragen mit Optionen a–d, nur zu "${selTopic}"]
+[3 MC-Fragen mit Optionen a–d, NUR zu "${selTopic}", Schwierigkeit: ${diffDesc}]
 
 ## Teil B – Kurzantworten (je 3 Punkte)
-[2 Kurzantwort-Fragen zu "${selTopic}"]
+[2 Kurzantwort-Fragen zu "${selTopic}", Schwierigkeit angepasst]
 
 ## Teil C – Ausführliche Antwort (6 Punkte)
-[1 tiefe Verständnisfrage zu "${selTopic}"]
+[1 Verständnisfrage zu "${selTopic}" passend zur Schwierigkeit]
 
 ---
 ## Lösungsschlüssel
 [Vollständige Lösungen mit Erklärungen]`
     : `Erstelle 5 abwechslungsreiche Übungsaufgaben NUR zum Thema "${selTopic}" aus dem Fach "${sessionMeta.name}".
 
+Schwierigkeit: ${diffDesc}
+Alle 5 Aufgaben müssen dieser Schwierigkeit entsprechen – nicht schwerer, nicht leichter.
+
 Aufgaben sollen echtes Verständnis testen – nicht reines Auswendiglernen:
 - Mix aus: Erklären, Anwenden, Vergleichen, Beispiele nennen, Zusammenhänge erläutern
-- Jede Aufgabe mit Punktzahl (1–4 Punkte je nach Schwierigkeit)
-- Aufsteigende Schwierigkeit
+- Jede Aufgabe mit Punktzahl (1–4 Punkte je nach Teilaufgabe)
+- Aufsteigende Komplexität innerhalb der gewählten Schwierigkeit
 
 Format:
-## Übungsaufgaben: ${selTopic}
+## Übungsaufgaben: ${selTopic} (${selAufgabenDiff})
 
 **Aufgabe 1 (X Pkt.):** [Aufgabe]
 

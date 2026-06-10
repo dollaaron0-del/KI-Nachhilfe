@@ -325,13 +325,13 @@ html, body {
 
 .diff-row  { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 500; }
 .diff-group { display: flex; gap: 6px; }
-.diff-btn  {
+.diff-btn, .diff-btn-a {
   border: 1.5px solid var(--border); background: var(--surface);
   border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 500;
   cursor: pointer; color: var(--text2); transition: all .15s;
   -webkit-tap-highlight-color: transparent;
 }
-.diff-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.diff-btn.active, .diff-btn-a.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 
 .exam-toolbar {
   display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-bottom: 16px;

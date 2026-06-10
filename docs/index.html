@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -282,6 +282,16 @@
           <button class="aufg-type-btn active" data-type="uebung">📝 Übungsaufgaben</button>
           <button class="aufg-type-btn" data-type="klausur">📋 Klausur lite</button>
         </div>
+        <div class="diff-row">
+          <span>Schwierigkeit:</span>
+          <div class="diff-group">
+            <button class="diff-btn-a" data-adiff="einsteiger">Einsteiger</button>
+            <button class="diff-btn-a" data-adiff="leicht">Leicht</button>
+            <button class="diff-btn-a active" data-adiff="mittel">Mittel</button>
+            <button class="diff-btn-a" data-adiff="schwer">Schwer</button>
+            <button class="diff-btn-a" data-adiff="pruefungsnah">Prüfungsnah</button>
+          </div>
+        </div>
         <button class="btn-primary" id="aufgaben-gen-btn" disabled>Aufgaben generieren</button>
         <button class="btn-secondary btn-sm" id="aufgaben-rescan-btn">Themen neu erkennen</button>
       </div>
@@ -502,6 +512,6 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>
