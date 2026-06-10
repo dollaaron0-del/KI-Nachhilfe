@@ -215,6 +215,7 @@ let examAnsVis   = false;
 let blitzIdx       = 0;
 let blitzResults   = [];
 let scannedTopics  = [];
+let moduleStructure = null; // { kapitel: [{titel, lernziel, themen:[...]}] }
 let selTopic       = null;
 let selAufgabenType = 'uebung';
 let aufgabenAnsVis  = false;
@@ -873,6 +874,7 @@ async function openSubject(subj) {
   sessionTxt = await DB.content(subj.id);
   customPrompt = subj.custom_prompt || '';
   scannedTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => []);
+  moduleStructure = await api(`/api/subjects/${subj.id}/structure`).catch(() => null);
   learnedTopics = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => []);
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
@@ -1157,8 +1159,9 @@ async function handleUpload(files) {
     updatePruefungsnahBtns();
     renderRechnenDocs();
 
-    if (scannedTopics.length) {
+    if (scannedTopics.length || moduleStructure) {
       scannedTopics = [];
+      moduleStructure = null;
       fetch(`/api/subjects/${sessionId}/topics`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
     }
 
@@ -3268,11 +3271,12 @@ function loadLernpfad() {
   const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
+  // Check new format (topic::diff) and old format (plain topic name = einsteiger)
+  const isTopicDone = topic => learnedSet.has(topic + '::' + activeDiff) ||
+                               (activeDiff === 'einsteiger' && learnedSet.has(topic));
   let foundCurrent = false;
-  scannedTopics.forEach(topic => {
-    // Check new format (topic::diff) and old format (plain topic name = einsteiger)
-    const isDone = learnedSet.has(topic + '::' + activeDiff) ||
-                   (activeDiff === 'einsteiger' && learnedSet.has(topic));
+  const makeItem = topic => {
+    const isDone    = isTopicDone(topic);
     const isCurrent = !isDone && !foundCurrent;
     if (isCurrent) foundCurrent = true;
     const item = document.createElement('div');
@@ -3286,8 +3290,37 @@ function loadLernpfad() {
       <span class="lernpfad-name">${esc(topic)}${diffTag}</span>
       <button class="${btnClass}">${btnLabel}</button>`;
     item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
-    list.appendChild(item);
-  });
+    return item;
+  };
+
+  if (moduleStructure?.kapitel?.length) {
+    // Modul-Reise: chapters with Lernziel + progress
+    moduleStructure.kapitel.forEach((k, ki) => {
+      const doneCount = k.themen.filter(isTopicDone).length;
+      const total     = k.themen.length;
+      const kapDone   = total > 0 && doneCount === total;
+      const head = document.createElement('div');
+      head.className = `kap-head${kapDone ? ' kap-done' : ''}`;
+      head.innerHTML = `
+        <div class="kap-num">${kapDone ? '✓' : ki + 1}</div>
+        <div class="kap-info">
+          <div class="kap-title">${esc(k.titel)}</div>
+          ${k.lernziel ? `<div class="kap-ziel">🎯 ${esc(k.lernziel)}</div>` : ''}
+        </div>
+        <span class="kap-progress${kapDone ? ' kap-progress-done' : ''}">${doneCount}/${total}</span>`;
+      list.appendChild(head);
+      k.themen.forEach(topic => list.appendChild(makeItem(topic)));
+    });
+  } else {
+    // Old flat list + hint to upgrade to chapters
+    const hint = document.createElement('div');
+    hint.className = 'kap-restructure-hint';
+    hint.innerHTML = `<span>🗺️ Neu: Strukturiere deinen Lernpfad in Kapitel mit Lernzielen.</span>
+      <button class="btn-secondary btn-sm">Jetzt strukturieren</button>`;
+    hint.querySelector('button').addEventListener('click', e => scanModuleStructure(e.target));
+    list.appendChild(hint);
+    scannedTopics.forEach(topic => list.appendChild(makeItem(topic)));
+  }
 }
 
 // ── Lernen canvas state ────────────────────────────────────────────────────
@@ -3805,32 +3838,46 @@ async function markTopicDone() {
   toast(`✅ "${topic}" als gelernt markiert`, 'success', 2500);
 }
 
-document.getElementById('lernpfad-scan-btn')?.addEventListener('click', async () => {
+async function scanModuleStructure(btn) {
   if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
-  const btn = document.getElementById('lernpfad-scan-btn');
+  const orig = btn.textContent;
   btn.disabled = true; btn.textContent = '…';
   try {
     const raw = await claudeLocal(
-      [{ role: 'user', content: 'Welche Hauptthemen gibt es in den Unterlagen?' }],
-      sysBlocks(`Analysiere den Lernstoff und erstelle eine Liste der wichtigsten Themen.
-Antworte NUR als JSON-Array mit maximal 12 kurzen Thema-Strings (max. 4 Wörter je Thema):
-["Thema 1", "Thema 2", ...]`),
-      400
+      [{ role: 'user', content: 'Strukturiere den Lernstoff als Lernreise in Kapiteln.' }],
+      sysBlocks(`Analysiere den Lernstoff und strukturiere ihn als Lernreise in didaktischer Reihenfolge: Grundlagen zuerst, darauf aufbauende Konzepte danach.
+Antworte NUR als JSON:
+{"kapitel":[{"titel":"Kurzer Kapiteltitel (max 5 Wörter)","lernziel":"Nach diesem Kapitel kannst du …(ein Satz, konkret)","themen":["Thema 1","Thema 2"]}]}
+Regeln: 3-6 Kapitel, je 2-4 Themen, Themennamen max. 4 Wörter, insgesamt max. 14 Themen. Jedes Thema nur einmal.`),
+      900
     );
-    const m = raw.match(/\[[\s\S]*\]/);
-    if (!m) throw new Error('Keine Themen erkannt');
-    const topics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 12);
-    if (!topics.length) throw new Error('Keine Themen gefunden');
-    scannedTopics = topics;
-    fetch(`/api/subjects/${sessionId}/topics`, {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Keine Struktur erkannt');
+    const data = JSON.parse(m[0]);
+    const kapitel = (data.kapitel || []).filter(k =>
+      k && typeof k.titel === 'string' && Array.isArray(k.themen) && k.themen.length);
+    if (!kapitel.length) throw new Error('Keine Kapitel gefunden');
+    const seen = new Set();
+    kapitel.forEach(k => { k.themen = k.themen.filter(t => typeof t === 'string' && !seen.has(t) && seen.add(t)); });
+    moduleStructure = { kapitel: kapitel.filter(k => k.themen.length) };
+    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 16);
+    fetch(`/api/subjects/${sessionId}/structure`, {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ topics: scannedTopics }),
+      body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
     }).catch(() => {});
     renderMilestone();
     loadLernpfad();
-    toast('Lernpfad wurde erstellt!', 'success');
+    toast('🗺️ Deine Modul-Reise ist bereit!', 'success');
   } catch (e) {
     toast('Fehler beim Erkennen: ' + e.message, 'error');
+  }
+  btn.disabled = false; btn.textContent = orig;
+}
+
+document.getElementById('lernpfad-scan-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('lernpfad-scan-btn');
+  try {
+    await scanModuleStructure(btn);
   } finally {
     btn.disabled = false; btn.textContent = 'Themen erkennen';
   }

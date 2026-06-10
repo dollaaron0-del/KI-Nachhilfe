@@ -1272,6 +1272,27 @@ app.delete('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Module structure (Kapitel + Lernziele), stored alongside flat topics
+app.get('/api/subjects/:id/structure', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT structure FROM scanned_topics WHERE subject_id=$1', [req.params.id]);
+    res.json(rows[0]?.structure || null);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/subjects/:id/structure', authMiddleware, async (req, res) => {
+  const { structure, topics } = req.body;
+  if (!structure || !Array.isArray(topics)) return res.status(400).json({ error: 'structure und topics erforderlich' });
+  try {
+    await pool.query(
+      `INSERT INTO scanned_topics (subject_id, topics, structure, updated_at) VALUES ($1,$2,$3,now())
+       ON CONFLICT (subject_id) DO UPDATE SET topics=$2, structure=$3, updated_at=now()`,
+      [req.params.id, JSON.stringify(topics), JSON.stringify(structure)]
+    );
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SAVED AUFGABEN
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1449,6 +1470,7 @@ async function initTables() {
     CREATE TABLE IF NOT EXISTS scanned_topics (
       subject_id TEXT PRIMARY KEY,
       topics     JSONB NOT NULL,
+      structure  JSONB,
       updated_at TIMESTAMPTZ DEFAULT now()
     );
     CREATE TABLE IF NOT EXISTS saved_aufgaben (
