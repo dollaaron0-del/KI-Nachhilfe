@@ -1355,6 +1355,30 @@ html, body {
   border-radius: 10px; padding: 3px 9px;
 }
 .kap-progress-done { color: var(--green); border-color: var(--green); }
+/* ── XP & Konfetti ─────────────────────────────────────────────────────── */
+.xp-chip {
+  --xp-pct: 0%;
+  font-size: 12px; font-weight: 800; padding: 5px 10px; border-radius: 12px;
+  border: 1.5px solid var(--border); color: var(--text);
+  background: linear-gradient(90deg, rgba(88,86,214,.28) var(--xp-pct), transparent var(--xp-pct));
+  white-space: nowrap;
+}
+.xp-chip.xp-goal-done {
+  border-color: var(--green); color: var(--green);
+  background: linear-gradient(90deg, rgba(52,199,89,.22) 100%, transparent 100%);
+}
+.confetti-wrap {
+  position: fixed; inset: 0; pointer-events: none; z-index: 9999; overflow: hidden;
+}
+.confetti-piece {
+  position: absolute; top: -14px; width: 9px; height: 14px; border-radius: 2px;
+  animation: confetti-fall linear forwards;
+}
+@keyframes confetti-fall {
+  0%   { transform: translateY(0) rotate(0deg);      opacity: 1; }
+  100% { transform: translateY(105vh) rotate(560deg); opacity: .7; }
+}
+
 /* ── Lern-Session ──────────────────────────────────────────────────────── */
 .session-banner {
   margin: 12px 16px 0; padding: 12px 14px;

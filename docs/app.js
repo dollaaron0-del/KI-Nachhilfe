@@ -880,6 +880,7 @@ async function openSubject(subj) {
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
   document.getElementById('header-label').textContent = `${subj.emoji || subj.icon || '📚'}  ${subj.name}`;
+  updateXpChip();
   const appHeader = document.querySelector('.app-header');
   if (appHeader && subj.color) appHeader.style.borderTopColor = subj.color;
   updateHeaderPages();
@@ -1454,6 +1455,8 @@ Antworte NUR als JSON:
     showQuizState(document.getElementById('quiz-fb'));
     refreshAnalysisState();
     sessionTick('quiz');
+    if (ev.score >= 2) { addXP(ev.score === 3 ? 15 : 10); comboUp(); }
+    else { if (ev.score === 1) addXP(5); comboReset(); }
   } catch (e) {
     document.getElementById('quiz-submit').disabled = false;
     document.getElementById('q-box').textContent = '⚠️ ' + e.message;
@@ -1549,6 +1552,7 @@ function endBlitz() {
     ).join('')}</div>`;
   showQuizState(document.getElementById('quiz-blitz-done'));
   sessionTick('quiz-complete');
+  if (correct > 0) addXP(correct * 8, `Blitz-Quiz: ${correct}/5`);
 }
 
 document.getElementById('blitz-again-btn')?.addEventListener('click', startBlitz);
@@ -3148,6 +3152,7 @@ function endReview() {
     <div class="done-pct" style="color:${pct>=70?'var(--green)':pct>=50?'var(--yellow)':'var(--red)'}">${pct}% gewusst</div>`;
   showKartenState(document.getElementById('karten-done'));
   sessionTick('karten');
+  addXP(20, 'Karten-Session');
 }
 
 document.getElementById('karten-gen-btn')?.addEventListener('click', generateKarten);
@@ -3329,6 +3334,68 @@ function loadLernpfad() {
   }
 }
 
+// ══ BELOHNUNG: XP, Tagesziel, Combo, Konfetti ══════════════════════════════
+const XP_DAILY_GOAL = 100;
+const XP_BY_DIFF = { einsteiger: 40, leicht: 55, mittel: 70, schwer: 90, pruefungsnah: 120 };
+let comboCount = 0;
+
+function xpKey() { return `xp_${new Date().toISOString().slice(0, 10)}`; }
+
+async function addXP(n, reason) {
+  if (!n) return;
+  const prev = (await localforage.getItem(xpKey()).catch(() => 0)) || 0;
+  const now  = prev + n;
+  localforage.setItem(xpKey(), now).catch(() => {});
+  updateXpChip(now);
+  if (reason) toast(`⚡ +${n} XP · ${reason}`, 'success', 2200);
+  if (prev < XP_DAILY_GOAL && now >= XP_DAILY_GOAL) {
+    confettiBurst();
+    setTimeout(() => toast('🎯 Tagesziel erreicht! Stark.', 'success', 4000), 400);
+  }
+}
+
+function updateXpChip(value) {
+  const el = document.getElementById('xp-chip');
+  if (!el) return;
+  const render = xp => {
+    const pct = Math.min(100, Math.round((xp / XP_DAILY_GOAL) * 100));
+    el.classList.remove('hidden');
+    el.classList.toggle('xp-goal-done', xp >= XP_DAILY_GOAL);
+    el.style.setProperty('--xp-pct', pct + '%');
+    el.textContent = `⚡ ${xp}`;
+  };
+  if (typeof value === 'number') render(value);
+  else localforage.getItem(xpKey()).then(xp => render(xp || 0)).catch(() => render(0));
+}
+
+function comboUp() {
+  comboCount++;
+  if (comboCount >= 3) {
+    const bonus = comboCount * 5;
+    toast(`🔥 ${comboCount}er-Combo! +${bonus} Bonus-XP`, 'success', 2800);
+    addXP(bonus);
+  }
+}
+function comboReset() { comboCount = 0; }
+
+function confettiBurst() {
+  const colors = ['#5856d6', '#007aff', '#34c759', '#ff9500', '#ff2d55', '#ffd60a'];
+  const wrap = document.createElement('div');
+  wrap.className = 'confetti-wrap';
+  for (let i = 0; i < 44; i++) {
+    const p = document.createElement('span');
+    p.className = 'confetti-piece';
+    p.style.left = Math.random() * 100 + 'vw';
+    p.style.background = colors[i % colors.length];
+    p.style.animationDelay = (Math.random() * 0.5) + 's';
+    p.style.animationDuration = (1.6 + Math.random() * 1.2) + 's';
+    p.style.transform = `rotate(${Math.random() * 360}deg)`;
+    wrap.appendChild(p);
+  }
+  document.body.appendChild(wrap);
+  setTimeout(() => wrap.remove(), 3200);
+}
+
 // ══ LERN-SESSION (Zeitbudget-Planer) ═══════════════════════════════════════
 let currentSession = null;
 
@@ -3434,6 +3501,8 @@ function renderSessionBanner() {
       </div>`;
     el.querySelector('#session-finish-btn').addEventListener('click', () => {
       currentSession = null; saveSession(); renderSessionBanner();
+      confettiBurst();
+      addXP(100, 'Session abgeschlossen');
     });
     return;
   }
@@ -3890,6 +3959,7 @@ Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exak
 
     lernenAttempts++;
     const understood = ev.understood === true && ev.score >= 2;
+    if (ev.score >= 2) comboUp(); else comboReset();
     const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
     const scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '💪' : '🔁';
 
@@ -3994,7 +4064,18 @@ async function markTopicDone() {
   renderMilestone();
   loadLernpfad();
   sessionTick('topic', topic);
-  toast(`✅ "${topic}" als gelernt markiert`, 'success', 2500);
+  addXP(XP_BY_DIFF[lernenCurrentDiff] || 40, `"${topic}" gelernt`);
+  // Kapitel komplett? → Konfetti
+  if (moduleStructure?.kapitel) {
+    const learnedSet = new Set(learnedTopics);
+    const tDone = t => learnedSet.has(t + '::' + lernenCurrentDiff) ||
+                       (lernenCurrentDiff === 'einsteiger' && learnedSet.has(t));
+    const kap = moduleStructure.kapitel.find(k => k.themen.includes(topic));
+    if (kap && kap.themen.every(tDone)) {
+      confettiBurst();
+      setTimeout(() => toast(`📗 Kapitel "${kap.titel}" abgeschlossen!`, 'success', 4000), 300);
+    }
+  }
 }
 
 async function scanModuleStructure(btn) {
