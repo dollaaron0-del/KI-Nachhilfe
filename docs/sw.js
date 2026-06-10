@@ -1,6 +1,6 @@
 'use strict';
-const CACHE = 'ki-tutor-v3';
-const STATIC = ['./', './index.html', './app.js', './style.css', './icon.svg', './manifest.json'];
+const CACHE = 'ki-tutor-v4';
+const STATIC = ['./app.js', './style.css', './icon.svg', './manifest.json'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();
@@ -15,7 +15,16 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.url.includes('api.anthropic.com') || e.request.url.includes('cdn.jsdelivr.net') || e.request.url.includes('cdnjs.cloudflare.com')) return;
+  const url = e.request.url;
+  if (url.includes('api.anthropic.com') || url.includes('cdn.jsdelivr.net') || url.includes('cdnjs.cloudflare.com')) return;
+
+  // HTML immer vom Netzwerk – nie gecacht, damit Updates sofort ankommen
+  if (e.request.mode === 'navigate' || url.endsWith('.html')) {
+    e.respondWith(fetch(e.request).catch(() => caches.match('./index.html')));
+    return;
+  }
+
+  // Alles andere: Cache first, Netzwerk als Fallback
   e.respondWith(
     caches.match(e.request).then(cached => {
       const fresh = fetch(e.request).then(r => {
