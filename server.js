@@ -93,7 +93,7 @@ const upload = multer({
 });
 
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static('docs'));
 
 function slidesBlock(session) {
   return {
