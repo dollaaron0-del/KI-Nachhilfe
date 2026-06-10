@@ -204,6 +204,7 @@ async function checkAuth() {
 let sessionId      = null;
 let sessionMeta    = null;
 let sessionTxt     = '';
+let examDocContext  = '';
 let customPrompt    = '';
 let prefCalculator  = '';
 let currentFeature  = 'chat';
@@ -872,6 +873,7 @@ async function openSubject(subj) {
     sessionMeta.files = serverDocs.map(d => ({ name: d.filename, uploadedAt: d.uploaded_at }));
   }
   sessionTxt = await DB.content(subj.id);
+  examDocContext = await loadExamDocContext(subj.id);
   customPrompt = subj.custom_prompt || '';
   scannedTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => []);
   moduleStructure = await api(`/api/subjects/${subj.id}/structure`).catch(() => null);
@@ -1036,7 +1038,7 @@ function updateSettingsBadge() {
 // ══ UPLOAD SHEET ═══════════════════════════════════════════════════════════
 
 document.getElementById('back-btn')?.addEventListener('click', () => {
-  sessionId = null; sessionMeta = null; sessionTxt = ''; customPrompt = '';
+  sessionId = null; sessionMeta = null; sessionTxt = ''; examDocContext = ''; customPrompt = '';
   showScreen('subjects-screen'); loadSubjects();
 });
 document.getElementById('btn-add-docs')?.addEventListener('click', showUploadSheet);
@@ -3635,7 +3637,22 @@ function lernenCacheKey(topic) {
   return `lc2_${sessionId}_${topic}_${diff}`;
 }
 
-function getDiffInstr(effLevel) {
+async function loadExamDocContext(subjId) {
+  try {
+    const docs = await api(`/api/subjects/${subjId}/documents/typed?types=klausur,altklausur,uebungsblatt`);
+    if (!docs || !docs.length) return '';
+    const docLabel = d => {
+      const found = DOC_TYPES.find(t => t.value === d.doc_type);
+      return found ? found.label : d.doc_type;
+    };
+    return docs.map(d => `[${docLabel(d)}: ${d.filename}]\n${d.content}`).join('\n\n---\n\n');
+  } catch { return ''; }
+}
+
+function getDiffInstr(effLevel, examCtx) {
+  const examSnippet = examCtx && examCtx.trim()
+    ? `\n\nKLAUSUR-REFERENZ: Orientiere dich an Aufgabentyp, Stil und Komplexität folgender Prüfungsunterlagen. Mimiere deren Formulierungen, Notation und Schwierigkeitsgrad:\n${examCtx.slice(0, 1800)}`
+    : '';
   switch (effLevel.diff) {
     case 'leicht':
       return `Niveau: GRUNDLAGEN (Stufe 2 von 5).
@@ -3648,11 +3665,11 @@ AUFGABE: Mittelschwere Aufgabe mit 2-3 Rechenschritten, realistisches Szenario.`
     case 'schwer':
       return `Niveau: FORTGESCHRITTEN (Stufe 4 von 5).
 ERKLÄRUNG: Gehe in die Tiefe. "Was ist das?" = vollständige fachliche Definition inkl. Randfälle und Einschränkungen. "Warum wichtig?" = Verbindung zu anderen Konzepten, theoretischer Hintergrund. "Beispiel" = komplexes Praxisbeispiel mit mehreren Einflussgrößen. Rechenbeispiel: mehrstufig, zeige alle Zwischenschritte und erkläre WARUM jeder Schritt nötig ist.
-AUFGABE: Komplexe Aufgabe mit mehreren Teilschritten, die mehrere Konzepte verknüpft.`;
+AUFGABE: Komplexe Aufgabe mit mehreren Teilschritten, die mehrere Konzepte verknüpft.${examSnippet}`;
     case 'pruefungsnah':
       return `Niveau: EXPERTE (Stufe 5 von 5).
 ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: vollständig ausformuliert mit Formelangaben, Einheiten, Interpretation des Ergebnisses.
-AUFGABE: Klausuraufgabe mit vollständigem erwarteten Lösungsweg, Prüfungssprache.`;
+AUFGABE: Klausuraufgabe mit vollständigem erwarteten Lösungsweg, Prüfungssprache.${examSnippet}`;
     default:
       return `Niveau: EINSTEIGER (Stufe 1 von 5).
 ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn unbedingt nötig, dann maximal ein Schritt.
@@ -3712,7 +3729,8 @@ async function loadTopicContent(topic) {
   }
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
   const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
-  const diffInstr = getDiffInstr(effLevel);
+  const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
+  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '');
   try {
     const ctx = sessionTxt ? sessionTxt.slice(0, 3500) : '';
     const raw = await claudeLocal(
@@ -3764,7 +3782,8 @@ async function regenLernenTask() {
   btn.disabled = true; btn.textContent = '⏳';
   try {
     const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
-    const diffInstr = getDiffInstr(effLevel);
+    const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
+    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '');
     const ctx = sessionTxt ? sessionTxt.slice(0, 2000) : '';
     const raw = await claudeLocal(
       [{ role: 'user', content: `Generiere eine neue Übungsaufgabe zum Thema "${topic}".` }],

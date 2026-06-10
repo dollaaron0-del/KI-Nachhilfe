@@ -532,6 +532,20 @@ app.patch('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Return content of documents filtered by doc_type (for exam-style context)
+app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) => {
+  const types = (req.query.types || '').split(',').map(t => t.trim()).filter(Boolean);
+  if (!types.length) return res.json([]);
+  try {
+    const placeholders = types.map((_, i) => `$${i + 2}`).join(',');
+    const { rows } = await pool.query(
+      `SELECT filename, doc_type, LEFT(content, 4000) AS content FROM documents WHERE subject_id=$1 AND doc_type IN (${placeholders}) ORDER BY uploaded_at DESC`,
+      [req.params.id, ...types]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Accept pre-extracted text (from client-side PDF.js)
 app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) => {
   const { filename, content } = req.body;
