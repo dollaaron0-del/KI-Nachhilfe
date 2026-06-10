@@ -1055,6 +1055,17 @@ function hideUploadSheet() {
   document.getElementById('upload-sheet').classList.add('hidden');
 }
 
+const DOC_TYPES = [
+  { value: '',                label: '— Kein Typ' },
+  { value: 'skript',          label: '📘 Vorlesungsskript' },
+  { value: 'formelsammlung',  label: '🧮 Formelsammlung' },
+  { value: 'klausur',         label: '📋 Klausur' },
+  { value: 'altklausur',      label: '📋 Altklausur' },
+  { value: 'uebungsblatt',    label: '✏️ Übungsblatt' },
+  { value: 'zusammenfassung', label: '📄 Zusammenfassung' },
+  { value: 'lehrbuch',        label: '📚 Lehrbuch' },
+];
+
 async function renderDocList() {
   const wrap = document.getElementById('doc-list-wrap');
   const list = document.getElementById('doc-list');
@@ -1069,6 +1080,9 @@ async function renderDocList() {
     const date = new Date(doc.uploaded_at).toLocaleDateString('de-DE', {
       day: '2-digit', month: '2-digit', year: '2-digit',
     });
+    const optionsHtml = DOC_TYPES.map(t =>
+      `<option value="${t.value}"${doc.doc_type === t.value ? ' selected' : ''}>${t.label}</option>`
+    ).join('');
     const row = document.createElement('div');
     row.className = 'doc-row';
     row.innerHTML = `
@@ -1079,7 +1093,14 @@ async function renderDocList() {
           <div class="doc-row-date">${date}</div>
         </div>
       </div>
+      <select class="doc-type-sel" title="Dokumenttyp">${optionsHtml}</select>
       <button class="doc-del-btn" title="Löschen">🗑</button>`;
+    row.querySelector('.doc-type-sel').addEventListener('change', async e => {
+      await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, {
+        method: 'PATCH', headers: authHeaders(),
+        body: JSON.stringify({ doc_type: e.target.value }),
+      });
+    });
     row.querySelector('.doc-del-btn').addEventListener('click', async () => {
       if (!confirm(`"${doc.filename}" löschen?`)) return;
       await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });

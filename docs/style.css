@@ -75,6 +75,11 @@ html, body {
 .doc-del-btn  { background: none; border: none; font-size: 18px; cursor: pointer;
   padding: 4px 6px; opacity: .5; flex-shrink: 0; border-radius: 8px; }
 .doc-del-btn:active { opacity: 1; background: var(--border); }
+.doc-type-sel {
+  font-size: 12px; padding: 4px 8px; border-radius: 8px; flex-shrink: 0;
+  border: 1.5px solid var(--border); background: var(--bg); color: var(--text);
+  cursor: pointer; max-width: 140px;
+}
 
 /* ── Subjects Screen ─────────────────────────────────────────────────── */
 #subjects-screen {

@@ -514,10 +514,21 @@ app.delete('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
 app.get('/api/subjects/:id/documents', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id,filename,uploaded_at FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC',
+      'SELECT id,filename,doc_type,uploaded_at FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC',
       [req.params.id]
     );
     res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res) => {
+  const { doc_type } = req.body;
+  try {
+    await pool.query(
+      'UPDATE documents SET doc_type=$1 WHERE id=$2 AND subject_id=$3',
+      [doc_type || null, req.params.docId, req.params.id]
+    );
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -590,10 +601,15 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
       const query = typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 300) : '';
       let docContext = '';
 
+      const docLabel = r => {
+        const types = { skript:'Vorlesungsskript', formelsammlung:'Formelsammlung', klausur:'Klausur', altklausur:'Altklausur', uebungsblatt:'Übungsblatt', zusammenfassung:'Zusammenfassung', lehrbuch:'Lehrbuch' };
+        return r.doc_type && types[r.doc_type] ? `[${types[r.doc_type]}: ${r.filename}]` : `[${r.filename}]`;
+      };
+
       if (query) {
         try {
           const { rows } = await pool.query(`
-            SELECT filename,
+            SELECT filename, doc_type,
                    ts_headline('german', content, plainto_tsquery('german', $1),
                      'MaxWords=80, MinWords=30, StartSel=, StopSel=') AS snippet
             FROM documents
@@ -602,15 +618,15 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
             ORDER BY ts_rank(to_tsvector('german', content), plainto_tsquery('german', $1)) DESC
             LIMIT 4
           `, [query, req.body.subject_id]);
-          if (rows.length) docContext = rows.map(r => `[${r.filename}]\n${r.snippet}`).join('\n\n---\n\n');
+          if (rows.length) docContext = rows.map(r => `${docLabel(r)}\n${r.snippet}`).join('\n\n---\n\n');
         } catch {}
       }
 
       if (!docContext) {
         const { rows } = await pool.query(
-          'SELECT filename, content FROM documents WHERE subject_id=$1', [req.body.subject_id]
+          'SELECT filename, doc_type, content FROM documents WHERE subject_id=$1', [req.body.subject_id]
         );
-        if (rows.length) docContext = rows.map(r => `[${r.filename}]\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
+        if (rows.length) docContext = rows.map(r => `${docLabel(r)}\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
       }
 
       if (docContext) {
