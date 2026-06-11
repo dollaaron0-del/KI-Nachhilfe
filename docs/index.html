@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=97" />
+  <link rel="stylesheet" href="style.css?v=98" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -220,14 +220,27 @@
         </div>
         <div class="a-area">
           <textarea id="quiz-answer" placeholder="Deine Antwort…" rows="4" maxlength="3000"></textarea>
+          <div id="quiz-confidence" class="quiz-confidence hidden">
+            <p class="confidence-label">Wie sicher bist du bei dieser Antwort?</p>
+            <div class="confidence-btns">
+              <button class="conf-btn" data-conf="1">🤔 Unsicher</button>
+              <button class="conf-btn" data-conf="2">🙂 Eher sicher</button>
+              <button class="conf-btn" data-conf="3">😎 Sehr sicher</button>
+            </div>
+          </div>
           <button class="btn-primary" id="quiz-submit" disabled>Antwort abgeben</button>
         </div>
       </div>
       <div id="quiz-fb" class="cx-state hidden">
         <div class="fb-card">
           <div class="fb-score" id="fb-score"></div>
+          <div id="fb-confidence" class="fb-confidence hidden"></div>
           <div class="fb-text"  id="fb-text"></div>
           <div class="fb-correct" id="fb-correct"></div>
+          <div id="fb-deepen" class="fb-deepen hidden">
+            <p class="fb-deepen-hint">Du hast bei diesem Thema wiederholt Schwierigkeiten. Soll ich es in kleinere Unterteile aufteilen?</p>
+            <button class="btn-secondary btn-sm" id="fb-deepen-btn">🔎 Thema in Unterteile aufteilen</button>
+          </div>
         </div>
         <div class="quiz-btns">
           <button class="btn-primary"   id="quiz-next">Nächste Frage →</button>
@@ -641,6 +654,14 @@
       <!-- Step 1: Erklärung (scrollable) -->
       <div id="lernen-step-1" class="lernen-step">
         <div class="lernen-erkl-scroll">
+          <!-- Pre-Test: erscheint vor der Erklärung bei neuen Themen -->
+          <div id="lernen-pretest" class="lernen-pretest hidden">
+            <div class="pretest-icon">💭</div>
+            <h3 class="pretest-title">Vor der Erklärung</h3>
+            <p class="pretest-hint">Was weißt du schon über dieses Thema? Kurze Notiz – auch «nichts» ist eine gültige Antwort.</p>
+            <textarea id="pretest-input" class="pretest-input" placeholder="Dein Vorwissen…" rows="3" maxlength="500"></textarea>
+            <button class="btn-primary" id="pretest-submit" style="width:100%">Weiter zur Erklärung →</button>
+          </div>
           <div id="lernen-erkl-loading" style="text-align:center;padding:40px 16px">
             <div class="big-icon spin">📖</div>
             <p>Thema wird erklärt…</p>
@@ -648,6 +669,15 @@
             <p class="ai-progress-pct" id="lernen-prog-pct">0%</p>
           </div>
           <div id="lernen-erkl-body" class="hidden"></div>
+          <!-- Elaborative Interrogation: Reflexionsfrage nach der Erklärung -->
+          <div id="lernen-elaborate" class="lernen-elaborate hidden">
+            <div class="elaborate-q" id="elaborate-q"></div>
+            <textarea id="elaborate-input" class="elaborate-input" placeholder="Deine Überlegung in 1–2 Sätzen…" rows="2" maxlength="500"></textarea>
+            <div class="elaborate-row">
+              <button class="btn-secondary btn-sm" id="elaborate-skip">Überspringen</button>
+              <button class="btn-primary btn-sm" id="elaborate-go">Bestätigen →</button>
+            </div>
+          </div>
         </div>
         <div class="lernen-step1-footer hidden" id="lernen-step1-footer">
           <button class="btn-primary" id="lernen-to-task-btn" style="width:100%">Weiter zur Aufgabe →</button>
@@ -782,7 +812,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=97"></script>
+<script src="app.js?v=98"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

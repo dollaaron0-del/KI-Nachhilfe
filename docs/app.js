@@ -1412,6 +1412,19 @@ document.getElementById('quiz-submit')?.addEventListener('click',    submitAnswe
 document.getElementById('quiz-next')?.addEventListener('click',      fetchQuestion);
 document.getElementById('quiz-stop')?.addEventListener('click',      () => switchToAnalysis());
 document.getElementById('quiz-answer')?.addEventListener('keydown',  e => { if (e.key === 'Enter' && e.ctrlKey) submitAnswer(); });
+// Konfidenz-Buttons: einblenden sobald der Nutzer schreibt, deaktivieren bei Löschen
+document.getElementById('quiz-answer')?.addEventListener('input', e => {
+  const hasText = e.target.value.trim().length > 5;
+  const confEl = document.getElementById('quiz-confidence');
+  if (confEl) confEl.classList.toggle('hidden', !hasText);
+  if (!hasText) { quizConfidence = 0; document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active')); }
+});
+document.querySelectorAll('.conf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    quizConfidence = parseInt(btn.dataset.conf, 10);
+    document.querySelectorAll('.conf-btn').forEach(b => b.classList.toggle('active', b === btn));
+  });
+});
 document.getElementById('quiz-reset-btn')?.addEventListener('click', async () => {
   if (!confirm('Quiz-Fortschritt zurücksetzen?')) return;
   sessionMeta.quizStats = { questions: [] };
@@ -1424,6 +1437,7 @@ document.getElementById('quiz-reset-btn')?.addEventListener('click', async () =>
   refreshAnalysisState();
 });
 document.getElementById('quiz-blitz-btn')?.addEventListener('click', startBlitz);
+document.getElementById('fb-deepen-btn')?.addEventListener('click', () => deepenWeakTopic(lastFbTopicName));
 
 function showQuizState(el) {
   document.querySelectorAll('#panel-quiz .cx-state').forEach(s => s.classList.add('hidden'));
@@ -1432,6 +1446,10 @@ function showQuizState(el) {
 
 async function fetchQuestion() {
   if (!sessionMeta) return;
+  // Reset confidence for each new question
+  quizConfidence = 0;
+  document.querySelectorAll('.conf-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('quiz-confidence')?.classList.add('hidden');
   document.getElementById('q-box').innerHTML =
     '<div class="typing-dots"><span></span><span></span><span></span></div>';
   document.getElementById('quiz-answer').value = '';
@@ -1515,10 +1533,16 @@ Antworte NUR als JSON:
     const ev = JSON.parse(m[0]);
     haptic(ev.score >= 2 ? 40 : [80,40,80]);
 
+    const savedConf = quizConfidence;
+    const isOverconfident = savedConf === 3 && ev.score <= 1;
+    const isSureAndRight  = savedConf === 3 && ev.score >= 2;
+    lastFbTopicName = ev.topic || '';
+
     sessionMeta.quizStats.questions.push({
       question: sessionMeta.currentQuestion, userAnswer: answer,
       correct: ev.correct, score: ev.score, topic: ev.topic,
       correctAnswer: ev.correct_answer, feedback: ev.feedback,
+      confidence: savedConf,
       ts: Date.now(), blitz: false,
     });
     sessionMeta.currentQuestion = null;
@@ -1527,8 +1551,9 @@ Antworte NUR als JSON:
     await syncSubjectSummary();
     updateScoreChip();
     touchStreak();
-    // Retrieval belohnen: Quiz-XP nach Punktzahl (0/5/10/15)
-    if (ev.score > 0) addXP(ev.score * 5);
+
+    // Konfidenz-adjustierte XP: überzeugtes Richtig → Bonus; überzeugtes Falsch → keine XP
+    if (!isOverconfident && ev.score > 0) addXP(ev.score * 5);
 
     const labels  = ['❌ Falsch (0/3)', '⚠️ Ansatz (1/3)', '🔶 Teilweise (2/3)', '✅ Korrekt (3/3)'];
     const classes = ['c0', 'c1', 'c2', 'c3'];
@@ -1537,15 +1562,77 @@ Antworte NUR als JSON:
     document.getElementById('fb-text').textContent  = ev.feedback;
     document.getElementById('fb-correct').innerHTML = `<strong>Musterantwort:</strong> ${esc(ev.correct_answer)}`;
 
+    // Konfidenz-Feedback
+    const confEl = document.getElementById('fb-confidence');
+    if (confEl && savedConf > 0) {
+      const confLabels = ['', '🤔 Unsicher', '🙂 Eher sicher', '😎 Sehr sicher'];
+      if (isOverconfident) {
+        confEl.className = 'fb-confidence fb-confidence--alarm';
+        confEl.innerHTML = `<strong>⚠️ Fehleinschätzung!</strong> Du warst sehr sicher, aber die Antwort war falsch. Das deutet auf eine echte Wissenslücke hin – dieses Thema solltest du unbedingt vertiefen.`;
+      } else if (isSureAndRight) {
+        confEl.className = 'fb-confidence fb-confidence--bonus';
+        confEl.innerHTML = `<strong>🎯 Sicher &amp; Korrekt!</strong> Gute Kalibrierung – du weißt was du weißt. +Bonus XP.`;
+      } else {
+        confEl.className = 'fb-confidence fb-confidence--info';
+        confEl.textContent = `Selbsteinschätzung: ${confLabels[savedConf]}`;
+      }
+      confEl.classList.remove('hidden');
+    } else if (confEl) { confEl.classList.add('hidden'); }
+
+    // "Thema vertiefen" anbieten wenn Thema schwach ist
+    const deepEl = document.getElementById('fb-deepen');
+    if (deepEl) {
+      const weakNow = getWeakTopics(sessionMeta.quizStats.questions);
+      deepEl.classList.toggle('hidden', !(weakNow.includes(lastFbTopicName) || isOverconfident));
+    }
+
     showQuizState(document.getElementById('quiz-fb'));
     refreshAnalysisState();
     sessionTick('quiz');
-    if (ev.score >= 2) { addXP(ev.score === 3 ? 15 : 10); comboUp(); }
-    else { if (ev.score === 1) addXP(5); comboReset(); }
+    if (!isOverconfident && ev.score >= 2) {
+      const xpBonus = isSureAndRight ? (ev.score === 3 ? 20 : 13) : (ev.score === 3 ? 15 : 10);
+      addXP(xpBonus); comboUp();
+    } else {
+      if (!isOverconfident && ev.score === 1) addXP(5);
+      comboReset();
+    }
   } catch (e) {
     document.getElementById('quiz-submit').disabled = false;
     document.getElementById('q-box').textContent = '⚠️ ' + e.message;
     showQuizState(document.getElementById('quiz-q'));
+  }
+}
+
+// ── Schwaches Thema in Unterteile aufteilen ────────────────────────────────
+async function deepenWeakTopic(topicName) {
+  if (!topicName || !sessionId) return;
+  const btn = document.getElementById('fb-deepen-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    const raw = await claudeLocal(
+      [{ role: 'user', content: `Teile das Thema "${topicName}" in 3–4 Unterteile auf.` }],
+      sysBlocks(`Du bist ein Lernassistent für das Fach "${sessionMeta?.name || ''}".
+Teile das Thema "${topicName}" in 3–4 klar abgegrenzte Unterteile auf, die ein Student schrittweise lernen kann.
+Die Unterteile sollen KURZE Thementitel sein (max. 5 Wörter je Titel), keine Aufgaben.
+Antworte NUR als JSON: {"subtopics":["<Titel 1>","<Titel 2>","<Titel 3>"]}`),
+      300
+    );
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('Keine Subtopics erhalten');
+    const data = JSON.parse(m[0]);
+    if (!Array.isArray(data.subtopics) || !data.subtopics.length) throw new Error('Leere Subtopics');
+    const subs = data.subtopics.map(s => `${topicName}: ${s}`);
+    const idx  = scannedTopics.indexOf(topicName);
+    if (idx >= 0) scannedTopics.splice(idx + 1, 0, ...subs);
+    else          scannedTopics.push(...subs);
+    await localforage.setItem(`topics_${sessionId}`, scannedTopics).catch(() => {});
+    loadLernpfad();
+    document.getElementById('fb-deepen')?.classList.add('hidden');
+    toast(`${subs.length} Unterteile zu "${topicName}" im Lernpfad hinzugefügt`, 'success', 3500);
+  } catch (e) {
+    toast('Fehler: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔎 Thema in Unterteile aufteilen'; }
   }
 }
 
@@ -3409,7 +3496,33 @@ function loadLernpfad() {
     return item;
   };
 
-  if (moduleStructure?.kapitel?.length) {
+  // Interleaving-Toggle: Themen aus verschiedenen Kapiteln abwechselnd üben
+  const controlsBar = document.createElement('div');
+  controlsBar.className = 'lernpfad-controls';
+  const ilBtn = document.createElement('button');
+  ilBtn.className = `btn-secondary btn-sm interleave-btn${interleavedMode ? ' active' : ''}`;
+  ilBtn.textContent = interleavedMode ? '🔀 Gemischt (aktiv)' : '🔀 Gemischter Modus';
+  ilBtn.title = 'Themen aus verschiedenen Kapiteln abwechselnd üben (Interleaving)';
+  ilBtn.addEventListener('click', () => {
+    interleavedMode = !interleavedMode;
+    loadLernpfad();
+  });
+  controlsBar.appendChild(ilBtn);
+  list.appendChild(controlsBar);
+
+  if (interleavedMode && moduleStructure?.kapitel?.length > 1) {
+    // Round-robin über Kapitel: Thema 1 aus Kap1, Thema 1 aus Kap2, Thema 2 aus Kap1 …
+    const maxLen = Math.max(...moduleStructure.kapitel.map(k => k.themen.length));
+    const label = document.createElement('div');
+    label.className = 'kap-restructure-hint';
+    label.innerHTML = `<span>🔀 Gemischter Modus – Themen aus verschiedenen Kapiteln abwechselnd</span>`;
+    list.appendChild(label);
+    for (let i = 0; i < maxLen; i++) {
+      for (const kap of moduleStructure.kapitel) {
+        if (i < kap.themen.length) list.appendChild(makeItem(kap.themen[i]));
+      }
+    }
+  } else if (moduleStructure?.kapitel?.length) {
     // Modul-Reise: chapters with Lernziel + progress
     moduleStructure.kapitel.forEach((k, ki) => {
       const doneCount = k.themen.filter(isTopicDone).length;
@@ -3686,6 +3799,12 @@ let topicMeta = {};
 const REVIEW_AFTER_STRONG_MS = 7 * 86400000;
 const REVIEW_AFTER_WEAK_MS   = 3 * 86400000;
 
+// ── v98: Lern-Psychologie Extras ──────────────────────────────────────────
+let quizConfidence  = 0;      // 1=unsicher, 2=eher sicher, 3=sehr sicher (0=nicht gesetzt)
+let pretestAnswer   = '';     // Vorwissen-Notiz vor der Erklärung
+let lastFbTopicName = '';     // Thema der letzten Quiz-Frage (für "Vertiefen")
+let interleavedMode = false;  // Lernpfad-Reihenfolge über Kapitel mischen
+
 function topicReviewDue(key) {
   const m = topicMeta[key];
   if (!m || !m.ts) return false; // ohne Metadaten (Altbestand) nie als fällig markieren
@@ -3732,15 +3851,27 @@ function openTopicView(topic) {
   document.getElementById('lernen-mode-text').classList.remove('active');
   document.getElementById('lernen-regen-btn').classList.add('hidden');
   // Reset step 1
-  document.getElementById('lernen-erkl-loading').style.display = '';
+  document.getElementById('lernen-erkl-loading').style.display = 'none';
   document.getElementById('lernen-erkl-body').classList.add('hidden');
+  document.getElementById('lernen-elaborate')?.classList.add('hidden');
   document.getElementById('lernen-step1-footer').classList.add('hidden');
   document.getElementById('lernen-tab-aufgabe').disabled = true;
   document.getElementById('lernen-done-btn').classList.add('hidden');
   lernenSwitchStep(1);
-  // Fällige Wiederholung: Cache überspringen, damit eine NEUE Aufgabe kommt –
-  // die alte wiederzuerkennen wäre kein echtes Abrufen aus dem Gedächtnis.
-  loadTopicContent(topic, topicReviewDue(topic + '::' + lernenCurrentDiff));
+  pretestAnswer = '';
+  // Pre-Test: bei noch nie gelernten Themen zuerst Vorwissen abfragen.
+  // Bei Wiederholungen (isDue) oder bereits Abgeschlossenen: direkt laden.
+  const isFresh = !learnedTopics.includes(topic + '::' + lernenCurrentDiff);
+  const isDue   = topicReviewDue(topic + '::' + lernenCurrentDiff);
+  if (isFresh && !isDue) {
+    document.getElementById('lernen-pretest')?.classList.remove('hidden');
+    const pretestInput = document.getElementById('pretest-input');
+    if (pretestInput) pretestInput.value = '';
+  } else {
+    document.getElementById('lernen-pretest')?.classList.add('hidden');
+    document.getElementById('lernen-erkl-loading').style.display = '';
+    loadTopicContent(topic, isDue);
+  }
 }
 
 function closeLernenTopic() {
@@ -3824,6 +3955,11 @@ function renderTopicContent(topic, data) {
       inner +
     `</div>`;
   let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>`;
+  // Pre-Test Recap: zeige Vorwissen-Notiz als aufklappbaren Block oben
+  if (pretestAnswer) {
+    html += `<details class="pretest-recap"><summary>💭 Dein Vorwissen vorher</summary>` +
+      `<div class="pretest-recap-body">${esc(pretestAnswer)}</div></details>`;
+  }
   if (data.was)    html += section('💡', 'Was ist das?',       '',                    `<div class="explainer-body">${fmtMd(data.was)}</div>`);
   if (data.warum)  html += section('🎯', 'Warum wichtig?',     '',                    `<div class="explainer-body">${fmtMd(data.warum)}</div>`);
   if (data.vertiefung && data.vertiefung.trim())
@@ -3834,7 +3970,31 @@ function renderTopicContent(topic, data) {
   const body = document.getElementById('lernen-erkl-body');
   body.innerHTML = html;
   body.classList.remove('hidden');
-  document.getElementById('lernen-step1-footer').classList.remove('hidden');
+
+  // Elaborative Interrogation: Reflexionsfrage nach der Erklärung
+  // Bei Pre-Test (frisch gelernt) immer anzeigen; bei Wiederholung überspringen
+  const elabEl = document.getElementById('lernen-elaborate');
+  const hasPretest = !!pretestAnswer;
+  if (elabEl && hasPretest) {
+    const templates = [
+      `Erkläre "${topic}" in deinen eigenen Worten – als würdest du es jemandem ohne Vorkenntnisse erklären.`,
+      `Warum ist "${topic}" wichtig, und wo begegnet dir das Konzept in der Praxis?`,
+      `Was ist das Kernprinzip hinter "${topic}"? Was wäre das Erste, was du jemandem darüber sagen würdest?`,
+      `Wie hängt "${topic}" mit anderen Konzepten zusammen, die du kennst?`,
+    ];
+    const q = templates[Math.floor(Math.random() * templates.length)];
+    const elabQ = document.getElementById('elaborate-q');
+    const elabIn = document.getElementById('elaborate-input');
+    if (elabQ) elabQ.textContent = '🤔 ' + q;
+    if (elabIn) elabIn.value = '';
+    elabEl.classList.remove('hidden');
+    // Keep step1-footer hidden until elaboration is confirmed/skipped
+    document.getElementById('lernen-step1-footer').classList.add('hidden');
+  } else {
+    if (elabEl) elabEl.classList.add('hidden');
+    document.getElementById('lernen-step1-footer').classList.remove('hidden');
+  }
+
   if (data.aufgabe && data.aufgabe.trim()) {
     document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(data.aufgabe));
     document.getElementById('lernen-tab-aufgabe').disabled = false;
@@ -4379,6 +4539,23 @@ if (window.visualViewport) {
     if (h > 40) wrap.style.height = h + 'px';
   }).catch(() => {});
 }());
+
+// ── Pre-Test & Elaboration controls ──────────────────────────────────────
+function submitPretest() {
+  const input = document.getElementById('pretest-input');
+  pretestAnswer = (input?.value || '').trim();
+  document.getElementById('lernen-pretest')?.classList.add('hidden');
+  document.getElementById('lernen-erkl-loading').style.display = '';
+  loadTopicContent(currentExplainerTopic, false);
+}
+document.getElementById('pretest-submit')?.addEventListener('click', submitPretest);
+
+function finishElaboration() {
+  document.getElementById('lernen-elaborate')?.classList.add('hidden');
+  document.getElementById('lernen-step1-footer')?.classList.remove('hidden');
+}
+document.getElementById('elaborate-skip')?.addEventListener('click', finishElaboration);
+document.getElementById('elaborate-go')?.addEventListener('click', finishElaboration);
 
 // Lernen topic view controls
 document.getElementById('lernen-back-btn')?.addEventListener('click', closeLernenTopic);
