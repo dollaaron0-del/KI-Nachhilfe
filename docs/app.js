@@ -907,6 +907,7 @@ async function openSubject(subj) {
     : (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
   // Normalize old-format entries (plain topic name) → topic::einsteiger
   learnedTopics = rawLearned.map(t => (t.includes('::') ? t : t + '::einsteiger'));
+  topicMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
 
@@ -1439,8 +1440,22 @@ async function fetchQuestion() {
 
   const done   = sessionMeta.quizStats.questions.length;
   const avoid  = sessionMeta.quizStats.questions.slice(-8).map(q => q.question).join('\n- ');
-  const prompt = `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
 
+  // Gezieltes Retrieval: gelernte Themen abfragen festigt sie (Testing-Effekt),
+  // schwache Themen brauchen die meiste Übung.
+  const learnedNames = [...new Set(learnedTopics.map(t => t.split('::')[0]))]
+    .filter(t => scannedTopics.includes(t));
+  const weak = getWeakTopics(sessionMeta.quizStats.questions).slice(0, 4);
+  let focusInstr = '';
+  if (weak.length && done % 2 === 0) {
+    focusInstr = `\nSCHWERPUNKT: Stelle die Frage zu einem dieser Themen, bei denen der Student noch Schwächen zeigt: ${weak.join(', ')}.`;
+  } else if (learnedNames.length) {
+    const pick = learnedNames[Math.floor(Math.random() * learnedNames.length)];
+    focusInstr = `\nSCHWERPUNKT: Stelle die Frage zum kürzlich gelernten Thema "${pick}" – aktives Erinnern festigt das Wissen.`;
+  }
+
+  const prompt = `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
+${focusInstr}
 Bevorzuge Fragen die echtes Verständnis testen:
 - "Erkläre warum…" / "Was passiert wenn…"
 - Transferfragen: Konzept auf neue Situation anwenden
@@ -1512,6 +1527,8 @@ Antworte NUR als JSON:
     await syncSubjectSummary();
     updateScoreChip();
     touchStreak();
+    // Retrieval belohnen: Quiz-XP nach Punktzahl (0/5/10/15)
+    if (ev.score > 0) addXP(ev.score * 5);
 
     const labels  = ['❌ Falsch (0/3)', '⚠️ Ansatz (1/3)', '🔶 Teilweise (2/3)', '✅ Korrekt (3/3)'];
     const classes = ['c0', 'c1', 'c2', 'c3'];
@@ -3246,8 +3263,12 @@ const MILESTONE_LEVELS = [
 
 function calculateMilestone() {
   const total    = scannedTopics.length;
-  const uniqueDone = new Set(learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t)).size;
-  const topicPct = total > 0 ? uniqueDone / total : 0;
+  const current  = new Set(scannedTopics);
+  // Nur Themen zählen, die im aktuellen Lernpfad existieren (nach Re-Scan können alte Namen wegfallen)
+  const uniqueDone = new Set(
+    learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t).filter(t => current.has(t))
+  ).size;
+  const topicPct = total > 0 ? Math.min(1, uniqueDone / total) : 0;
   const q        = sessionMeta?.quizStats?.questions || [];
   const quizAvg  = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
   const pct      = Math.round((topicPct * 0.7 + quizAvg * 0.3) * 100);
@@ -3288,9 +3309,13 @@ function renderMilestone() {
     </div>${i < MILESTONE_LEVELS.length - 1 ? `<div class="${lineClass}"></div>` : ''}`;
   }).join('');
 
+  const currentTopics = new Set(scannedTopics);
+  const doneCount = new Set(
+    learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t).filter(t => currentTopics.has(t))
+  ).size;
   const infoTxt = selIdx !== null
     ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · <span class="ms-reset-btn">Zurücksetzen</span>`
-    : `${m.pct}% · ${new Set(learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t)).size}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
+    : `${m.pct}% · ${doneCount}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
 
   banner.innerHTML = `
     <div class="ms-steps">${stepsHtml}</div>
@@ -3366,17 +3391,19 @@ function loadLernpfad() {
   let foundCurrent = false;
   const makeItem = topic => {
     const isDone    = isTopicDone(topic);
+    const isDue     = isDone && topicReviewDue(topic + '::' + activeDiff);
     const isCurrent = !isDone && !foundCurrent;
     if (isCurrent) foundCurrent = true;
     const item = document.createElement('div');
-    item.className = `lernpfad-item${isDone ? ' is-done' : ''}${isCurrent ? ' is-current' : ''}`;
+    item.className = `lernpfad-item${isDone ? ' is-done' : ''}${isDue ? ' is-due' : ''}${isCurrent ? ' is-current' : ''}`;
     const diffLvl = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : null;
     const diffTag = diffLvl && !isDone ? ` <span class="lernpfad-diff-tag">${diffLvl.emoji} ${diffLvl.name}</span>` : '';
-    const btnLabel = isDone ? 'Wiederholen' : 'Lernen →';
-    const btnClass = isDone ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
+    const dueTag  = isDue ? ' <span class="lernpfad-due-tag">🔄 Wiederholung fällig</span>' : '';
+    const btnLabel = isDue ? 'Auffrischen →' : isDone ? 'Wiederholen' : 'Lernen →';
+    const btnClass = isDone && !isDue ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
     item.innerHTML = `
-      <span class="lernpfad-status">${isDone ? '✅' : isCurrent ? '▶' : '○'}</span>
-      <span class="lernpfad-name">${esc(topic)}${diffTag}</span>
+      <span class="lernpfad-status">${isDue ? '🔄' : isDone ? '✅' : isCurrent ? '▶' : '○'}</span>
+      <span class="lernpfad-name">${esc(topic)}${diffTag}${dueTag}</span>
       <button class="${btnClass}">${btnLabel}</button>`;
     item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
     return item;
@@ -3492,23 +3519,27 @@ async function buildSessionPlan(budget) {
   const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
   const isDone = t => learnedSet.has(t + '::' + activeDiff);
+  const isDue  = t => isDone(t) && topicReviewDue(t + '::' + activeDiff);
+  const due  = scannedTopics.filter(isDue);
   const open = scannedTopics.filter(t => !isDone(t));
-  const done = scannedTopics.filter(isDone);
+  const done = scannedTopics.filter(t => isDone(t) && !isDue(t));
 
   const items = [];
   let pausesLeft = spec.pauses;
   let topicCount = 0;
-  const pushTopic = (t, repeat) => {
-    items.push({ type: 'topic', label: `${repeat ? '🔁' : '📖'} ${t}`, target: t, done: false });
+  const pushTopic = (t, icon) => {
+    items.push({ type: 'topic', label: `${icon} ${t}`, target: t, done: false });
     topicCount++;
     if (pausesLeft > 0 && topicCount % 2 === 0 && topicCount < spec.topics) {
       items.push({ type: 'pause', label: '☕ Kurze Pause (10 Min)', done: false });
       pausesLeft--;
     }
   };
-  open.slice(0, spec.topics).forEach(t => pushTopic(t, false));
+  // Reihenfolge nach Lernwirkung: fällige Wiederholungen (Spacing!) → neue Themen → Rest
+  due.slice(0, Math.max(1, Math.floor(spec.topics / 2))).forEach(t => pushTopic(t, '🔄'));
+  open.slice(0, spec.topics - topicCount).forEach(t => pushTopic(t, '📖'));
   if (topicCount < spec.topics) {
-    done.slice(0, spec.topics - topicCount).forEach(t => pushTopic(t, true));
+    done.slice(0, spec.topics - topicCount).forEach(t => pushTopic(t, '🔁'));
   }
 
   try {
@@ -3647,6 +3678,25 @@ let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual overrid
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
 
+// ── Spaced Review: Vergessenskurve für Lernpfad-Themen ─────────────────────
+// topicMeta["Thema::diff"] = { ts: <zuletzt gelernt>, attempts: <Versuche bis korrekt> }
+// Sicher gekonnt (1 Versuch) → nach 7 Tagen fällig; wacklig (≥2 Versuche) → nach 3 Tagen.
+let topicMeta = {};
+
+const REVIEW_AFTER_STRONG_MS = 7 * 86400000;
+const REVIEW_AFTER_WEAK_MS   = 3 * 86400000;
+
+function topicReviewDue(key) {
+  const m = topicMeta[key];
+  if (!m || !m.ts) return false; // ohne Metadaten (Altbestand) nie als fällig markieren
+  const interval = (m.attempts || 1) >= 2 ? REVIEW_AFTER_WEAK_MS : REVIEW_AFTER_STRONG_MS;
+  return Date.now() - m.ts >= interval;
+}
+
+function saveTopicMeta() {
+  if (sessionId) localforage.setItem(`ltmeta_${sessionId}`, topicMeta).catch(() => {});
+}
+
 function openTopicView(topic) {
   currentExplainerTopic = topic;
   lernenTopicData = null;
@@ -3688,7 +3738,9 @@ function openTopicView(topic) {
   document.getElementById('lernen-tab-aufgabe').disabled = true;
   document.getElementById('lernen-done-btn').classList.add('hidden');
   lernenSwitchStep(1);
-  loadTopicContent(topic);
+  // Fällige Wiederholung: Cache überspringen, damit eine NEUE Aufgabe kommt –
+  // die alte wiederzuerkennen wäre kein echtes Abrufen aus dem Gedächtnis.
+  loadTopicContent(topic, topicReviewDue(topic + '::' + lernenCurrentDiff));
 }
 
 function closeLernenTopic() {
@@ -3802,9 +3854,9 @@ function renderTopicContent(topic, data) {
   }
 }
 
-async function loadTopicContent(topic) {
-  // Serve from cache if available
-  const cached = await localforage.getItem(lernenCacheKey(topic)).catch(() => null);
+async function loadTopicContent(topic, forceFresh = false) {
+  // Serve from cache if available (außer bei fälliger Wiederholung → frische Aufgabe)
+  const cached = forceFresh ? null : await localforage.getItem(lernenCacheKey(topic)).catch(() => null);
   // Stale guard: user may have navigated to a different topic while awaiting cache/AI
   if (currentExplainerTopic !== topic) return;
   if (cached) {
@@ -4171,7 +4223,9 @@ async function markTopicDone() {
   if (!topic || !sessionId) return;
   closeLernenTopic();
   const key = topic + '::' + lernenCurrentDiff;
-  if (!learnedTopics.includes(key)) {
+  const isFirstLearn = !learnedTopics.includes(key);
+  const wasReviewDue = !isFirstLearn && topicReviewDue(key);
+  if (isFirstLearn) {
     learnedTopics.push(key);
     localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/learned-topics`, {
@@ -4179,10 +4233,17 @@ async function markTopicDone() {
       body: JSON.stringify({ topic: key }),
     }).catch(() => {});
   }
+  // Stärke + Zeitpunkt merken: bestimmt wann die Wiederholung fällig wird.
+  topicMeta[key] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts) };
+  saveTopicMeta();
   renderMilestone();
   loadLernpfad();
   sessionTick('topic', topic);
-  addXP(XP_BY_DIFF[lernenCurrentDiff] || 40, `"${topic}" gelernt`);
+  // XP nur für echten Lernfortschritt: voll beim ersten Mal, halb für fällige
+  // Wiederholung (Retrieval belohnen!), nichts für wiederholtes Abhaken.
+  const fullXP = XP_BY_DIFF[lernenCurrentDiff] || 40;
+  if (isFirstLearn)       addXP(fullXP, `"${topic}" gelernt`);
+  else if (wasReviewDue)  addXP(Math.round(fullXP / 2), `"${topic}" aufgefrischt`);
   // Kapitel komplett? → Konfetti
   if (moduleStructure?.kapitel) {
     const learnedSet = new Set(learnedTopics);

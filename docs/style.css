@@ -1977,6 +1977,20 @@ html, body {
   vertical-align: middle;
 }
 
+/* Spaced-Review: Thema ist zur Wiederholung fällig */
+.lernpfad-item.is-due { opacity: 1; }
+.lernpfad-due-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(255,149,0,0.15);
+  color: var(--orange, #ff9500);
+  vertical-align: middle;
+}
+
 /* Wiederholen button for done topics */
 .lernpfad-btn-repeat {
   background: transparent !important;
