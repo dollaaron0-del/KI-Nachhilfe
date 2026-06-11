@@ -1991,6 +1991,13 @@ html, body {
   vertical-align: middle;
 }
 
+/* Upgrade tag: topic done at lower level, should revisit at current */
+.lernpfad-upgrade-tag {
+  display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
+  padding: 1px 7px; border-radius: 8px;
+  background: rgba(52,199,89,.12); color: var(--green); vertical-align: middle;
+}
+
 /* Wiederholen button for done topics */
 .lernpfad-btn-repeat {
   background: transparent !important;

@@ -3474,23 +3474,30 @@ function loadLernpfad() {
   const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
-  const isTopicDone = topic => learnedSet.has(topic + '::' + activeDiff);
+  // Thema gilt als "getan" wenn es je bei IRGENDEINEM Niveau gelernt wurde –
+  // konsistent mit calculateMilestone(). So stimmen Balken und Lernpfad überein.
+  const learnedBaseNames = new Set(learnedTopics.map(lt => lt.includes('::') ? lt.split('::')[0] : lt));
+  const isTopicDone       = topic => learnedBaseNames.has(topic);
+  const isTopicDoneAtDiff = topic => learnedSet.has(topic + '::' + activeDiff);
   let foundCurrent = false;
   const makeItem = topic => {
-    const isDone    = isTopicDone(topic);
-    const isDue     = isDone && topicReviewDue(topic + '::' + activeDiff);
-    const isCurrent = !isDone && !foundCurrent;
+    const isDone      = isTopicDone(topic);
+    const isDoneNow   = isTopicDoneAtDiff(topic);
+    const isDue       = isDone && topicReviewDue(topic + '::' + activeDiff);
+    const needsUpgrade = isDone && !isDoneNow && !isDue; // getan bei niedrigerem Niveau
+    const isCurrent   = !isDone && !foundCurrent;
     if (isCurrent) foundCurrent = true;
     const item = document.createElement('div');
     item.className = `lernpfad-item${isDone ? ' is-done' : ''}${isDue ? ' is-due' : ''}${isCurrent ? ' is-current' : ''}`;
     const diffLvl = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : null;
     const diffTag = diffLvl && !isDone ? ` <span class="lernpfad-diff-tag">${diffLvl.emoji} ${diffLvl.name}</span>` : '';
     const dueTag  = isDue ? ' <span class="lernpfad-due-tag">🔄 Wiederholung fällig</span>' : '';
-    const btnLabel = isDue ? 'Auffrischen →' : isDone ? 'Wiederholen' : 'Lernen →';
-    const btnClass = isDone && !isDue ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
+    const upgradeTag = needsUpgrade ? ` <span class="lernpfad-upgrade-tag">⬆ Jetzt auf ${activeLvl.name}</span>` : '';
+    const btnLabel = isDue ? 'Auffrischen →' : needsUpgrade ? 'Vertiefen →' : isDoneNow ? 'Wiederholen' : 'Lernen →';
+    const btnClass = isDoneNow && !isDue ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
     item.innerHTML = `
-      <span class="lernpfad-status">${isDue ? '🔄' : isDone ? '✅' : isCurrent ? '▶' : '○'}</span>
-      <span class="lernpfad-name">${esc(topic)}${diffTag}${dueTag}</span>
+      <span class="lernpfad-status">${isDue ? '🔄' : isDoneNow ? '✅' : isDone ? '✓' : isCurrent ? '▶' : '○'}</span>
+      <span class="lernpfad-name">${esc(topic)}${diffTag}${dueTag}${upgradeTag}</span>
       <button class="${btnClass}">${btnLabel}</button>`;
     item.querySelector('.lernpfad-btn').addEventListener('click', () => openTopicView(topic));
     return item;
@@ -3766,10 +3773,15 @@ function renderSessionBanner() {
 
 document.querySelectorAll('.session-budget-btn').forEach(b => b.addEventListener('click', async () => {
   document.getElementById('session-sheet').classList.add('hidden');
-  currentSession = await buildSessionPlan(b.dataset.budget);
-  saveSession();
-  renderSessionBanner();
-  toast('Session geplant – tippe den ersten Schritt an!', 'success', 3000);
+  try {
+    currentSession = await buildSessionPlan(b.dataset.budget);
+    saveSession();
+    renderSessionBanner();
+    toast('Session geplant – tippe den ersten Schritt an!', 'success', 3000);
+  } catch (e) {
+    console.error('Session build failed:', e);
+    toast('Fehler beim Planen der Session: ' + e.message, 'error');
+  }
 }));
 document.getElementById('session-sheet-close')?.addEventListener('click', () =>
   document.getElementById('session-sheet').classList.add('hidden'));
@@ -4549,6 +4561,12 @@ function submitPretest() {
   loadTopicContent(currentExplainerTopic, false);
 }
 document.getElementById('pretest-submit')?.addEventListener('click', submitPretest);
+document.getElementById('pretest-skip')?.addEventListener('click', () => {
+  pretestAnswer = '';
+  document.getElementById('lernen-pretest')?.classList.add('hidden');
+  document.getElementById('lernen-erkl-loading').style.display = '';
+  loadTopicContent(currentExplainerTopic, false);
+});
 
 function finishElaboration() {
   document.getElementById('lernen-elaborate')?.classList.add('hidden');
