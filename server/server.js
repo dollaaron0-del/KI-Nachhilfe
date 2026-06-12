@@ -532,6 +532,17 @@ app.patch('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Return short snippets of ALL documents for breadth-first topic scanning
+app.get('/api/subjects/:id/documents/snippets', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT filename, LEFT(content, 600) AS snippet FROM documents WHERE subject_id=$1 ORDER BY uploaded_at ASC',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Return content of documents filtered by doc_type (for exam-style context)
 app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) => {
   const types = (req.query.types || '').split(',').map(t => t.trim()).filter(Boolean);

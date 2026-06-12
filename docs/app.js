@@ -517,6 +517,17 @@ function docsForPrompt(limit = 40000) {
   return `${head}\n\n[…Auszug aus der Mitte der Unterlagen…]\n\n${mid}\n\n[…Auszug vom Ende der Unterlagen…]\n\n${tail}`;
 }
 
+// Fetches a short snippet from EVERY document individually → breadth-first coverage.
+// Fixes the bias where docsForPrompt() would return only the first documents' content.
+async function buildDocOverview() {
+  if (!sessionId) return null;
+  try {
+    const docs = await api(`/api/subjects/${sessionId}/documents/snippets`);
+    if (!Array.isArray(docs) || !docs.length) return null;
+    return docs.map(d => `[Dokument: ${d.filename}]\n${d.snippet}`).join('\n\n---\n\n');
+  } catch { return null; }
+}
+
 function sysBlocks(extra = '') {
   return [
     {
@@ -2260,26 +2271,21 @@ document.getElementById('aufgaben-scan-btn')?.addEventListener('click', scanTopi
 document.getElementById('aufgaben-rescan-btn')?.addEventListener('click', scanTopics);
 
 async function scanTopics() {
-  if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
+  if (!sessionTxt && !sessionId) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   document.getElementById('aufgaben-loading-txt').textContent = 'Themen werden erkannt…';
   showAufgabenState(document.getElementById('aufgaben-loading'));
   const aufgabenScanDone = startProgress('aufgaben-progress-bar', 'aufgaben-progress-pct', 15000);
   selTopic = null;
   document.getElementById('aufgaben-gen-btn').disabled = true;
 
-  const prompt = `Analysiere den GESAMTEN folgenden Lernstoff und erstelle eine vollständige Themenliste.
-
-WICHTIG: Die Unterlagen bestehen aus mehreren Dokumenten und decken viele verschiedene Themengebiete ab.
-Verteile die Themen gleichmäßig über den GESAMTEN Stoff – von Anfang bis Ende, über alle Dokumente hinweg.
-Konzentriere dich NICHT nur auf die ersten Seiten oder ein einzelnes Kapitel. Erfasse die ganze Breite des Fachs.
-
-Antworte NUR als JSON-Array mit 15–20 kurzen Thema-Strings (max. 4 Wörter je Thema):
-["Thema 1", "Thema 2", "Thema 3", ...]`;
-
   try {
+    // Use breadth-first doc overview so all documents are represented
+    const overview = await buildDocOverview();
+    const overviewText = overview || docsForPrompt(25000);
     const raw = await claudeLocal(
-      [{ role: 'user', content: 'Liste alle Hauptthemen aus dem gesamten Stoff auf – über alle Dokumente und Kapitel verteilt, nicht nur den Anfang.' }],
-      sysBlocks(prompt), 700,
+      [{ role: 'user', content: `Hier sind Auszüge aus ALLEN Dokumenten dieser Lernsammlung:\n\n${overviewText}\n\nErstelle eine vollständige Themenliste, die die GESAMTE Breite aller Dokumente abdeckt – nicht nur die ersten.\nAntworte NUR als JSON-Array mit 15–20 kurzen Thema-Strings (max. 4 Wörter je Thema):\n["Thema 1","Thema 2",...]` }],
+      [{ type: 'text', text: 'Du listest Lernthemen aus Unterlagen auf. Antworte NUR als JSON-Array.' }],
+      700
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
@@ -3349,21 +3355,32 @@ const MILESTONE_LEVELS = [
 // ══ LERNEN (Lernpfad + Meilensteine) ═════════════════════════════════════
 
 function calculateMilestone() {
-  const total    = scannedTopics.length;
-  const current  = new Set(scannedTopics);
-  // Nur Themen zählen, die im aktuellen Lernpfad existieren (nach Re-Scan können alte Namen wegfallen)
-  const uniqueDone = new Set(
+  const total   = scannedTopics.length;
+  const current = new Set(scannedTopics);
+  const q       = sessionMeta?.quizStats?.questions || [];
+  const quizAvg = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
+
+  // Auto-level: based on any-level completion (tracks broad learning progress)
+  const anyDone = new Set(
     learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t).filter(t => current.has(t))
   ).size;
-  const topicPct = total > 0 ? Math.min(1, uniqueDone / total) : 0;
-  const q        = sessionMeta?.quizStats?.questions || [];
-  const quizAvg  = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
-  const pct      = Math.round((topicPct * 0.7 + quizAvg * 0.3) * 100);
+  const anyTopicPct = total > 0 ? Math.min(1, anyDone / total) : 0;
+  const autoRaw = Math.round((anyTopicPct * 0.7 + quizAvg * 0.3) * 100);
   let level = MILESTONE_LEVELS[0], levelIdx = 0;
   for (let i = 0; i < MILESTONE_LEVELS.length; i++) {
-    if (pct >= MILESTONE_LEVELS[i].min) { level = MILESTONE_LEVELS[i]; levelIdx = i; }
+    if (autoRaw >= MILESTONE_LEVELS[i].min) { level = MILESTONE_LEVELS[i]; levelIdx = i; }
   }
-  return { ...level, pct, levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length };
+
+  // Display %: count only at the ACTIVE difficulty (selected or auto-level's diff)
+  const activeDiff = selectedDiffIdx !== null
+    ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger')
+    : (level.diff || 'einsteiger');
+  const diffDone = new Set(
+    learnedTopics.filter(t => t.endsWith('::' + activeDiff)).map(t => t.split('::')[0]).filter(t => current.has(t))
+  ).size;
+  const pct = total > 0 ? Math.round((diffDone / total) * 100) : 0;
+
+  return { ...level, pct, doneCount: diffDone, totalTopics: total, levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length };
 }
 
 function renderMilestone() {
@@ -3396,13 +3413,10 @@ function renderMilestone() {
     </div>${i < MILESTONE_LEVELS.length - 1 ? `<div class="${lineClass}"></div>` : ''}`;
   }).join('');
 
-  const currentTopics = new Set(scannedTopics);
-  const doneCount = new Set(
-    learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t).filter(t => currentTopics.has(t))
-  ).size;
+  const activeDiffName = selIdx !== null ? MILESTONE_LEVELS[selIdx].name : (m.diff ? m.name : 'Einsteiger');
   const infoTxt = selIdx !== null
-    ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · <span class="ms-reset-btn">Zurücksetzen</span>`
-    : `${m.pct}% · ${doneCount}/${scannedTopics.length} Themen${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
+    ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · ${m.doneCount}/${m.totalTopics} Themen auf diesem Level · <span class="ms-reset-btn">Zurücksetzen</span>`
+    : `${m.pct}% · ${m.doneCount}/${m.totalTopics} Themen auf <strong>${activeDiffName}</strong>-Level${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
 
   banner.innerHTML = `
     <div class="ms-steps">${stepsHtml}</div>
@@ -4429,28 +4443,42 @@ async function markTopicDone() {
 }
 
 async function scanModuleStructure(btn) {
-  if (!sessionTxt) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
+  if (!sessionTxt && !sessionId) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   const orig = btn.textContent;
-  btn.disabled = true; btn.textContent = '…';
+  btn.disabled = true;
   try {
-    const raw = await claudeLocal(
-      [{ role: 'user', content: 'Strukturiere den Lernstoff als Lernreise in Kapiteln.' }],
-      sysBlocks(`Analysiere den Lernstoff und strukturiere ihn als Lernreise in didaktischer Reihenfolge: Grundlagen zuerst, darauf aufbauende Konzepte danach.
-Antworte NUR als JSON:
-{"kapitel":[{"titel":"Kurzer Kapiteltitel (max 5 Wörter)","lernziel":"Nach diesem Kapitel kannst du …(ein Satz, konkret)","themen":["Thema 1","Thema 2"]}]}
-Regeln: 4-8 Kapitel, je 2-5 Themen, Themennamen max. 4 Wörter, insgesamt max. 24 Themen. Decke die GANZE Breite des Stoffs ab (alle Dokumente/Kapitel), nicht nur den Anfang. Jedes Thema nur einmal.`),
-      1300
+    // Phase 1: Fetch short snippet from EVERY document → identify Hauptthemen across ALL docs
+    btn.textContent = 'Überblick lädt…';
+    const overview = await buildDocOverview();
+    const overviewText = overview || docsForPrompt(25000);
+
+    const p1Raw = await claudeLocal(
+      [{ role: 'user', content: `Hier sind kurze Auszüge aus ALLEN Dokumenten dieser Lernsammlung:\n\n${overviewText}\n\nIdentifiziere 6–8 übergeordnete Hauptthemen, die insgesamt in diesen Dokumenten behandelt werden. Decke die GESAMTE Breite aller Dokumente ab – nicht nur die ersten.` }],
+      [{ type: 'text', text: 'Du bist ein Lernstruktur-Experte. Analysiere Dokumentübersichten und erkenne übergeordnete Themengebiete.\nAntworte NUR als JSON-Array mit 6–8 Strings:\n["Hauptthema 1","Hauptthema 2",...]' }],
+      600
     );
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Keine Struktur erkannt');
-    const data = JSON.parse(m[0]);
+    const m1 = p1Raw.match(/\[[\s\S]*?\]/);
+    if (!m1) throw new Error('Hauptthemen nicht erkannt');
+    const hauptthemen = JSON.parse(m1[0]).filter(t => typeof t === 'string' && t.trim()).slice(0, 8);
+    if (!hauptthemen.length) throw new Error('Keine Hauptthemen gefunden');
+
+    // Phase 2: For each Hauptthema generate 3–5 specific Lernthemen using full content
+    btn.textContent = 'Lernthemen…';
+    const p2Raw = await claudeLocal(
+      [{ role: 'user', content: `Strukturiere den Lernstoff in diese Hauptthemen:\n${hauptthemen.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n\nErstelle für jedes Hauptthema 3–5 konkrete Lernthemen (max. 4 Wörter), die in den Unterlagen behandelt werden. Didaktische Reihenfolge: Grundlagen zuerst.` }],
+      sysBlocks(`Antworte NUR als JSON:\n{"kapitel":[{"titel":"Hauptthema","lernziel":"Nach diesem Kapitel kannst du …(ein Satz)","themen":["Lernthema 1","Lernthema 2"]}]}\nRegeln: Themennamen max. 4 Wörter, jedes Thema nur einmal, insgesamt max. 30 Themen.`),
+      1400
+    );
+    const m2 = p2Raw.match(/\{[\s\S]*\}/);
+    if (!m2) throw new Error('Lernstruktur nicht erkannt');
+    const data = JSON.parse(m2[0]);
     const kapitel = (data.kapitel || []).filter(k =>
       k && typeof k.titel === 'string' && Array.isArray(k.themen) && k.themen.length);
     if (!kapitel.length) throw new Error('Keine Kapitel gefunden');
     const seen = new Set();
     kapitel.forEach(k => { k.themen = k.themen.filter(t => typeof t === 'string' && !seen.has(t) && seen.add(t)); });
     moduleStructure = { kapitel: kapitel.filter(k => k.themen.length) };
-    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 24);
+    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 30);
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/structure`, {
@@ -4459,7 +4487,7 @@ Regeln: 4-8 Kapitel, je 2-5 Themen, Themennamen max. 4 Wörter, insgesamt max. 2
     }).catch(() => {});
     renderMilestone();
     loadLernpfad();
-    toast('🗺️ Deine Modul-Reise ist bereit!', 'success');
+    toast(`🗺️ ${hauptthemen.length} Hauptthemen · ${scannedTopics.length} Lernthemen erkannt!`, 'success');
   } catch (e) {
     toast('Fehler beim Erkennen: ' + e.message, 'error');
   }
