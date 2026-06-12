@@ -3953,7 +3953,7 @@ async function loadExamDocContext(subjId) {
 
 function getDiffInstr(effLevel, examCtx) {
   const examSnippet = examCtx && examCtx.trim()
-    ? `\n\nKLAUSUR-REFERENZ: Orientiere dich an Aufgabentyp, Stil und Komplexität folgender Prüfungsunterlagen. Mimiere deren Formulierungen, Notation und Schwierigkeitsgrad:\n${examCtx.slice(0, 1800)}`
+    ? `\n\nKLAUSUR-REFERENZ: Orientiere dich an Aufgabentyp, Stil und Komplexität folgender Prüfungsunterlagen. Mimiere deren Formulierungen, Notation und Schwierigkeitsgrad:\n${examCtx.slice(0, 8000)}`
     : '';
   switch (effLevel.diff) {
     case 'leicht':
@@ -4270,6 +4270,16 @@ async function checkLernenSolution() {
   }
   try {
     let ev;
+    // Bewertungsmaßstab an das Niveau koppeln, auf dem die Aufgabe generiert wurde:
+    // Rechenfehler bleiben auf jedem Level Fehler, aber die Sprach-/Fachbegriff-
+    // Erwartung steigt erst mit dem Schwierigkeitsgrad.
+    const GRADE_STD = {
+      einsteiger: `NIVEAU EINSTEIGER: Bewerte das konzeptuelle Verständnis. Eigene Worte und Alltagssprache sind völlig in Ordnung – Fachbegriffe sind NICHT erforderlich, solange die Kernidee inhaltlich stimmt. Die Musterlösung ("loesung") ebenfalls in einfacher, zugänglicher Sprache schreiben.`,
+      leicht: `NIVEAU GRUNDLAGEN: Eigene Worte sind in Ordnung. Grobe Begriffsverwechslungen zählen als Fehler, aber exakte Fachterminologie ist nicht nötig. Musterlösung in einfacher Sprache mit den wichtigsten Grundbegriffen.`,
+      mittel: `NIVEAU LERNENDER: Die zentralen Fachbegriffe des Themas sollten korrekt verwendet werden. Kleinere sprachliche Ungenauigkeiten sind ok, wenn das Verständnis klar erkennbar ist. Musterlösung mit korrekten Fachbegriffen.`,
+      schwer: `NIVEAU FORTGESCHRITTEN: Präzise Fachsprache wird erwartet. Fehlende oder falsch verwendete zentrale Fachbegriffe senken die Bewertung. Musterlösung in vollständiger Fachsprache.`,
+      pruefungsnah: `NIVEAU PRÜFUNGSNAH: Klausurmaßstab. Exakte Fachterminologie, vollständige Begründungen und saubere Notation wie in einer Prüfung erforderlich – bewerte wie ein strenger Korrektor. Musterlösung als vollständige Klausur-Musterlösung.`,
+    };
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
 Bewerte SEHR STRENG:
 {
@@ -4282,7 +4292,9 @@ Bewerte SEHR STRENG:
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
 KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
-Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.`;
+Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.
+
+${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}`;
 
     if (lernenAnswerMode === 'text') {
       const answerText = document.getElementById('lernen-text-answer').value.trim();

@@ -550,7 +550,7 @@ app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) =>
   try {
     const placeholders = types.map((_, i) => `$${i + 2}`).join(',');
     const { rows } = await pool.query(
-      `SELECT filename, doc_type, LEFT(content, 4000) AS content FROM documents WHERE subject_id=$1 AND doc_type IN (${placeholders}) ORDER BY uploaded_at DESC`,
+      `SELECT filename, doc_type, LEFT(content, 8000) AS content FROM documents WHERE subject_id=$1 AND doc_type IN (${placeholders}) ORDER BY uploaded_at DESC`,
       [req.params.id, ...types]
     );
     res.json(rows);
