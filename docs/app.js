@@ -3529,6 +3529,14 @@ function loadLernpfad() {
     loadLernpfad();
   });
   controlsBar.appendChild(ilBtn);
+  // Re-Scan: ohne diesen Button gäbe es nach dem ersten Scan keine Möglichkeit mehr,
+  // die Themen neu zu erkennen (der Erst-Scan-Button lebt nur im Empty-State)
+  const rescanBtn = document.createElement('button');
+  rescanBtn.className = 'btn-secondary btn-sm';
+  rescanBtn.textContent = '🔄 Themen neu erkennen';
+  rescanBtn.title = 'Alle Dokumente neu analysieren und Hauptthemen + Lernthemen neu aufbauen';
+  rescanBtn.addEventListener('click', () => scanModuleStructure(rescanBtn));
+  controlsBar.appendChild(rescanBtn);
   list.appendChild(controlsBar);
 
   if (interleavedMode && moduleStructure?.kapitel?.length > 1) {
