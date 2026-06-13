@@ -457,11 +457,16 @@ app.post('/api/subjects', authMiddleware, async (req, res) => {
   const { id, name, emoji, color } = req.body;
   if (!id || !name) return res.status(400).json({ error: 'id und name erforderlich' });
   try {
+    // Scope the upsert to the owner: ON CONFLICT only updates a row that already
+    // belongs to this user. A subject id that exists for *another* user must not
+    // be silently overwritten (cross-user data integrity).
     const { rows } = await pool.query(
       `INSERT INTO subjects (id,name,emoji,color,user_id) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3,color=$4 RETURNING *`,
+       ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3,color=$4
+       WHERE subjects.user_id=$5 RETURNING *`,
       [id, name, emoji || '📚', color || '#5856d6', req.user.id]
     );
+    if (!rows.length) return res.status(409).json({ error: 'Fach-ID bereits vergeben' });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -676,8 +681,10 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
       }
 
       if (!docContext) {
+        // Bounded fallback when full-text search finds nothing: cap at the 4 most
+        // recent documents so subjects with many uploads can't blow up token cost.
         const { rows } = await pool.query(
-          'SELECT filename, doc_type, content FROM documents WHERE subject_id=$1', [req.body.subject_id]
+          'SELECT filename, doc_type, content FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC LIMIT 4', [req.body.subject_id]
         );
         if (rows.length) docContext = rows.map(r => `${docLabel(r)}\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
       }
@@ -789,7 +796,7 @@ app.post('/api/local', authMiddleware, async (req, res) => {
     const r = await callClaude(params);
     const haikuText = r.content?.[0]?.text;
     if (typeof haikuText !== 'string') throw new Error('Haiku returned unexpected response shape');
-    return haikuText;
+    return { text: haikuText, usage: r.usage || {} };
   };
   try {
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
@@ -814,9 +821,9 @@ app.post('/api/local', authMiddleware, async (req, res) => {
       if (m) { try { JSON.parse(m[0]); jsonOk = true; } catch { try { JSON.parse(repair(m[0])); jsonOk = true; } catch {} } }
       if (!jsonOk) {
         console.warn('Ollama returned invalid/no JSON in json_mode – falling back to Haiku');
-        const haikuText = await callHaiku();
+        const { text: haikuText, usage } = await callHaiku();
         const today2 = new Date().toISOString().slice(0, 10);
-        recordUsage(today2, 'claude-haiku-4-5-20251001', 0, 0, req.user.id, feature).catch(() => {});
+        recordUsage(today2, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
         return res.json({ content: [{ text: haikuText }] });
       }
     }
@@ -824,9 +831,9 @@ app.post('/api/local', authMiddleware, async (req, res) => {
   } catch (e) {
     console.error('Ollama error:', e.message);
     try {
-      const haikuText = await callHaiku();
+      const { text: haikuText, usage } = await callHaiku();
       const today3 = new Date().toISOString().slice(0, 10);
-      recordUsage(today3, 'claude-haiku-4-5-20251001', 0, 0, req.user.id, feature).catch(() => {});
+      recordUsage(today3, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
       res.json({ content: [{ text: haikuText }] });
     } catch (e2) {
       console.error('Haiku fallback also failed:', e2.message);
@@ -1041,10 +1048,16 @@ app.post('/api/restore', authMiddleware, async (req, res) => {
   try {
     await client.query('BEGIN');
     for (const s of subjects) {
-      await client.query(
-        'INSERT INTO subjects (id,name,emoji,user_id) VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3,user_id=$4',
+      // Only insert a new subject or update one already owned by this user.
+      // Never seize a subject id that belongs to another account (the old
+      // ON CONFLICT … SET user_id=$4 let a crafted backup steal ownership).
+      const { rows: own } = await client.query(
+        `INSERT INTO subjects (id,name,emoji,user_id) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (id) DO UPDATE SET name=$2,emoji=$3
+         WHERE subjects.user_id=$4 RETURNING id`,
         [s.id, s.name, s.emoji || '📚', req.user.id]
       );
+      if (!own.length) continue;  // id belongs to someone else → skip its data
       if (s.messages?.length) {
         await client.query('DELETE FROM messages WHERE subject_id=$1', [s.id]);
         for (const m of s.messages) {

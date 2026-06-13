@@ -389,28 +389,40 @@ async function claudeLocal(messages, systemBlocks, maxTokens = 2000, opts = {}) 
   return (await r.json()).content[0].text;
 }
 
+// Escape the most common local-model JSON breakage: literal newline/CR/tab
+// characters inside string values, which make JSON.parse throw.
+function repairJson(s) {
+  let inStr = false, esc = false, out = '';
+  for (const c of s) {
+    if (esc)        { out += c; esc = false; continue; }
+    if (c === '\\') { out += c; esc = true;  continue; }
+    if (c === '"')  { out += c; inStr = !inStr; continue; }
+    if (inStr) {
+      if (c === '\n') { out += '\\n'; continue; }
+      if (c === '\r') { out += '\\r'; continue; }
+      if (c === '\t') { out += '\\t'; continue; }
+    }
+    out += c;
+  }
+  return out;
+}
+
+// Tolerant JSON.parse for an already-extracted object/array string: retries
+// once with the repair pass. Throws (like JSON.parse) if still unparseable, so
+// callers' existing try/catch keep working — but the common newline case now
+// recovers instead of failing the whole feature.
+function parseJsonLoose(str) {
+  try { return JSON.parse(str); } catch {}
+  return JSON.parse(repairJson(str));
+}
+
 // Extract and parse the first JSON object from a model response.
 // Handles plain JSON, code-fenced ```json...``` blocks, and the most common
 // local-model failure mode: literal newline/CR characters inside string values.
 function parseJsonResponse(raw) {
-  function repair(s) {
-    let inStr = false, esc = false, out = '';
-    for (const c of s) {
-      if (esc)        { out += c; esc = false; continue; }
-      if (c === '\\') { out += c; esc = true;  continue; }
-      if (c === '"')  { out += c; inStr = !inStr; continue; }
-      if (inStr) {
-        if (c === '\n') { out += '\\n'; continue; }
-        if (c === '\r') { out += '\\r'; continue; }
-        if (c === '\t') { out += '\\t'; continue; }
-      }
-      out += c;
-    }
-    return out;
-  }
   function tryParse(s) {
     try { return JSON.parse(s); } catch {}
-    try { return JSON.parse(repair(s)); } catch {}
+    try { return JSON.parse(repairJson(s)); } catch {}
     return null;
   }
   const cb = raw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
@@ -1545,7 +1557,7 @@ Antworte NUR als JSON:
     );
     const m  = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Modellantwort');
-    const ev = JSON.parse(m[0]);
+    const ev = parseJsonLoose(m[0]);
     haptic(ev.score >= 2 ? 40 : [80,40,80]);
 
     const savedConf = quizConfidence;
@@ -1634,7 +1646,7 @@ Antworte NUR als JSON: {"subtopics":["<Titel 1>","<Titel 2>","<Titel 3>"]}`),
     );
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Keine Subtopics erhalten');
-    const data = JSON.parse(m[0]);
+    const data = parseJsonLoose(m[0]);
     if (!Array.isArray(data.subtopics) || !data.subtopics.length) throw new Error('Leere Subtopics');
     const subs = data.subtopics.map(s => `${topicName}: ${s}`);
     const idx  = scannedTopics.indexOf(topicName);
@@ -1678,7 +1690,7 @@ Antworte NUR als JSON (kein Text davor oder danach):
     const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Antwort');
-    const data = JSON.parse(m[0]);
+    const data = parseJsonLoose(m[0]);
     document.getElementById('blitz-q-box').textContent = data.question;
     const grid = document.getElementById('mc-grid');
     data.options.forEach((opt, i) => {
@@ -2293,7 +2305,7 @@ async function scanTopics() {
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
-    scannedTopics = JSON.parse(m[0]).filter(t => typeof t === 'string').slice(0, 20);
+    scannedTopics = parseJsonLoose(m[0]).filter(t => typeof t === 'string').slice(0, 20);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     fetch(`/api/subjects/${sessionId}/topics`, {
@@ -3066,7 +3078,7 @@ Antworte NUR als JSON-Array (maximal 40 Begriffe, alphabetisch sortiert):
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Begriffe gefunden');
-    glossarTerms = JSON.parse(m[0]).filter(t => t.term && t.def);
+    glossarTerms = parseJsonLoose(m[0]).filter(t => t.term && t.def);
     glossarTerms.sort((a, b) => a.term.localeCompare(b.term, 'de'));
     DB.setGlossar(sessionId, glossarTerms.map(t => ({ term: t.term, definition: t.def }))).catch(() => {});
     glossarDone();
@@ -3250,7 +3262,7 @@ Antworte NUR als JSON-Array:
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Karten erkannt');
-    const parsed = JSON.parse(m[0]).filter(c => c.front && c.back);
+    const parsed = parseJsonLoose(m[0]).filter(c => c.front && c.back);
     const existing = await DB.cards(sessionId);
     const newCards = parsed.map(c => ({
       front: c.front, back: c.back,
@@ -4083,7 +4095,7 @@ async function loadTopicContent(topic, forceFresh = false) {
     if (currentExplainerTopic !== topic) { stopProg(); return; }
     let data = null;
     const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { data = JSON.parse(m[0]); } catch { data = null; } }
+    if (m) { try { data = parseJsonLoose(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
     localforage.setItem(lernenCacheKey(topic), data).catch(() => {});
@@ -4136,7 +4148,7 @@ async function regenLernenTask() {
     );
     const m = raw.match(/\{[\s\S]*\}/);
     let newAufgabe = null;
-    if (m) { try { newAufgabe = JSON.parse(m[0]).aufgabe; } catch {} }
+    if (m) { try { newAufgabe = parseJsonLoose(m[0]).aufgabe; } catch {} }
     if (newAufgabe && newAufgabe.trim()) {
       lernenTopicData.aufgabe = newAufgabe;
       document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(newAufgabe));
@@ -4483,7 +4495,7 @@ async function scanModuleStructure(btn) {
     );
     const m1 = p1Raw.match(/\[[\s\S]*?\]/);
     if (!m1) throw new Error('Hauptthemen nicht erkannt');
-    const hauptthemen = JSON.parse(m1[0]).filter(t => typeof t === 'string' && t.trim()).slice(0, 8);
+    const hauptthemen = parseJsonLoose(m1[0]).filter(t => typeof t === 'string' && t.trim()).slice(0, 8);
     if (!hauptthemen.length) throw new Error('Keine Hauptthemen gefunden');
 
     // Phase 2: For each Hauptthema generate 3–5 specific Lernthemen using full content
@@ -4495,7 +4507,7 @@ async function scanModuleStructure(btn) {
     );
     const m2 = p2Raw.match(/\{[\s\S]*\}/);
     if (!m2) throw new Error('Lernstruktur nicht erkannt');
-    const data = JSON.parse(m2[0]);
+    const data = parseJsonLoose(m2[0]);
     const kapitel = (data.kapitel || []).filter(k =>
       k && typeof k.titel === 'string' && Array.isArray(k.themen) && k.themen.length);
     if (!kapitel.length) throw new Error('Keine Kapitel gefunden');
