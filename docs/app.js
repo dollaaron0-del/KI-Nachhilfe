@@ -1691,6 +1691,17 @@ Antworte NUR als JSON (kein Text davor oder danach):
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Antwort');
     const data = parseJsonLoose(m[0]);
+    if (!Array.isArray(data.options) || data.options.length < 2) throw new Error('Ungültige Antwortoptionen');
+    // Local models sometimes encode the index as a string ("2") or letter ("C")
+    // instead of a number — normalise so the strict i===correct compare works.
+    let correct = data.correct;
+    if (typeof correct === 'string') {
+      const t = correct.trim().toUpperCase();
+      correct = /^[A-D]$/.test(t) ? t.charCodeAt(0) - 65 : parseInt(t, 10);
+    }
+    if (!Number.isInteger(correct) || correct < 0 || correct >= data.options.length)
+      throw new Error('Ungültiger Lösungsindex');
+    data.correct = correct;
     document.getElementById('blitz-q-box').textContent = data.question;
     const grid = document.getElementById('mc-grid');
     data.options.forEach((opt, i) => {
@@ -3188,9 +3199,10 @@ function renderProgressChart() {
 }
 
 // ══ KARTEIKARTEN ══════════════════════════════════════════════════════════
-let reviewQueue = [];
-let reviewIdx   = 0;
-let reviewStats = { again: 0, hard: 0, good: 0, easy: 0 };
+let reviewQueue   = [];
+let reviewAllCards = [];   // full card set; reviewQueue holds references into this
+let reviewIdx     = 0;
+let reviewStats   = { again: 0, hard: 0, good: 0, easy: 0 };
 
 function srsUpdate(card, grade) {
   if (grade < 2) {
@@ -3280,6 +3292,7 @@ Antworte NUR als JSON-Array:
 
 async function startReview() {
   const cards = await DB.cards(sessionId);
+  reviewAllCards = cards;
   reviewQueue = cards.filter(c => c.due <= Date.now());
   if (!reviewQueue.length) { await initKarten(); return; }
   reviewIdx   = 0;
@@ -3318,13 +3331,13 @@ document.querySelectorAll('.grade-btn').forEach(btn => {
     const keys = ['again','hard','good','easy'];
     reviewStats[keys[grade]]++;
 
-    const cards   = await DB.cards(sessionId);
-    const cardIdx = cards.findIndex(c => c.id === reviewQueue[reviewIdx].id);
-    if (cardIdx >= 0) {
-      srsUpdate(cards[cardIdx], grade);
-      await DB.setCards(sessionId, cards);
-      touchStreak();
-    }
+    // Update the card in place. reviewQueue holds references into reviewAllCards,
+    // so mutating the queued card also updates the full set we persist.
+    // (We cannot re-fetch + match by id: setCards re-inserts all rows and the
+    // SERIAL ids change on every save, so id matching would fail after card 1.)
+    srsUpdate(reviewQueue[reviewIdx], grade);
+    await DB.setCards(sessionId, reviewAllCards);
+    touchStreak();
 
     reviewIdx++;
     if (reviewIdx >= reviewQueue.length) {
