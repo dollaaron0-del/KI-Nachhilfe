@@ -1857,44 +1857,43 @@ html, body {
   transition: opacity 0.15s;
 }
 .ms-step:active { opacity: 0.6; }
+/* Animierbare Füllung (progressive enhancement; ignoriert wo nicht unterstützt) */
+@property --ms-frac {
+  syntax: '<angle>'; inherits: true; initial-value: 0deg;
+}
+/* Stufen-Kreis = Ring, der sich im Uhrzeigersinn nach --ms-frac füllt.
+   Der conic-gradient zeichnet den Fortschritt, das ::before-Loch macht den Donut. */
 .ms-dot {
+  position: relative;
   width: 40px; height: 40px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px;
-  background: var(--bg);
-  border: 2px solid var(--border);
-  transition: all 0.25s ease;
-  opacity: 0.4;
+  background: conic-gradient(var(--accent) var(--ms-frac, 0deg), var(--ms-track, rgba(128,128,128,0.2)) 0);
+  transition: --ms-frac 0.5s ease, box-shadow 0.25s ease;
 }
-/* Past steps: filled + checkmark */
-.ms-step.ms-past .ms-dot {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-size: 15px;
-  opacity: 1;
-  box-shadow: 0 2px 8px rgba(88,86,214,0.3);
+.ms-dot::before {
+  content: ''; position: absolute; inset: 3px;
+  border-radius: 50%; background: var(--surface);
+  transition: background 0.25s ease;
 }
-/* Auto-detected current level */
-.ms-step.ms-active .ms-dot {
-  background: rgba(88,86,214,0.1);
-  border-color: var(--accent);
-  border-width: 2.5px;
-  opacity: 1;
-  box-shadow: 0 0 0 5px rgba(88,86,214,0.1);
+.ms-dot-emoji {
+  position: relative; z-index: 1;
+  font-size: 18px; line-height: 1;
+  color: var(--text-secondary); opacity: 0.55;
+  transition: color 0.2s, opacity 0.2s;
 }
-/* Manually selected level */
-.ms-step.ms-manual .ms-dot {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  opacity: 1;
-  box-shadow: 0 3px 14px rgba(88,86,214,0.45);
-}
-.ms-step:hover:not(.ms-active):not(.ms-past):not(.ms-manual) .ms-dot {
-  border-color: rgba(88,86,214,0.5);
-  opacity: 0.7;
+/* Vollständig gelernte Stufe: Kreis ganz gefüllt + Häkchen */
+.ms-step.ms-complete .ms-dot::before { background: var(--accent); }
+.ms-step.ms-complete .ms-dot-emoji { color: #fff; opacity: 1; font-size: 15px; }
+.ms-step.ms-complete .ms-dot { box-shadow: 0 2px 8px rgba(88,86,214,0.3); }
+/* Auto-erkannte aktuelle Stufe (in Arbeit) */
+.ms-step.ms-active .ms-dot { box-shadow: 0 0 0 5px rgba(88,86,214,0.1); }
+.ms-step.ms-active .ms-dot-emoji { opacity: 1; }
+/* Manuell gewählte Stufe */
+.ms-step.ms-manual .ms-dot { box-shadow: 0 3px 14px rgba(88,86,214,0.45); }
+.ms-step.ms-manual .ms-dot-emoji { opacity: 1; }
+.ms-step:hover:not(.ms-active):not(.ms-complete):not(.ms-manual) .ms-dot-emoji {
+  opacity: 0.8;
 }
 .ms-label {
   font-size: 10px;
@@ -1905,7 +1904,7 @@ html, body {
   opacity: 0.45;
   transition: opacity 0.2s, color 0.2s;
 }
-.ms-step.ms-past .ms-label { opacity: 0.7; }
+.ms-step.ms-complete .ms-label { opacity: 0.7; }
 .ms-step.ms-active .ms-label,
 .ms-step.ms-manual .ms-label {
   color: var(--accent);
@@ -1918,10 +1917,11 @@ html, body {
   background: var(--border);
   margin: 0 3px;
   margin-bottom: 24px;
-  border-radius: 2px;
-  transition: background 0.3s;
+  border-radius: 3px;
+  transition: background 0.3s, height 0.3s;
 }
-.ms-line.ms-line-done { background: var(--accent); opacity: 0.6; }
+/* Volle Stufe links davon → Strich kräftiger und dicker */
+.ms-line.ms-line-done { background: var(--accent); height: 5px; opacity: 0.85; }
 .ms-bar-wrap {
   height: 5px;
   background: rgba(128,128,128,0.15);

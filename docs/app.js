@@ -3457,33 +3457,39 @@ const MILESTONE_LEVELS = [
 
 // ══ LERNEN (Lernpfad + Meilensteine) ═════════════════════════════════════
 
-function calculateMilestone() {
-  const total   = scannedTopics.length;
+// Distinct gescannte Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
+function topicsDoneAtDiff(diff) {
   const current = new Set(scannedTopics);
-
-  // Auto-level: rein nach tatsächlich durchgelernten Themen. Der Quiz-Schnitt
-  // fließt NICHT mehr ein – sonst stieg das Level (und die Skala zeigte ✓),
-  // ohne dass auch nur ein Abschnitt durchgelernt wurde.
-  const anyDone = new Set(
-    learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t).filter(t => current.has(t))
+  return new Set(
+    learnedTopics.filter(t => t.endsWith('::' + diff)).map(t => t.split('::')[0]).filter(t => current.has(t))
   ).size;
-  const anyTopicPct = total > 0 ? Math.min(1, anyDone / total) : 0;
-  const autoRaw = Math.round(anyTopicPct * 100);
-  let level = MILESTONE_LEVELS[0], levelIdx = 0;
-  for (let i = 0; i < MILESTONE_LEVELS.length; i++) {
-    if (autoRaw >= MILESTONE_LEVELS[i].min) { level = MILESTONE_LEVELS[i]; levelIdx = i; }
-  }
+}
 
-  // Display %: count only at the ACTIVE difficulty (selected or auto-level's diff)
-  const activeDiff = selectedDiffIdx !== null
-    ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger')
-    : (level.diff || 'einsteiger');
-  const diffDone = new Set(
-    learnedTopics.filter(t => t.endsWith('::' + activeDiff)).map(t => t.split('::')[0]).filter(t => current.has(t))
-  ).size;
-  const pct = total > 0 ? Math.round((diffDone / total) * 100) : 0;
+function calculateMilestone() {
+  const total = scannedTopics.length;
 
-  return { ...level, pct, doneCount: diffDone, totalTopics: total, levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length };
+  // Fortschritt PRO Stufe: Anteil der Themen, die auf genau diesem Niveau
+  // durchgearbeitet wurden. So füllt sich jeder Stufen-Kreis nur durch Aufgaben
+  // auf diesem Niveau – leichte Themen heben keine höheren Stufen.
+  const fracs = MILESTONE_LEVELS.map(l => {
+    const d = l.diff || 'einsteiger';
+    return total > 0 ? Math.min(1, topicsDoneAtDiff(d) / total) : 0;
+  });
+
+  // Auto-Stufe = niedrigste noch nicht vollständig gelernte Stufe (= woran man
+  // gerade arbeitet). Erst wenn eine Stufe ganz voll ist, rückt sie eine weiter.
+  let levelIdx = 0;
+  while (levelIdx < MILESTONE_LEVELS.length - 1 && fracs[levelIdx] >= 1) levelIdx++;
+  const level = MILESTONE_LEVELS[levelIdx];
+
+  // Anzeige-% = Fortschritt auf dem AKTIVEN Niveau (manuell gewählt oder Auto).
+  const activeIdx  = selectedDiffIdx !== null ? selectedDiffIdx : levelIdx;
+  const activeDiff = MILESTONE_LEVELS[activeIdx].diff || 'einsteiger';
+  const diffDone   = topicsDoneAtDiff(activeDiff);
+  const pct = total > 0 ? Math.round(Math.min(1, diffDone / total) * 100) : 0;
+
+  return { ...level, pct, doneCount: diffDone, totalTopics: total,
+           levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length, fracs };
 }
 
 function renderMilestone() {
@@ -3502,16 +3508,20 @@ function renderMilestone() {
 
   const autoIdx  = m.levelNum - 1;
   const selIdx   = selectedDiffIdx;
+  const fracs    = m.fracs || [];
 
   const stepsHtml = MILESTONE_LEVELS.map((l, i) => {
+    const frac     = fracs[i] || 0;
+    const complete = frac >= 1;                 // ganze Stufe durchgelernt → Kreis voll
+    const deg      = Math.round(frac * 360);    // Füllung im Uhrzeigersinn
     const isManual = selIdx !== null;
     const isActive = isManual ? i === selIdx : i === autoIdx;
-    const isPast   = i < autoIdx; // always based on real progress
-    const cls = ['ms-step', isActive ? (isManual ? 'ms-manual' : 'ms-active') : '', isPast ? 'ms-past' : '']
+    const cls = ['ms-step', isActive ? (isManual ? 'ms-manual' : 'ms-active') : '', complete ? 'ms-complete' : '']
                   .filter(Boolean).join(' ');
-    const lineClass = isPast ? 'ms-line ms-line-done' : 'ms-line';
-    return `<div class="${cls}" data-diffidx="${i}">
-      <div class="ms-dot">${isPast ? '✓' : l.emoji}</div>
+    // Verbindungsstrich wird dick/aktiv, sobald die Stufe LINKS davon voll ist.
+    const lineClass = complete ? 'ms-line ms-line-done' : 'ms-line';
+    return `<div class="${cls}" data-diffidx="${i}" style="--ms-frac:${deg}deg">
+      <div class="ms-dot"><span class="ms-dot-emoji">${complete ? '✓' : l.emoji}</span></div>
       <div class="ms-label">${l.name}</div>
     </div>${i < MILESTONE_LEVELS.length - 1 ? `<div class="${lineClass}"></div>` : ''}`;
   }).join('');
