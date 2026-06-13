@@ -1428,7 +1428,10 @@ async function sendChat() {
     typ.remove();
     addMsg(chatMessages, 'assistant', reply, () => rephraseReply(reply));
   } catch (e) {
-    sessionMeta.chatHistory.pop();
+    // Keep the user's message in history: it is already rendered in the DOM and
+    // persisted server-side (DB.addMessage above, and server messages are the
+    // source of truth on reload). Popping it here would desync the in-memory
+    // context from what the user sees, so a retry/follow-up would omit it.
     typ.remove(); addMsg(chatMessages, 'assistant', '⚠️ ' + e.message);
   }
   document.getElementById('chat-send').disabled = false;
