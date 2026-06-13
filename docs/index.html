@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=109" />
+  <link rel="stylesheet" href="style.css?v=111" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -654,15 +654,6 @@
       <!-- Step 1: Erklärung (scrollable) -->
       <div id="lernen-step-1" class="lernen-step">
         <div class="lernen-erkl-scroll">
-          <!-- Pre-Test: erscheint vor der Erklärung bei neuen Themen -->
-          <div id="lernen-pretest" class="lernen-pretest hidden">
-            <div class="pretest-icon">💭</div>
-            <h3 class="pretest-title">Vor der Erklärung</h3>
-            <p class="pretest-hint">Was weißt du schon über dieses Thema? Kurze Notiz – auch «nichts» ist eine gültige Antwort. (Optional – du kannst auch direkt lernen.)</p>
-            <textarea id="pretest-input" class="pretest-input" placeholder="Dein Vorwissen… (optional)" rows="3" maxlength="500"></textarea>
-            <button class="btn-primary" id="pretest-submit" style="width:100%">Weiter zur Erklärung →</button>
-            <button class="btn-secondary btn-sm" id="pretest-skip" style="margin-top:4px;width:100%">Direkt zur Erklärung (ohne Pre-Test)</button>
-          </div>
           <div id="lernen-erkl-loading" style="text-align:center;padding:40px 16px">
             <div class="big-icon spin">📖</div>
             <p>Thema wird erklärt…</p>
@@ -813,7 +804,7 @@
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="app.js?v=109"></script>
+<script src="app.js?v=111"></script>
 <div id="toast-container"></div>
 
 <!-- ══ ADMIN USER MANAGEMENT SHEET ════════════════════════════════════════ -->

@@ -3460,15 +3460,15 @@ const MILESTONE_LEVELS = [
 function calculateMilestone() {
   const total   = scannedTopics.length;
   const current = new Set(scannedTopics);
-  const q       = sessionMeta?.quizStats?.questions || [];
-  const quizAvg = q.length > 0 ? q.reduce((a, x) => a + x.score, 0) / (q.length * 3) : 0;
 
-  // Auto-level: based on any-level completion (tracks broad learning progress)
+  // Auto-level: rein nach tatsächlich durchgelernten Themen. Der Quiz-Schnitt
+  // fließt NICHT mehr ein – sonst stieg das Level (und die Skala zeigte ✓),
+  // ohne dass auch nur ein Abschnitt durchgelernt wurde.
   const anyDone = new Set(
     learnedTopics.map(t => t.includes('::') ? t.split('::')[0] : t).filter(t => current.has(t))
   ).size;
   const anyTopicPct = total > 0 ? Math.min(1, anyDone / total) : 0;
-  const autoRaw = Math.round((anyTopicPct * 0.7 + quizAvg * 0.3) * 100);
+  const autoRaw = Math.round(anyTopicPct * 100);
   let level = MILESTONE_LEVELS[0], levelIdx = 0;
   for (let i = 0; i < MILESTONE_LEVELS.length; i++) {
     if (autoRaw >= MILESTONE_LEVELS[i].min) { level = MILESTONE_LEVELS[i]; levelIdx = i; }
@@ -3938,7 +3938,6 @@ const REVIEW_AFTER_WEAK_MS   = 3 * 86400000;
 
 // ── v98: Lern-Psychologie Extras ──────────────────────────────────────────
 let quizConfidence  = 0;      // 1=unsicher, 2=eher sicher, 3=sehr sicher (0=nicht gesetzt)
-let pretestAnswer   = '';     // Vorwissen-Notiz vor der Erklärung
 let lastFbTopicName = '';     // Thema der letzten Quiz-Frage (für "Vertiefen")
 let interleavedMode = false;  // Lernpfad-Reihenfolge über Kapitel mischen
 
@@ -3995,20 +3994,10 @@ function openTopicView(topic) {
   document.getElementById('lernen-tab-aufgabe').disabled = true;
   document.getElementById('lernen-done-btn').classList.add('hidden');
   lernenSwitchStep(1);
-  pretestAnswer = '';
-  // Pre-Test: bei noch nie gelernten Themen zuerst Vorwissen abfragen.
-  // Bei Wiederholungen (isDue) oder bereits Abgeschlossenen: direkt laden.
-  const isFresh = !learnedTopics.includes(topic + '::' + lernenCurrentDiff);
-  const isDue   = topicReviewDue(topic + '::' + lernenCurrentDiff);
-  if (isFresh && !isDue) {
-    document.getElementById('lernen-pretest')?.classList.remove('hidden');
-    const pretestInput = document.getElementById('pretest-input');
-    if (pretestInput) pretestInput.value = '';
-  } else {
-    document.getElementById('lernen-pretest')?.classList.add('hidden');
-    document.getElementById('lernen-erkl-loading').style.display = '';
-    loadTopicContent(topic, isDue);
-  }
+  // Vorwissen-Abfrage entfernt – direkt zur Erklärung, egal ob neu, fällig oder Wiederholung.
+  const isDue = topicReviewDue(topic + '::' + lernenCurrentDiff);
+  document.getElementById('lernen-erkl-loading').style.display = '';
+  loadTopicContent(topic, isDue);
 }
 
 function closeLernenTopic() {
@@ -4092,11 +4081,6 @@ function renderTopicContent(topic, data) {
       inner +
     `</div>`;
   let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>`;
-  // Pre-Test Recap: zeige Vorwissen-Notiz als aufklappbaren Block oben
-  if (pretestAnswer) {
-    html += `<details class="pretest-recap"><summary>💭 Dein Vorwissen vorher</summary>` +
-      `<div class="pretest-recap-body">${esc(pretestAnswer)}</div></details>`;
-  }
   if (data.was)    html += section('💡', 'Was ist das?',       '',                    `<div class="explainer-body">${fmtMd(data.was)}</div>`);
   if (data.warum)  html += section('🎯', 'Warum wichtig?',     '',                    `<div class="explainer-body">${fmtMd(data.warum)}</div>`);
   if (data.vertiefung && data.vertiefung.trim())
@@ -4108,11 +4092,11 @@ function renderTopicContent(topic, data) {
   body.innerHTML = html;
   body.classList.remove('hidden');
 
-  // Elaborative Interrogation: Reflexionsfrage nach der Erklärung
-  // Bei Pre-Test (frisch gelernt) immer anzeigen; bei Wiederholung überspringen
+  // Elaborative Interrogation: Reflexionsfrage nach der Erklärung.
+  // Nur bei frisch gelernten Themen; bei Wiederholung (bereits gelernt) überspringen.
   const elabEl = document.getElementById('lernen-elaborate');
-  const hasPretest = !!pretestAnswer;
-  if (elabEl && hasPretest) {
+  const isFresh = !learnedTopics.includes(topic + '::' + lernenCurrentDiff);
+  if (elabEl && isFresh) {
     const templates = [
       `Erkläre "${topic}" in deinen eigenen Worten – als würdest du es jemandem ohne Vorkenntnisse erklären.`,
       `Warum ist "${topic}" wichtig, und wo begegnet dir das Konzept in der Praxis?`,
@@ -4703,22 +4687,7 @@ if (window.visualViewport) {
   }).catch(() => {});
 }());
 
-// ── Pre-Test & Elaboration controls ──────────────────────────────────────
-function submitPretest() {
-  const input = document.getElementById('pretest-input');
-  pretestAnswer = (input?.value || '').trim();
-  document.getElementById('lernen-pretest')?.classList.add('hidden');
-  document.getElementById('lernen-erkl-loading').style.display = '';
-  loadTopicContent(currentExplainerTopic, false);
-}
-document.getElementById('pretest-submit')?.addEventListener('click', submitPretest);
-document.getElementById('pretest-skip')?.addEventListener('click', () => {
-  pretestAnswer = '';
-  document.getElementById('lernen-pretest')?.classList.add('hidden');
-  document.getElementById('lernen-erkl-loading').style.display = '';
-  loadTopicContent(currentExplainerTopic, false);
-});
-
+// ── Elaboration controls ──────────────────────────────────────────────────
 function finishElaboration() {
   document.getElementById('lernen-elaborate')?.classList.add('hidden');
   document.getElementById('lernen-step1-footer')?.classList.remove('hidden');
