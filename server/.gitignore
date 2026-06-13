@@ -1,2 +1,4 @@
 .env
+.env.save*
+.env.bak
 node_modules/

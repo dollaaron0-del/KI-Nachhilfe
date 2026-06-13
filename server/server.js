@@ -327,6 +327,21 @@ function authMiddleware(req, res, next) {
   } catch { res.status(401).json({ error: 'Sitzung abgelaufen – bitte neu anmelden' }); }
 }
 
+// Verify the logged-in user owns the subject referenced by :id.
+// Mounted on /api/subjects/:id so every sub-resource (messages, documents,
+// cards, quiz, glossar, cheat, topics, aufgaben, klausuren, …) is isolated
+// per user and one account can never read or modify another account's data.
+async function assertOwnsSubject(req, res, next) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT 1 FROM subjects WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Fach nicht gefunden' });
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Benutzername und Passwort erforderlich' });
@@ -451,6 +466,9 @@ app.post('/api/subjects', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// All /api/subjects/:id/* routes below require ownership of the subject.
+app.use('/api/subjects/:id', authMiddleware, assertOwnsSubject);
+
 app.patch('/api/subjects/:id', authMiddleware, async (req, res) => {
   const { custom_prompt } = req.body;
   try {
@@ -572,7 +590,7 @@ app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/documents', upload.single('file'), async (req, res) => {
+app.post('/api/subjects/:id/documents', authMiddleware, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei' });
   try {
     let content = '';
@@ -620,8 +638,18 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
       ? system
       : system ? [{ type: 'text', text: system }] : [];
 
-    // RAG: inject relevant document context if subject_id provided
+    // RAG: inject relevant document context if subject_id provided.
+    // Only for subjects the requesting user actually owns — otherwise the RAG
+    // path could leak another user's documents into the response.
+    let ownsSubject = false;
     if (req.body.subject_id) {
+      const { rows } = await pool.query(
+        'SELECT 1 FROM subjects WHERE id=$1 AND user_id=$2',
+        [req.body.subject_id, req.user.id]
+      );
+      ownsSubject = rows.length > 0;
+    }
+    if (req.body.subject_id && ownsSubject) {
       const lastMsg = messages[messages.length - 1];
       const query = typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 300) : '';
       let docContext = '';
@@ -827,10 +855,15 @@ app.post('/api/local/stream', authMiddleware, async (req, res) => {
     if (!r.ok) throw new Error(`Ollama ${r.status}`);
     const reader = r.body.getReader();
     const dec = new TextDecoder();
+    let buf = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      for (const line of dec.decode(value).split('\n')) {
+      buf += dec.decode(value, { stream: true });
+      // Keep the trailing (possibly incomplete) line in the buffer for the next chunk.
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const d = line.slice(6).trim();
         if (d === '[DONE]') continue;
@@ -1431,11 +1464,6 @@ app.delete('/api/subjects/:id/learned-topics/:topic', authMiddleware, async (req
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── SPA fallback ───────────────────────────────────────────────────────────
-app.get('/{*path}', (req, res) => {
-  res.sendFile(path.join(__dirname, '../docs/index.html'));
-});
-
 // ── Admin: per-user stats ──────────────────────────────────────────────────
 app.get('/api/admin/user-stats', authMiddleware, async (req, res) => {
   if (!await requireAdmin(req, res)) return;
@@ -1482,6 +1510,11 @@ app.get('/api/admin/analytics', authMiddleware, async (req, res) => {
     `);
     res.json({ features, dau, costs });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SPA fallback (must stay AFTER all /api routes) ──────────────────────────
+app.get('/{*path}', (req, res) => {
+  res.sendFile(path.join(__dirname, '../docs/index.html'));
 });
 
 // ── DB Table Init ──────────────────────────────────────────────────────────

@@ -368,7 +368,7 @@ async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
     headers: authHeaders(),
     body: JSON.stringify({
       messages, system: systemBlocks, max_tokens: maxTokens,
-      model: 'claude-haiku-4-5-20251001', subject_id: sessionId,
+      model: 'claude-haiku-4-5-20251001', subject_id: sessionId, feature: currentFeature,
     }),
   });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(friendlyApiError(e.error, r.status)); }
@@ -429,19 +429,23 @@ async function claudeLocalStream(messages, systemBlocks, maxTokens = 3000, onTok
   if (!r.ok) throw new Error(`Serverfehler ${r.status}`);
   const reader = r.body.getReader();
   const dec = new TextDecoder();
-  let full = '';
+  let full = '', buf = '';
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    for (const line of dec.decode(value).split('\n')) {
+    buf += dec.decode(value, { stream: true });
+    // Keep the trailing (possibly incomplete) line for the next chunk.
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
       const d = line.slice(6).trim();
       if (d === '[DONE]') return full;
-      try {
-        const parsed = JSON.parse(d);
-        if (parsed.error) throw new Error(parsed.error);
-        if (parsed.token) { full += parsed.token; onToken(full); }
-      } catch (e) { if (e.message) throw e; }
+      let parsed;
+      try { parsed = JSON.parse(d); }
+      catch { continue; }   // ignore malformed/partial lines, never abort the stream
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.token) { full += parsed.token; onToken(full); }
     }
   }
   return full;
