@@ -178,6 +178,7 @@ document.getElementById('btn-logout')?.addEventListener('click', () => {
 });
 
 function onAuthSuccess() {
+  sessionExpiredHandled = false;  // a fresh session can expire again later
   document.getElementById('auth-username-badge').textContent = '👤 ' + authUsername;
   const adminPanel = document.getElementById('admin-panel');
   if (adminPanel) adminPanel.classList.toggle('hidden', !authIsAdmin);
@@ -240,11 +241,31 @@ let activeTool      = 'pen';      // 'pen' | 'eraser' | 'highlighter' | 'line'
 let linePreviewData = null;
 
 // ── DB (server-backed) ────────────────────────────────────────────────────
+// Session-expiry handling. A 401 from any api() call means the token is gone or
+// expired; without this the many `.catch(() => [])` call sites would just show
+// empty data with no hint to re-login. Idempotent so parallel 401s (e.g. the
+// burst of loads on a page open) only redirect once.
+let sessionExpiredHandled = false;
+function handleAuthExpired() {
+  if (sessionExpiredHandled) return;
+  sessionExpiredHandled = true;
+  authToken = ''; authUsername = '';
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('auth_username');
+  localStorage.removeItem('auth_is_admin');
+  stopApprovalPolling();
+  showScreen('auth-screen');
+  toast('Deine Sitzung ist abgelaufen – bitte melde dich neu an.', 'warn', 5000);
+}
+
 const api = (url, opts = {}) =>
   fetch(url, {
     headers: { 'content-type': 'application/json', ...(authToken ? { authorization: `Bearer ${authToken}` } : {}) },
     ...opts,
-  }).then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); }));
+  }).then(r => {
+    if (r.status === 401) { handleAuthExpired(); throw new Error('Sitzung abgelaufen'); }
+    return r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || r.status); });
+  });
 
 const DB = {
   // ── Server ──────────────────────────────────────────────────────────────
