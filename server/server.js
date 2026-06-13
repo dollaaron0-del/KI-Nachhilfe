@@ -753,6 +753,13 @@ const OLLAMA_MODEL        = process.env.OLLAMA_MODEL        || 'phi4:14b';
 const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || 'llava:7b';
 const OLLAMA_URL          = 'http://localhost:11434/v1/chat/completions';
 
+// Local-model toggle. Default OFF: the local model (phi4:14b) exceeded its 60s
+// budget on CPU hardware and only wasted time before falling back to Haiku, so
+// /api/local + /api/local/stream go straight to Claude Haiku — fast & reliable
+// for live use. Set USE_OLLAMA=true to re-enable the free local model (e.g. on
+// GPU hardware). Vision (/api/local/vision) is unaffected and still uses Ollama.
+const USE_OLLAMA = process.env.USE_OLLAMA === 'true';
+
 function ollamaMsgs(system, messages) {
   const sysText = Array.isArray(system)
     ? system.map(b => b.text || '').join('\n')
@@ -785,6 +792,17 @@ async function callOllama(messages, maxTokens = 2000, jsonMode = false) {
   }
 }
 
+// Routes a batch completion to the local model or straight to Claude Haiku,
+// honoring USE_OLLAMA. Use this for background/server-side tasks (not the
+// request handlers, which record per-user usage themselves).
+async function localComplete(messages, maxTokens = 2000, jsonMode = false) {
+  if (USE_OLLAMA) return callOllama(messages, maxTokens, jsonMode);
+  const r = await callClaude({ model: 'claude-haiku-4-5-20251001', max_tokens: maxTokens, messages });
+  const text = r.content?.[0]?.text;
+  if (typeof text !== 'string') throw new Error('Haiku returned unexpected response shape');
+  return text;
+}
+
 app.post('/api/local', authMiddleware, async (req, res) => {
   const { messages, system, max_tokens, json_mode, feature } = req.body;
   if (!messages || !Array.isArray(messages)) {
@@ -799,6 +817,13 @@ app.post('/api/local', authMiddleware, async (req, res) => {
     return { text: haikuText, usage: r.usage || {} };
   };
   try {
+    // Local model disabled → answer directly with Haiku (fast, reliable).
+    if (!USE_OLLAMA) {
+      const { text: haikuText, usage } = await callHaiku();
+      const todayH = new Date().toISOString().slice(0, 10);
+      recordUsage(todayH, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
+      return res.json({ content: [{ text: haikuText }] });
+    }
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
     // When json_mode was requested, verify Ollama returned *valid* parseable JSON.
     // Regex alone is not enough — models often produce { } with literal newlines
@@ -851,6 +876,22 @@ app.post('/api/local/stream', authMiddleware, async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   try {
+    // Local model disabled → stream tokens directly from Claude Haiku.
+    if (!USE_OLLAMA) {
+      const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 3000, messages };
+      if (system) params.system = system;
+      const stream = anthropic.messages.stream(params);
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+          res.write(`data: ${JSON.stringify({ token: event.delta.text })}\n\n`);
+        }
+      }
+      const finalMsg = await stream.finalMessage();
+      const u = finalMsg.usage || {};
+      recordUsage(new Date().toISOString().slice(0, 10), 'claude-haiku-4-5-20251001', u.input_tokens || 0, u.output_tokens || 0, req.user.id, null).catch(() => {});
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
     const r = await fetch(OLLAMA_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1122,10 +1163,10 @@ app.post('/api/restore', authMiddleware, async (req, res) => {
   }
 });
 
-// ── Auto-card generation (uses Ollama) ────────────────────────────────────
+// ── Auto-card generation (local model or Haiku, per USE_OLLAMA) ───────────
 async function autoGenerateCards(subjectId, filename, content) {
   const truncated = content.slice(0, 8000);
-  const text = await callOllama([{
+  const text = await localComplete([{
     role: 'user',
     content: `Erstelle 12 Lernkarten (Frage/Antwort) aus diesem Text. Antworte NUR als JSON-Array ohne Erklärung:\n[{"front":"Frage?","back":"Antwort."},...]\n\nText:\n${truncated}`,
   }], 2000);
@@ -1138,7 +1179,7 @@ async function autoGenerateCards(subjectId, filename, content) {
       [subjectId, c.front, c.back]
     );
   }
-  console.log(`Auto-generated ${cards.length} cards from "${filename}" using Ollama`);
+  console.log(`Auto-generated ${cards.length} cards from "${filename}" using ${USE_OLLAMA ? 'Ollama' : 'Haiku'}`);
 }
 
 // ── Stats endpoint ─────────────────────────────────────────────────────────
@@ -1532,6 +1573,21 @@ app.get('/{*path}', (req, res) => {
 
 // ── DB Table Init ──────────────────────────────────────────────────────────
 async function initTables() {
+  // Self-healing column migrations for tables created before these columns
+  // existed (CREATE TABLE IF NOT EXISTS never adds columns to an existing table).
+  // Each runs in its own statement + try/catch so a missing-ownership error
+  // (app user is not the table owner) only logs and never aborts the inits below.
+  const columnMigrations = [
+    'ALTER TABLE documents ADD COLUMN IF NOT EXISTS doc_type TEXT;',
+    'ALTER TABLE scanned_topics ADD COLUMN IF NOT EXISTS structure JSONB;',
+  ];
+  for (const sql of columnMigrations) {
+    try {
+      await pool.query(sql);
+    } catch (e) {
+      console.error('Column migration skipped:', sql, '-', e.message);
+    }
+  }
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cheat_sheets (
       subject_id TEXT PRIMARY KEY,
