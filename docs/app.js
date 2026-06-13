@@ -1228,14 +1228,23 @@ async function handleUpload(files) {
 
   try {
     let added = ''; const newFiles = [];
+    const failedExtract = [];  // PDFs that could not be read at all
+    const failedServer  = [];  // stored locally but the server rejected the save
     for (let i = 0; i < files.length; i++) {
       const fileLabel = files.length > 1 ? `${files[i].name} (${i + 1}/${files.length})` : files[i].name;
       label.textContent = `Verarbeite ${fileLabel}…`;
       bar.style.width = '0%'; pct.textContent = '0%';
-      const { text, pages, name } = await extractPDF(files[i], (done, total) => {
-        const p = Math.round((done / total) * 100);
-        bar.style.width = p + '%'; pct.textContent = p + '%';
-      });
+      let text, pages, name;
+      try {
+        ({ text, pages, name } = await extractPDF(files[i], (done, total) => {
+          const p = Math.round((done / total) * 100);
+          bar.style.width = p + '%'; pct.textContent = p + '%';
+        }));
+      } catch {
+        // One unreadable PDF must not discard the others in the batch.
+        failedExtract.push(files[i].name);
+        continue;
+      }
       added += '\n\n' + text;
       const uploadedAt = new Date().toISOString();
       newFiles.push({ name, pages, uploadedAt });
@@ -1245,33 +1254,67 @@ async function handleUpload(files) {
         meta.push({ localId: `local_${Date.now()}_${name}`, name, uploadedAt, docType: '', snippet: text.slice(0, 2000) });
         await saveDocMeta(meta);
       }
-      // Save to server for RAG + auto-card generation
-      fetch(`/api/subjects/${sessionId}/documents/text`, {
-        method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ filename: name, content: text }),
-      }).catch(() => {});
-    }
-    sessionTxt = (sessionTxt || '') + added;
-    sessionMeta.files = [...(sessionMeta.files || []), ...newFiles];
-    sessionMeta.updatedAt = new Date().toISOString();
-    updatePruefungsnahBtns();
-    renderRechnenDocs();
-
-    // Keep existing topics/structure – user can re-scan manually if needed
-    if (scannedTopics.length || moduleStructure) {
-      toast('Neues Dokument hinzugefügt. Themen neu erkennen? → Lernen-Tab → "Themen erkennen"', 'info', 5000);
+      // Save to server for RAG + auto-card generation. Await it so a failed save
+      // (401, payload too large, 5xx, offline) is surfaced instead of being
+      // silently swallowed and reported as success.
+      try {
+        const r = await fetch(`/api/subjects/${sessionId}/documents/text`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ filename: name, content: text }),
+        });
+        if (!r.ok) throw new Error(String(r.status));
+      } catch {
+        failedServer.push(name);
+      }
     }
 
-    await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
+    // Commit whatever was processed successfully — even on a partial failure,
+    // so local state never diverges from what was already written to docmeta.
+    if (newFiles.length) {
+      sessionTxt = (sessionTxt || '') + added;
+      sessionMeta.files = [...(sessionMeta.files || []), ...newFiles];
+      sessionMeta.updatedAt = new Date().toISOString();
+      updatePruefungsnahBtns();
+      renderRechnenDocs();
+
+      // Keep existing topics/structure – user can re-scan manually if needed
+      if (scannedTopics.length || moduleStructure) {
+        toast('Neues Dokument hinzugefügt. Themen neu erkennen? → Lernen-Tab → "Themen erkennen"', 'info', 5000);
+      }
+
+      await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
+      updateHeaderPages();
+      document.getElementById('no-docs-banner').classList.add('hidden');
+      renderDocList();
+    }
 
     prog.classList.add('hidden');
-    status.textContent = `✓ ${newFiles.map(f => f.name).join(', ')} hochgeladen · Karteikarten werden generiert…`;
-    status.className = 'sheet-status success';
-    status.classList.remove('hidden');
-    updateHeaderPages();
-    document.getElementById('no-docs-banner').classList.add('hidden');
-    renderDocList();
-    setTimeout(hideUploadSheet, 2000);
+
+    if (!newFiles.length) {
+      status.textContent = 'Fehler: ' + (failedExtract.length
+        ? `${failedExtract.join(', ')} konnte nicht gelesen werden.`
+        : 'Keine Datei verarbeitet.');
+      status.className = 'sheet-status error';
+      status.classList.remove('hidden');
+      return;
+    }
+
+    const okNames = newFiles.map(f => f.name).join(', ');
+    if (failedServer.length || failedExtract.length) {
+      // Some files only made it into local storage (or not at all): say so
+      // clearly instead of a misleading success message.
+      const parts = [`✓ ${okNames} gespeichert`];
+      if (failedServer.length)  parts.push(`⚠️ nicht auf Server gesichert: ${failedServer.join(', ')} (nur auf diesem Gerät, keine Karteikarten/RAG)`);
+      if (failedExtract.length) parts.push(`⚠️ nicht lesbar: ${failedExtract.join(', ')}`);
+      status.textContent = parts.join(' · ');
+      status.className = 'sheet-status error';
+      status.classList.remove('hidden');
+    } else {
+      status.textContent = `✓ ${okNames} hochgeladen · Karteikarten werden generiert…`;
+      status.className = 'sheet-status success';
+      status.classList.remove('hidden');
+      setTimeout(hideUploadSheet, 2000);
+    }
   } catch (err) {
     prog.classList.add('hidden');
     status.textContent = 'Fehler: ' + err.message;
