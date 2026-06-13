@@ -1558,6 +1558,13 @@ Antworte NUR als JSON:
     const m  = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Ungültige Modellantwort');
     const ev = parseJsonLoose(m[0]);
+    // Harden the model's score: clamp to a valid 0–3 integer so array lookups
+    // (labels/classes), XP and the stored quiz result can't break on
+    // out-of-range, string or null values.
+    let score = Math.round(Number(ev.score));
+    if (!Number.isFinite(score)) score = 0;
+    ev.score = Math.max(0, Math.min(3, score));
+    ev.correct = !!ev.correct;
     haptic(ev.score >= 2 ? 40 : [80,40,80]);
 
     const savedConf = quizConfidence;
