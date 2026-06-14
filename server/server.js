@@ -339,7 +339,18 @@ const upload = multer({
 });
 
 // ── Static frontend ────────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, '../docs')));
+// Assets (app.js/style.css) sind per ?v=-Query versioniert → bei jeder Version
+// neue URL, daher 30 Tage cachebar (Wiederbesuche/PWA-Reloads ohne Re-Download).
+// index.html & sw.js dürfen NIE lange gecacht werden, sonst sieht der Nutzer
+// neue ?v=-Bumps nicht und der Service Worker aktualisiert nicht.
+app.use(express.static(path.join(__dirname, '../docs'), {
+  maxAge: '30d',
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTH
