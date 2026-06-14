@@ -9,7 +9,7 @@
   <link rel="apple-touch-icon" href="icon.svg" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=116" />
+  <link rel="stylesheet" href="style.css?v=117" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -236,11 +236,11 @@
           <div class="fb-score" id="fb-score"></div>
           <div id="fb-confidence" class="fb-confidence hidden"></div>
           <div class="fb-text"  id="fb-text"></div>
-          <div class="fb-correct" id="fb-correct"></div>
           <div id="fb-deepen" class="fb-deepen hidden">
-            <p class="fb-deepen-hint">Du hast bei diesem Thema wiederholt Schwierigkeiten. Soll ich es in kleinere Unterteile aufteilen?</p>
-            <button class="btn-secondary btn-sm" id="fb-deepen-btn">🔎 Thema in Unterteile aufteilen</button>
+            <p class="fb-deepen-hint" id="fb-deepen-hint">Dieses Thema hakt noch – soll ich es in kleinere, leichtere Häppchen zerlegen?</p>
+            <button class="btn-primary btn-sm fb-deepen-btn" id="fb-deepen-btn">✨ In Häppchen aufteilen</button>
           </div>
+          <div class="fb-correct" id="fb-correct"></div>
         </div>
         <div class="quiz-btns">
           <button class="btn-primary"   id="quiz-next">Nächste Frage →</button>
@@ -890,7 +890,7 @@
 
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script src="app.js?v=116"></script>
+<script src="app.js?v=117"></script>
 
 </body>
 </html>

@@ -1731,11 +1731,20 @@ Antworte NUR als JSON:
       confEl.classList.remove('hidden');
     } else if (confEl) { confEl.classList.add('hidden'); }
 
-    // "Thema vertiefen" anbieten wenn Thema schwach ist
+    // "Thema vertiefen" anbieten – schon beim ersten Patzer, nicht erst beim
+    // Wiederholungstäter (genau dann bringt Aufteilen am meisten).
     const deepEl = document.getElementById('fb-deepen');
     if (deepEl) {
       const weakNow = getWeakTopics(sessionMeta.quizStats.questions);
-      deepEl.classList.toggle('hidden', !(weakNow.includes(lastFbTopicName) || isOverconfident));
+      const offer = !!lastFbTopicName &&
+        (ev.score <= 1 || isOverconfident || weakNow.includes(lastFbTopicName));
+      deepEl.classList.toggle('hidden', !offer);
+      // Bei Fehleinschätzung (sicher + falsch) dringlicher hervorheben.
+      deepEl.classList.toggle('fb-deepen--urgent', offer && isOverconfident);
+      const hintEl = document.getElementById('fb-deepen-hint');
+      if (hintEl) hintEl.textContent = isOverconfident
+        ? 'Hier klafft eine Wissenslücke – soll ich das Thema in kleinere, leichtere Häppchen zerlegen?'
+        : 'Dieses Thema hakt noch – soll ich es in kleinere, leichtere Häppchen zerlegen?';
     }
 
     showQuizState(document.getElementById('quiz-fb'));
@@ -1784,7 +1793,7 @@ Antworte NUR als JSON: {"subtopics":["<Titel 1>","<Titel 2>","<Titel 3>"]}`),
   } catch (e) {
     toast('Fehler: ' + e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔎 Thema in Unterteile aufteilen'; }
+    if (btn) { btn.disabled = false; btn.textContent = '✨ In Häppchen aufteilen'; }
   }
 }
 
