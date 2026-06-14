@@ -11,7 +11,16 @@ const Anthropic = require('@anthropic-ai/sdk');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET    = process.env.JWT_SECRET    || 'nachhilfe-secret-change-in-production';
+const DEFAULT_JWT_SECRET = 'nachhilfe-secret-change-in-production';
+const JWT_SECRET    = process.env.JWT_SECRET    || DEFAULT_JWT_SECRET;
+// Fail-fast: NIE mit dem öffentlichen Default-Secret laufen. Damit könnte jeder
+// beliebige (auch Admin-)Tokens fälschen → kompletter Auth-Bypass. Lieber gar
+// nicht starten, damit die Lücke nicht still durch eine fehlende .env zurückkommt.
+if (JWT_SECRET === DEFAULT_JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET ist nicht gesetzt – Fallback auf das öffentliche Default-Secret.');
+  console.error('Erzeuge eines mit `openssl rand -hex 48` und trage es als JWT_SECRET in server/.env ein.');
+  process.exit(1);
+}
 const TG_TOKEN      = process.env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT_ID    = process.env.TELEGRAM_ADMIN_CHAT_ID;
 const ADMIN_USER    = (process.env.ADMIN_USERNAME || '').toLowerCase();
@@ -1704,7 +1713,10 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // ── Start ──────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+// Nur auf Loopback lauschen: nginx proxied ohnehin an 127.0.0.1:3000. So ist das
+// Backend nicht direkt aus dem Netz erreichbar (kein Vorbeischleichen an nginx,
+// Rate-Limit & Security-Headern).
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`Nachhilfe-Server läuft auf Port ${PORT}`);
   console.log(`Datenbank: ${process.env.DATABASE_URL ? 'konfiguriert' : 'FEHLT'}`);
   console.log(`API-Key: ${process.env.ANTHROPIC_API_KEY ? 'gesetzt' : 'FEHLT'}`);
