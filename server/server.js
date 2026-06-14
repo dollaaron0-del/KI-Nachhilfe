@@ -221,6 +221,11 @@ async function checkAndNotify90pct(today, newCost) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Hinter dem nginx-Reverse-Proxy steht die echte Client-IP in X-Forwarded-For.
+// Ohne 'trust proxy' würde express-rate-limit alle Nutzer unter der Proxy-IP
+// zusammenfassen → 30/min würde zum gemeinsamen Limit für alle. Erster Hop wird vertraut.
+app.set('trust proxy', 1);
+
 // ── DB ─────────────────────────────────────────────────────────────────────
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -253,6 +258,27 @@ async function checkDailyLimit() {
   const today = new Date().toISOString().slice(0, 10);
   const { rows } = await pool.query('SELECT cost_eur, calls FROM daily_usage WHERE date=$1', [today]);
   return { today, cost: rows[0]?.cost_eur || 0, calls: rows[0]?.calls || 0 };
+}
+
+// Gibt eine Fehlermeldung zurück, wenn das globale ODER das persönliche
+// Tagesbudget erschöpft ist – sonst null. Zentral, damit ALLE bezahlten
+// Routen (auch /api/local* via Haiku) dieselbe Obergrenze durchsetzen.
+const USER_DAILY_LIMIT = 1.0;
+async function usageLimitError(userId) {
+  const { today, cost } = await checkDailyLimit();
+  const dailyLimit = await getDailyLimit();
+  if (cost >= dailyLimit) {
+    return `Tageslimit erreicht (${cost.toFixed(2)}€ / ${dailyLimit.toFixed(2)}€). Morgen wieder verfügbar.`;
+  }
+  try {
+    const { rows } = await pool.query(
+      'SELECT cost_eur FROM user_usage WHERE user_id=$1 AND date=$2', [userId, today]
+    );
+    if (parseFloat(rows[0]?.cost_eur || 0) >= USER_DAILY_LIMIT) {
+      return `Dein persönliches Tageslimit (${USER_DAILY_LIMIT.toFixed(2)}€) ist aufgebraucht. Morgen wieder verfügbar.`;
+    }
+  } catch (_) {}
+  return null;
 }
 
 async function recordUsage(today, model, inputTokens, outputTokens, userId = null, feature = null) {
@@ -536,10 +562,21 @@ app.delete('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 app.get('/api/subjects/:id/documents', authMiddleware, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT id,filename,doc_type,uploaded_at FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC',
-      [req.params.id]
-    );
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        'SELECT id,filename,doc_type,uploaded_at FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC',
+        [req.params.id]
+      ));
+    } catch (e) {
+      // Schema drift on an old prod DB (doc_type column missing): degrade
+      // gracefully to the list without the tag instead of 500-ing.
+      console.error('documents list without doc_type:', e.message);
+      ({ rows } = await pool.query(
+        'SELECT id,filename,NULL AS doc_type,uploaded_at FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC',
+        [req.params.id]
+      ));
+    }
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -600,12 +637,22 @@ app.post('/api/subjects/:id/documents', authMiddleware, upload.single('file'), a
   try {
     let content = '';
     if (req.file.mimetype === 'application/pdf') {
-      // Basic PDF text extraction using pdftotext if available, else store raw
+      // pdftotext asynchron (blockiert den Event-Loop nicht) und ohne Shell
+      // (execFile mit Argument-Array → keine Shell-Injection über den Pfad).
       try {
-        const { execSync } = require('child_process');
-        content = execSync(`pdftotext "${req.file.path}" -`).toString();
-      } catch {
-        content = fs.readFileSync(req.file.path).toString('base64');
+        const { execFile } = require('child_process');
+        const { promisify } = require('util');
+        const { stdout } = await promisify(execFile)('pdftotext', [req.file.path, '-'],
+          { maxBuffer: 25 * 1024 * 1024, timeout: 30000 });
+        content = stdout;
+      } catch (err) {
+        // pdftotext fehlt/scheitert → KEINE Base64-Rohdaten speichern; die würden
+        // RAG-Kontext und Auto-Karten vergiften. Stattdessen ehrlich fehlschlagen.
+        console.error('pdftotext failed:', err.message);
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(422).json({
+          error: 'PDF konnte serverseitig nicht gelesen werden. Bitte lade die Datei erneut hoch – der Text wird dann direkt im Browser extrahiert.',
+        });
       }
     } else {
       content = fs.readFileSync(req.file.path, 'utf8');
@@ -683,10 +730,14 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
       if (!docContext) {
         // Bounded fallback when full-text search finds nothing: cap at the 4 most
         // recent documents so subjects with many uploads can't blow up token cost.
-        const { rows } = await pool.query(
-          'SELECT filename, doc_type, content FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC LIMIT 4', [req.body.subject_id]
-        );
-        if (rows.length) docContext = rows.map(r => `${docLabel(r)}\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
+        // Wrapped in try/catch so a DB without the doc_type column (schema drift on
+        // an old prod DB) degrades to "no context" instead of 500-ing the chat.
+        try {
+          const { rows } = await pool.query(
+            'SELECT filename, doc_type, content FROM documents WHERE subject_id=$1 ORDER BY uploaded_at DESC LIMIT 4', [req.body.subject_id]
+          );
+          if (rows.length) docContext = rows.map(r => `${docLabel(r)}\n${r.content.slice(0, 4000)}`).join('\n\n---\n\n');
+        } catch (e) { console.error('RAG fallback skipped:', e.message); }
       }
 
       if (docContext) {
@@ -704,29 +755,10 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
     };
     if (systemBlocks.length) params.system = systemBlocks;
 
-    // Daily limit check
-    const { today, cost } = await checkDailyLimit();
-    const dailyLimit = await getDailyLimit();
-    if (cost >= dailyLimit) {
-      return res.status(429).json({
-        error: `Tageslimit erreicht (${cost.toFixed(2)}€ / ${dailyLimit.toFixed(2)}€). Morgen wieder verfügbar.`,
-      });
-    }
-
-    // Per-user daily limit (1€)
-    const USER_DAILY_LIMIT = 1.0;
-    try {
-      const { rows: uRows } = await pool.query(
-        'SELECT cost_eur FROM user_usage WHERE user_id=$1 AND date=$2',
-        [req.user.id, today]
-      );
-      const userCost = parseFloat(uRows[0]?.cost_eur || 0);
-      if (userCost >= USER_DAILY_LIMIT) {
-        return res.status(429).json({
-          error: `Dein persönliches Tageslimit (${USER_DAILY_LIMIT.toFixed(2)}€) ist aufgebraucht. Morgen wieder verfügbar.`,
-        });
-      }
-    } catch (_) {}
+    // Daily + per-user limit check (shared helper)
+    const limitMsg = await usageLimitError(req.user.id);
+    if (limitMsg) return res.status(429).json({ error: limitMsg });
+    const today = new Date().toISOString().slice(0, 10);
 
     const response = await callClaude(params);
     const feature = req.body.feature || null;
@@ -803,7 +835,7 @@ async function localComplete(messages, maxTokens = 2000, jsonMode = false) {
   return text;
 }
 
-app.post('/api/local', authMiddleware, async (req, res) => {
+app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
   const { messages, system, max_tokens, json_mode, feature } = req.body;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
@@ -819,6 +851,9 @@ app.post('/api/local', authMiddleware, async (req, res) => {
   try {
     // Local model disabled → answer directly with Haiku (fast, reliable).
     if (!USE_OLLAMA) {
+      // Haiku ist kostenpflichtig → gleiche Budget-Obergrenze wie /api/claude.
+      const limitMsg = await usageLimitError(req.user.id);
+      if (limitMsg) return res.status(429).json({ error: limitMsg });
       const { text: haikuText, usage } = await callHaiku();
       const todayH = new Date().toISOString().slice(0, 10);
       recordUsage(todayH, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
@@ -867,10 +902,15 @@ app.post('/api/local', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/local/stream', authMiddleware, async (req, res) => {
+app.post('/api/local/stream', claudeLimit, authMiddleware, async (req, res) => {
   const { messages, system, max_tokens } = req.body;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
+  }
+  // Budget-Check VOR den SSE-Headern, damit ein 429 als normaler JSON-Fehler ankommt.
+  if (!USE_OLLAMA) {
+    const limitMsg = await usageLimitError(req.user.id);
+    if (limitMsg) return res.status(429).json({ error: limitMsg });
   }
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

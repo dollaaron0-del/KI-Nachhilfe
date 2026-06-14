@@ -152,13 +152,13 @@ function startApprovalPolling(username, password) {
   stopApprovalPolling();
   approvalPollInterval = setInterval(async () => {
     try {
-      const r = await fetch(`/api/auth/approval-status?username=${encodeURIComponent(username)}`);
+      const r = await fetch(`/api/auth/approval-status?username=${encodeURIComponent(username)}`); // raw-fetch-ok: Polling vor Login, noch kein Token
       if (!r.ok) return;
       const data = await r.json();
       if (!data.approved) return;
       stopApprovalPolling();
       // Auto-login with stored credentials
-      const lr = await fetch('/api/auth/login', {
+      const lr = await fetch('/api/auth/login', { // raw-fetch-ok: Login erzeugt erst das Token
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -186,7 +186,7 @@ document.getElementById('auth-submit-btn')?.addEventListener('click', async () =
   try {
     stopApprovalPolling();
     document.getElementById('auth-submit-btn').textContent = '…';
-    const r = await fetch(`/api/auth/${authMode}`, {
+    const r = await fetch(`/api/auth/${authMode}`, { // raw-fetch-ok: Login/Register vor Token, eigenes 202-Pending-Handling
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -237,7 +237,7 @@ function onAuthSuccess() {
 async function checkAuth() {
   if (!authToken) { showScreen('auth-screen'); return; }
   try {
-    const r = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${authToken}` } });
+    const r = await fetch('/api/auth/me', { headers: { authorization: `Bearer ${authToken}` } }); // raw-fetch-ok: Token-Validierung, eigene 401-Logik
     if (!r.ok) { authToken = ''; localStorage.removeItem('auth_token'); showScreen('auth-screen'); return; }
     const data = await r.json();
     authUsername = data.username;
@@ -318,23 +318,21 @@ const DB = {
   // ── Server ──────────────────────────────────────────────────────────────
   subjects:     () => api('/api/subjects').catch(() => []),
   addSubject:   s  => api('/api/subjects', { method: 'POST', body: JSON.stringify({ id: s.id, name: s.name, emoji: s.icon || s.emoji || '📚', color: s.color || '#5856d6' }) }),
-  delSubject:   id => fetch(`/api/subjects/${id}`, { method: 'DELETE', headers: authHeaders() }),
+  delSubject:   id => api(`/api/subjects/${id}`, { method: 'DELETE' }),
 
   messages:     id => api(`/api/subjects/${id}/messages`).catch(() => []),
-  addMessage:   (id, role, content) => fetch(`/api/subjects/${id}/messages`, {
-    method: 'POST', headers: authHeaders(),
-    body: JSON.stringify({ role, content }),
+  addMessage:   (id, role, content) => api(`/api/subjects/${id}/messages`, {
+    method: 'POST', body: JSON.stringify({ role, content }),
   }).catch(() => {}),
-  clearMessages: id => fetch(`/api/subjects/${id}/messages`, { method: 'DELETE', headers: authHeaders() }),
+  clearMessages: id => api(`/api/subjects/${id}/messages`, { method: 'DELETE' }),
 
   cards:    id    => api(`/api/subjects/${id}/cards`).catch(() => []),
   setCards: (id, cards) => api(`/api/subjects/${id}/cards`, {
     method: 'POST', body: JSON.stringify({ cards }),
   }),
 
-  addQuizResult: (id, score, total) => fetch(`/api/subjects/${id}/quiz`, {
-    method: 'POST', headers: authHeaders(),
-    body: JSON.stringify({ score, total }),
+  addQuizResult: (id, score, total) => api(`/api/subjects/${id}/quiz`, {
+    method: 'POST', body: JSON.stringify({ score, total }),
   }).catch(() => {}),
   quizResults: id => api(`/api/subjects/${id}/quiz`).catch(() => []),
 
@@ -342,9 +340,8 @@ const DB = {
     try { const s = await api('/api/streak'); return { count: s.count, lastDate: s.last_date }; }
     catch { return { count: 0, lastDate: null }; }
   },
-  setStreak: v => fetch('/api/streak', {
-    method: 'POST', headers: authHeaders(),
-    body: JSON.stringify({ count: v.count, last_date: v.lastDate }),
+  setStreak: v => api('/api/streak', {
+    method: 'POST', body: JSON.stringify({ count: v.count, last_date: v.lastDate }),
   }).catch(() => {}),
 
   setGlossar: (id, terms) => api(`/api/subjects/${id}/glossar`, {
@@ -362,12 +359,11 @@ const DB = {
   setContent:  (id, v) => localforage.setItem(`cnt_${id}`, v),
 
   savedAufgaben: id => api(`/api/subjects/${id}/aufgaben`).catch(() => []),
-  saveAufgabe: (id, entry) => fetch(`/api/subjects/${id}/aufgaben`, {
-    method: 'POST', headers: authHeaders(),
-    body: JSON.stringify(entry),
+  saveAufgabe: (id, entry) => api(`/api/subjects/${id}/aufgaben`, {
+    method: 'POST', body: JSON.stringify(entry),
   }).catch(() => {}),
-  delAufgabe: (id, entryId) => fetch(`/api/subjects/${id}/aufgaben/${entryId}`, {
-    method: 'DELETE', headers: authHeaders(),
+  delAufgabe: (id, entryId) => api(`/api/subjects/${id}/aufgaben/${entryId}`, {
+    method: 'DELETE',
   }).catch(() => {}),
 
   async del(id) {
@@ -375,8 +371,8 @@ const DB = {
       this.delSubject(id),
       localforage.removeItem(`meta_${id}`),
       localforage.removeItem(`cnt_${id}`),
-      fetch(`/api/subjects/${id}/cheat`,  { method: 'DELETE', headers: authHeaders() }).catch(() => {}),
-      fetch(`/api/subjects/${id}/topics`, { method: 'DELETE', headers: authHeaders() }).catch(() => {}),
+      api(`/api/subjects/${id}/cheat`,  { method: 'DELETE' }).catch(() => {}),
+      api(`/api/subjects/${id}/topics`, { method: 'DELETE' }).catch(() => {}),
     ]);
   },
 };
@@ -417,7 +413,7 @@ function friendlyApiError(errStr, status) {
 }
 
 async function claude(messages, systemBlocks, maxTokens = 1500) {
-  const r = await fetch('/api/claude', {
+  const r = await fetch('/api/claude', { // raw-fetch-ok: eigene friendlyApiError-Behandlung + content[0].text
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, subject_id: sessionId, feature: currentFeature }),
@@ -431,7 +427,7 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
 
 // ── Haiku for simple generation tasks (12x cheaper than Sonnet) ──────────
 async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
-  const r = await fetch('/api/claude', {
+  const r = await fetch('/api/claude', { // raw-fetch-ok: eigene friendlyApiError-Behandlung + content[0].text
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({
@@ -445,7 +441,7 @@ async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
 
 // ── Local model via Ollama (free, for batch tasks) ────────────────────────
 async function claudeLocal(messages, systemBlocks, maxTokens = 2000, opts = {}) {
-  const r = await fetch('/api/local', {
+  const r = await fetch('/api/local', { // raw-fetch-ok: eigene Fehlerbehandlung + content[0].text
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, feature: currentFeature, ...opts }),
@@ -501,7 +497,7 @@ function parseJsonResponse(raw) {
 }
 
 async function claudeLocalStream(messages, systemBlocks, maxTokens = 3000, onToken) {
-  const r = await fetch('/api/local/stream', {
+  const r = await fetch('/api/local/stream', { // raw-fetch-ok: SSE-Streaming, liest body als Stream
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
@@ -534,7 +530,7 @@ async function claudeLocalStream(messages, systemBlocks, maxTokens = 3000, onTok
 // ── Local vision via Ollama (falls back to cloud if model not available) ──
 async function claudeLocalVision(base64, textPrompt, systemBlocks, maxTokens = 1500) {
   try {
-    const r = await fetch('/api/local/vision', {
+    const r = await fetch('/api/local/vision', { // raw-fetch-ok: eigener Cloud-Fallback bei Fehler
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ base64, media_type: 'image/png', text: textPrompt,
@@ -556,7 +552,7 @@ async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) 
       { type: 'text', text: textPrompt },
     ],
   }];
-  const r = await fetch('/api/claude', {
+  const r = await fetch('/api/claude', { // raw-fetch-ok: Vision-Aufruf, eigene friendlyApiError-Behandlung
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens }),
@@ -1140,9 +1136,8 @@ function settingsSave() {
   toast(calc ? `✅ ${calc} gespeichert.` : 'Einstellungen gespeichert.', 'success');
   updateSettingsBadge();
   Promise.all([
-    fetch(`/api/subjects/${sessionId}`, {
+    api(`/api/subjects/${sessionId}`, {
       method: 'PATCH',
-      headers: authHeaders(),
       body: JSON.stringify({ custom_prompt: val }),
     }),
     localforage.setItem('pref_calculator', calc),
@@ -1246,9 +1241,8 @@ async function renderDocList() {
       const newType = e.target.value;
       // Update server if doc has a real server ID
       if (fromServer) {
-        await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, {
-          method: 'PATCH', headers: authHeaders(),
-          body: JSON.stringify({ doc_type: newType }),
+        await api(`/api/subjects/${sessionId}/documents/${doc.id}`, {
+          method: 'PATCH', body: JSON.stringify({ doc_type: newType }),
         }).catch(() => {});
       }
       // Always update localforage docmeta
@@ -1262,7 +1256,7 @@ async function renderDocList() {
       if (!await confirmDialog(`"${doc.filename}" löschen?`,
           { title: 'Dokument löschen', okText: 'Löschen', danger: true })) return;
       if (fromServer) {
-        await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });
+        await api(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE' });
       }
       // Remove from localforage docmeta
       const meta = await loadDocMeta();
@@ -1329,7 +1323,7 @@ async function handleUpload(files) {
       // (401, payload too large, 5xx, offline) is surfaced instead of being
       // silently swallowed and reported as success.
       try {
-        const r = await fetch(`/api/subjects/${sessionId}/documents/text`, {
+        const r = await fetch(`/api/subjects/${sessionId}/documents/text`, { // raw-fetch-ok: prüft r.ok selbst, sammelt Fehlschläge
           method: 'POST', headers: authHeaders(),
           body: JSON.stringify({ filename: name, content: text }),
         });
@@ -1966,7 +1960,7 @@ async function loadSavedKlausuren() {
         </div>`;
       row.querySelector('.btn-secondary').addEventListener('click', () => restoreKlausur(k));
       row.querySelector('.saved-del-btn').addEventListener('click', async () => {
-        await fetch(`/api/subjects/${sessionId}/klausuren/${k.id}`, { method: 'DELETE', headers: authHeaders() });
+        await api(`/api/subjects/${sessionId}/klausuren/${k.id}`, { method: 'DELETE' });
         loadSavedKlausuren();
       });
       list.appendChild(row);
@@ -2030,8 +2024,8 @@ ${diffInstructions[selDiff] || diffInstructions.mittel}
   try {
     const exam = await claudeLocal([{ role: 'user', content: 'Klausur erstellen.' }], sysBlocks(examPrompt), 3000);
     currentExamText = exam;
-    fetch(`/api/subjects/${sessionId}/klausuren`, {
-      method: 'POST', headers: authHeaders(),
+    api(`/api/subjects/${sessionId}/klausuren`, {
+      method: 'POST',
       body: JSON.stringify({ id: Date.now().toString(), diff: selDiff, content: exam }),
     }).catch(() => {});
     const body = document.getElementById('exam-body');
@@ -2453,8 +2447,8 @@ async function scanTopics() {
     scannedTopics = parseJsonLoose(m[0]).filter(t => typeof t === 'string').slice(0, 20);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
-    fetch(`/api/subjects/${sessionId}/topics`, {
-      method: 'POST', headers: authHeaders(),
+    api(`/api/subjects/${sessionId}/topics`, {
+      method: 'POST',
       body: JSON.stringify({ topics: scannedTopics }),
     }).catch(() => {});
     aufgabenScanDone();
@@ -3099,7 +3093,7 @@ document.getElementById('exam-download-btn')?.addEventListener('click', () => {
 
 // ══ BACKUP / RESTORE ══════════════════════════════════════════════════════
 async function exportBackup() {
-  const r = await fetch('/api/backup', { headers: authHeaders() });
+  const r = await fetch('/api/backup', { headers: authHeaders() }); // raw-fetch-ok: lädt JSON-Blob für Datei-Download
   const blob = new Blob([JSON.stringify(await r.json(), null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a   = Object.assign(document.createElement('a'), {
@@ -3112,7 +3106,7 @@ async function exportBackup() {
 async function importBackup(file) {
   const data = JSON.parse(await file.text());
   if (!data.subjects) throw new Error('Ungültiges Backup-Format');
-  await fetch('/api/restore', {
+  await fetch('/api/restore', { // raw-fetch-ok: Bulk-Import, eigener Ablauf
     method: 'POST', headers: authHeaders(),
     body: JSON.stringify(data),
   });
@@ -3133,7 +3127,7 @@ document.getElementById('import-input')?.addEventListener('change', async e => {
 document.getElementById('cheat-gen-btn')?.addEventListener('click', generateCheatSheet);
 document.getElementById('cheat-new-btn')?.addEventListener('click', () => {
   currentCheatText = '';
-  fetch(`/api/subjects/${sessionId}/cheat`, { method: 'DELETE', headers: authHeaders() }).catch(() => {});
+  api(`/api/subjects/${sessionId}/cheat`, { method: 'DELETE' }).catch(() => {});
   document.getElementById('cheat-result').classList.add('hidden');
   document.getElementById('cheat-idle').classList.remove('hidden');
 });
@@ -3182,8 +3176,8 @@ Sei präzise und vollständig. Alle Formeln in LaTeX-Notation.`;
     );
     cheatDone();
     currentCheatText = result;
-    fetch(`/api/subjects/${sessionId}/cheat`, {
-      method: 'POST', headers: authHeaders(),
+    api(`/api/subjects/${sessionId}/cheat`, {
+      method: 'POST',
       body: JSON.stringify({ content: result }),
     }).catch(() => {});
   } catch (e) {
@@ -4626,8 +4620,8 @@ async function markTopicDone() {
   if (isFirstLearn) {
     learnedTopics.push(key);
     localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
-    fetch(`/api/subjects/${sessionId}/learned-topics`, {
-      method: 'POST', headers: authHeaders(),
+    api(`/api/subjects/${sessionId}/learned-topics`, {
+      method: 'POST',
       body: JSON.stringify({ topic: key }),
     }).catch(() => {});
   }
@@ -4693,8 +4687,8 @@ async function scanModuleStructure(btn) {
     scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 30);
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
-    fetch(`/api/subjects/${sessionId}/structure`, {
-      method: 'POST', headers: authHeaders(),
+    api(`/api/subjects/${sessionId}/structure`, {
+      method: 'POST',
       body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
     }).catch(() => {});
     renderMilestone();
