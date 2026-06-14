@@ -65,6 +65,53 @@ function toast(msg, type = 'info', duration = 3500) {
   el.addEventListener('click', () => { clearTimeout(timer); remove(); });
 }
 
+// App-eigener Bestätigungs-Dialog (ersetzt native confirm()): styling-bar,
+// blockiert nicht den JS-Thread und passt in die PWA. Gibt ein Promise<boolean>.
+function confirmDialog(message, {
+  title = 'Bestätigen', okText = 'OK', cancelText = 'Abbrechen', danger = false,
+} = {}) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-box" role="alertdialog" aria-modal="true">
+        <div class="confirm-title"></div>
+        <div class="confirm-msg"></div>
+        <div class="confirm-actions">
+          <button class="confirm-cancel" type="button"></button>
+          <button class="confirm-ok${danger ? ' danger' : ''}" type="button"></button>
+        </div>
+      </div>`;
+    // Texte via textContent setzen → kein HTML-Injection-Risiko bei Dateinamen etc.
+    overlay.querySelector('.confirm-title').textContent  = title;
+    overlay.querySelector('.confirm-msg').textContent    = message;
+    overlay.querySelector('.confirm-cancel').textContent = cancelText;
+    overlay.querySelector('.confirm-ok').textContent     = okText;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('show'));
+
+    let done = false;
+    const close = val => {
+      if (done) return; done = true;
+      document.removeEventListener('keydown', onKey);
+      overlay.classList.remove('show');
+      const drop = () => overlay.remove();
+      overlay.addEventListener('transitionend', drop, { once: true });
+      setTimeout(drop, 300); // Fallback, falls transitionend ausbleibt
+      resolve(val);
+    };
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(false); }
+      if (e.key === 'Enter')  { e.preventDefault(); close(true);  }
+    };
+    document.addEventListener('keydown', onKey);
+    overlay.querySelector('.confirm-cancel').addEventListener('click', () => close(false));
+    overlay.querySelector('.confirm-ok').addEventListener('click', () => { haptic(20); close(true); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(false); });
+    overlay.querySelector('.confirm-ok').focus();
+  });
+}
+
 // ── PDF.js worker ──────────────────────────────────────────────────────────
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -780,7 +827,8 @@ async function adminToggleAdmin(id, makeAdmin) {
 }
 
 async function adminDeleteUser(id, username) {
-  if (!confirm(`Benutzer "${username}" wirklich löschen? Alle Daten werden entfernt.`)) return;
+  if (!await confirmDialog(`Benutzer "${username}" wirklich löschen? Alle Daten werden entfernt.`,
+      { title: 'Benutzer löschen', okText: 'Löschen', danger: true })) return;
   try {
     await api(`/api/admin/users/${id}`, { method: 'DELETE' });
     toast(`${username} gelöscht`, 'success');
@@ -822,7 +870,8 @@ function makeCard(s) {
   div.addEventListener('click', e => { if (!e.target.closest('.card-del')) openSubject(s); });
   div.querySelector('.card-del').addEventListener('click', async e => {
     e.stopPropagation();
-    if (!confirm(`"${s.name}" löschen? Alle Daten gehen verloren.`)) return;
+    if (!await confirmDialog(`"${s.name}" löschen? Alle Daten gehen verloren.`,
+        { title: 'Fach löschen', okText: 'Löschen', danger: true })) return;
     await DB.del(s.id);
     loadSubjects();
   });
@@ -1210,7 +1259,8 @@ async function renderDocList() {
       examDocContext = await loadExamDocContext(sessionId);
     });
     row.querySelector('.doc-del-btn').addEventListener('click', async () => {
-      if (!confirm(`"${doc.filename}" löschen?`)) return;
+      if (!await confirmDialog(`"${doc.filename}" löschen?`,
+          { title: 'Dokument löschen', okText: 'Löschen', danger: true })) return;
       if (fromServer) {
         await fetch(`/api/subjects/${sessionId}/documents/${doc.id}`, { method: 'DELETE', headers: authHeaders() });
       }
@@ -1520,7 +1570,8 @@ document.querySelectorAll('.conf-btn').forEach(btn => {
   });
 });
 document.getElementById('quiz-reset-btn')?.addEventListener('click', async () => {
-  if (!confirm('Quiz-Fortschritt zurücksetzen?')) return;
+  if (!await confirmDialog('Dein bisheriger Quiz-Fortschritt wird gelöscht.',
+      { title: 'Quiz zurücksetzen', okText: 'Zurücksetzen', danger: true })) return;
   sessionMeta.quizStats = { questions: [] };
   sessionMeta.currentQuestion = null;
   await DB.setMeta(sessionId, sessionMeta);
@@ -3277,6 +3328,7 @@ let reviewQueue   = [];
 let reviewAllCards = [];   // full card set; reviewQueue holds references into this
 let reviewIdx     = 0;
 let reviewStats   = { again: 0, hard: 0, good: 0, easy: 0 };
+let reviewHardCards = [];  // in dieser Runde mit "Nochmal"/"Schwer" bewertete Karten (Referenzen)
 
 function srsUpdate(card, grade) {
   if (grade < 2) {
@@ -3371,6 +3423,19 @@ async function startReview() {
   if (!reviewQueue.length) { await initKarten(); return; }
   reviewIdx   = 0;
   reviewStats = { again: 0, hard: 0, good: 0, easy: 0 };
+  reviewHardCards = [];
+  showKartenState(document.getElementById('karten-review'));
+  showCard();
+}
+
+// Fokus-Runde: nur die in der letzten Runde wackligen Karten direkt nochmal.
+function startHardReview() {
+  if (!reviewHardCards.length) return;
+  reviewQueue = reviewHardCards;
+  reviewIdx   = 0;
+  reviewStats = { again: 0, hard: 0, good: 0, easy: 0 };
+  reviewHardCards = [];   // diese Runde sammelt erneut die noch wackligen
+  haptic(10);
   showKartenState(document.getElementById('karten-review'));
   showCard();
 }
@@ -3410,6 +3475,7 @@ document.querySelectorAll('.grade-btn').forEach(btn => {
     // (We cannot re-fetch + match by id: setCards re-inserts all rows and the
     // SERIAL ids change on every save, so id matching would fail after card 1.)
     srsUpdate(reviewQueue[reviewIdx], grade);
+    if (grade <= 1) reviewHardCards.push(reviewQueue[reviewIdx]); // "Nochmal"/"Schwer" → nochmal üben
     await DB.setCards(sessionId, reviewAllCards);
     touchStreak();
 
@@ -3427,6 +3493,7 @@ function endReview() {
   const good  = reviewStats.good + reviewStats.easy;
   const pct   = Math.round(good / total * 100);
 
+  const hardN = reviewHardCards.length;
   document.getElementById('karten-done-title').textContent =
     pct >= 80 ? '🌟 Ausgezeichnet!' : pct >= 60 ? '👍 Gut gemacht!' : '💪 Weiter üben!';
   document.getElementById('karten-done-stats').innerHTML = `
@@ -3436,7 +3503,9 @@ function endReview() {
       <span class="done-stat">😕 Schwer: ${reviewStats.hard}</span>
       <span class="done-stat">😵 Nochmal: ${reviewStats.again}</span>
     </div>
-    <div class="done-pct" style="color:${pct>=70?'var(--green)':pct>=50?'var(--yellow)':'var(--red)'}">${pct}% gewusst</div>`;
+    <div class="done-pct" style="color:${pct>=70?'var(--green)':pct>=50?'var(--yellow)':'var(--red)'}">${pct}% gewusst</div>
+    ${hardN ? `<button class="btn-primary btn-sm karten-hard-again" id="karten-hard-btn">💪 ${hardN} schwere Karte${hardN === 1 ? '' : 'n'} nochmal</button>` : ''}`;
+  document.getElementById('karten-hard-btn')?.addEventListener('click', startHardReview);
   showKartenState(document.getElementById('karten-done'));
   sessionTick('karten');
   addXP(20, 'Karten-Session');
@@ -3893,8 +3962,9 @@ function renderSessionBanner() {
     </div>
     <div class="session-bar"><div class="session-bar-fill" style="width:${pct}%"></div></div>
     <div class="session-items">${rows}</div>`;
-  el.querySelector('.session-abort').addEventListener('click', () => {
-    if (!confirm('Session wirklich beenden?')) return;
+  el.querySelector('.session-abort').addEventListener('click', async () => {
+    if (!await confirmDialog('Deine geplante Lern-Session wird verworfen.',
+        { title: 'Session beenden', okText: 'Beenden', danger: true })) return;
     currentSession = null; saveSession(); renderSessionBanner();
   });
   el.querySelectorAll('.session-item').forEach(row => row.addEventListener('click', () => {
