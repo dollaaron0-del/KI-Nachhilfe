@@ -3849,7 +3849,9 @@ function sessionStoreKey() { return `lsession_${sessionId}`; }
 
 async function buildSessionPlan(budget) {
   const spec = SESSION_SPECS[budget];
-  const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
+  const ms         = calculateMilestone();
+  const activeIdx  = selectedDiffIdx !== null ? selectedDiffIdx : (ms.levelNum - 1);
+  const activeLvl  = MILESTONE_LEVELS[activeIdx];
   const activeDiff = activeLvl.diff || 'einsteiger';
   const learnedSet = new Set(learnedTopics);
   const isDone = t => learnedSet.has(t + '::' + activeDiff);
@@ -3885,7 +3887,19 @@ async function buildSessionPlan(budget) {
   if (spec.quiz > 0) {
     items.push({ type: 'quiz', label: `❓ ${spec.quiz} Quiz-Fragen beantworten`, need: spec.quiz, got: 0, done: false });
   }
-  return { budget, label: spec.label, startedAt: new Date().toISOString(), items };
+
+  // Dünner Plan abfedern: Hinweis, wenn es nichts NEUES auf diesem Level mehr gibt.
+  let note = '';
+  if (!open.length && scannedTopics.length) {
+    const hasHigher = activeIdx < MILESTONE_LEVELS.length - 1;
+    note = hasHigher
+      ? `🎉 Du hast alle Themen auf <strong>${esc(activeLvl.name)}</strong> gelernt! Diese Session frischt Gelerntes auf – für neue Aufgaben erhöhe die Stufe im Lernpfad.`
+      : `🏆 Stark – du hast alles auf der höchsten Stufe gelernt! Diese Session hält dein Wissen frisch.`;
+  } else if (items.length <= 1) {
+    note = `Kurzer Plan – es gibt gerade wenig zu tun. Scanne mehr Themen oder lege Karteikarten an, um die Sessions voller zu machen.`;
+  }
+
+  return { budget, label: spec.label, startedAt: new Date().toISOString(), items, note };
 }
 
 function saveSession() {
@@ -3970,6 +3984,7 @@ function renderSessionBanner() {
       <button class="session-abort" title="Session beenden">✕</button>
     </div>
     <div class="session-bar"><div class="session-bar-fill" style="width:${pct}%"></div></div>
+    ${currentSession.note ? `<div class="session-note">${currentSession.note}</div>` : ''}
     <div class="session-items">${rows}</div>`;
   el.querySelector('.session-abort').addEventListener('click', async () => {
     if (!await confirmDialog('Deine geplante Lern-Session wird verworfen.',
