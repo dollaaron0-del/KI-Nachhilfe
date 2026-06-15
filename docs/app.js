@@ -4070,6 +4070,12 @@ let lernenLastX     = 0, lernenLastY = 0;
 let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
 let lernenActivePtr = null; // palm rejection: track active pointer ID
+let lernenPenActive = false;        // Stift liegt auf → Touch ignorieren (Palm-Rejection)
+let lernenFingerId  = null;         // PointerId des scrollenden Fingers
+let lernenFingerY0  = 0;            // Start-Y des Finger-Scrolls
+let lernenScroll0   = 0;            // scrollTop bei Scroll-Beginn
+const LERNEN_HEIGHT = 2400;         // langer Notizblock (scrollbar), nicht nur bildschirmhoch
+const LERNEN_PALM   = 45;           // Kontaktgröße ab der wir Handfläche annehmen (CSS-px)
 let lernenTopicData = null;
 let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
@@ -4377,7 +4383,7 @@ async function regenLernenTask() {
       if (lernenCtx) {
         const wrap = document.getElementById('lernen-canvas-wrap');
         lernenCtx.fillStyle = '#ffffff';
-        lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
+        lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
       }
       const ta = document.getElementById('lernen-text-answer');
       if (ta) ta.value = '';
@@ -4397,7 +4403,7 @@ function retryLernenSameTask() {
   if (lernenCtx) {
     const wrap = document.getElementById('lernen-canvas-wrap');
     lernenCtx.fillStyle = '#ffffff';
-    lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
+    lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
   }
   const ta = document.getElementById('lernen-text-answer');
   if (ta) ta.value = '';
@@ -4411,7 +4417,8 @@ function initLernenCanvas() {
   if (!canvas || !wrap || lernenCtx) return;
   const dpr = window.devicePixelRatio || 1;
   const w   = wrap.clientWidth  || 800;
-  const h   = wrap.clientHeight || 600;
+  const h   = LERNEN_HEIGHT;               // fester, langer Notizblock → scrollbar
+  canvas.style.height = h + 'px';
   canvas.width  = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
   lernenCtx = canvas.getContext('2d');
@@ -4445,22 +4452,54 @@ function lernenPos(e, canvas, r) {
 }
 
 function onLernenDown(e) {
+  const canvas = e.target;
+  const wrap   = document.getElementById('lernen-canvas-wrap');
+  const isDrawer = (e.pointerType === 'pen' || e.pointerType === 'mouse');
+  lernenDbg('DOWN', e, isDrawer ? 'Stift → zeichnen' : 'kein Stift → scrollen?');
+
+  if (!isDrawer) {
+    // Finger ODER Handfläche – niemals zeichnen.
+    // Palm-Rejection: während der Stift schreibt oder bei großem Kontakt (Handfläche) nichts tun.
+    if (lernenPenActive || e.width > LERNEN_PALM || e.height > LERNEN_PALM) {
+      lernenDbg('DOWN', e, 'IGNORIERT (Handfläche/Stift aktiv)');
+      return;
+    }
+    // Echter Finger → Notizblock per JS scrollen.
+    lernenFingerId = e.pointerId;
+    lernenFingerY0 = e.clientY;
+    lernenScroll0  = wrap.scrollTop;
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    return;
+  }
+
+  // Stift / Maus → zeichnen
   e.preventDefault();
-  // Palm rejection: ignore secondary pointers once a stroke is active
-  if (lernenActivePtr !== null) return;
+  if (lernenActivePtr !== null) return; // bereits ein Stift aktiv
+  lernenPenActive = true;
+  lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
   lernenActivePtr = e.pointerId;
-  e.target.setPointerCapture(e.pointerId); // keep events even if pointer leaves canvas
-  const r = e.target.getBoundingClientRect();
-  const p = lernenPos(e, e.target, r);
+  canvas.setPointerCapture(e.pointerId); // keep events even if pointer leaves canvas
+  const r = canvas.getBoundingClientRect();
+  const p = lernenPos(e, canvas, r);
   lernenLastX = p.x;
   lernenLastY = p.y;
   isDrawingLernen = true;
 }
 
 function onLernenMove(e) {
+  if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') {
+    // Finger-Scroll (nur der erkannte Finger; Handfläche/weitere Touches ignorieren)
+    if (e.pointerId === lernenFingerId) {
+      const wrap = document.getElementById('lernen-canvas-wrap');
+      wrap.scrollTop = lernenScroll0 + (lernenFingerY0 - e.clientY);
+      lernenDbg('SCROLL', e, `top=${wrap.scrollTop | 0}`);
+    }
+    return;
+  }
   if (!isDrawingLernen || !lernenCtx) return;
   if (e.pointerId !== lernenActivePtr) return; // palm rejection
   e.preventDefault();
+  lernenDbg('DRAW', e, 'zeichne');
   const canvas = e.target;
   const r      = canvas.getBoundingClientRect();
   // getCoalescedEvents captures all intermediate points during fast strokes
@@ -4484,10 +4523,21 @@ function onLernenMove(e) {
 }
 
 function onLernenUp(e) {
+  if (e.pointerId === lernenFingerId) lernenFingerId = null; // Finger-Scroll beendet
+  if (e.pointerType === 'pen' || e.pointerType === 'mouse') lernenPenActive = false;
   if (e.type === 'pointercancel' || e.pointerId === lernenActivePtr) {
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
+}
+
+// Temporäre Diagnose-Anzeige (Lernen-Bereich): zeigt live, was der Browser meldet.
+function lernenDbg(tag, e, action) {
+  const el = document.getElementById('touch-debug');
+  if (!el) return;
+  el.textContent =
+    `${tag}: type=${e.pointerType} w=${(e.width || 0).toFixed(0)} h=${(e.height || 0).toFixed(0)} ` +
+    `press=${(e.pressure || 0).toFixed(2)}\npenActive=${lernenPenActive} fingerId=${lernenFingerId} → ${action}`;
 }
 
 async function checkLernenSolution() {
@@ -4854,7 +4904,7 @@ document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   if (!lernenCtx) return;
   const wrap = document.getElementById('lernen-canvas-wrap');
   lernenCtx.fillStyle = '#fff';
-  lernenCtx.fillRect(0, 0, wrap.clientWidth, wrap.clientHeight);
+  lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
   if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);

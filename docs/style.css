@@ -1858,9 +1858,11 @@ html, body {
 .lernen-color.active .color-dot { box-shadow: 0 0 0 2px white, 0 0 0 4px var(--accent); }
 .lernen-canvas-wrap {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;                 /* langer Notizblock → scrollbar */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: #fff;
-  touch-action: none;
+  touch-action: none;               /* JS macht Finger-Scroll + Palm-Rejection */
   min-height: 0;
   -webkit-user-select: none;
   user-select: none;
@@ -1868,10 +1870,11 @@ html, body {
 #lernen-canvas {
   display: block;
   width: 100%;
-  height: 100%;
+  /* Höhe wird per JS gesetzt (LERNEN_HEIGHT) */
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* ── Milestone stepper ───────────────────────────────────────────────────── */

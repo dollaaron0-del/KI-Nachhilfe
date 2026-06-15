@@ -14,7 +14,7 @@
   <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=127" />
+  <link rel="stylesheet" href="style.css?v=128" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -461,7 +461,6 @@
       <div class="canvas-scroll-wrap" id="canvas-scroll-wrap">
         <canvas id="math-canvas"></canvas>
       </div>
-      <div id="touch-debug" style="position:fixed;left:8px;bottom:8px;z-index:9999;background:rgba(0,0,0,.82);color:#0f0;font:11px/1.4 monospace;padding:6px 8px;border-radius:6px;max-width:90vw;white-space:pre;pointer-events:none;">touch-debug: berühre die Fläche…</div>
 
     </div>
     </div><!-- end subpanel loesen-content -->
@@ -892,13 +891,16 @@
       <button class="btn-primary" id="settings-save-btn" onclick="settingsSave()">Speichern</button>
       <button class="btn-secondary" id="settings-close-btn" onclick="document.getElementById('settings-sheet').classList.add('hidden')">Abbrechen</button>
     </div>
-    <div style="text-align:center;font-size:11px;color:var(--text2);margin-top:14px;opacity:.7;">App-Version <span id="app-version">v127</span></div>
+    <div style="text-align:center;font-size:11px;color:var(--text2);margin-top:14px;opacity:.7;">App-Version <span id="app-version">v128</span></div>
   </div>
 </div>
 
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script defer src="app.js?v=127"></script>
+<script defer src="app.js?v=128"></script>
+
+<!-- Temporäre Touch-Diagnose (über allen Ansichten sichtbar) -->
+<div id="touch-debug" style="position:fixed;left:8px;bottom:8px;z-index:99999;background:rgba(0,0,0,.82);color:#0f0;font:11px/1.4 monospace;padding:6px 8px;border-radius:6px;max-width:90vw;white-space:pre;pointer-events:none;">touch-debug: berühre die Schreibfläche…</div>
 
 </body>
 </html>
