@@ -3529,16 +3529,26 @@ const MILESTONE_LEVELS = [
 
 // ══ LERNEN (Lernpfad + Meilensteine) ═════════════════════════════════════
 
-// Distinct gescannte Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
+// Einzige Wahrheitsquelle für die Themen des Lernpfads: exakt die Liste, die auch
+// in loadLernpfad() gerendert wird. Wenn eine Kapitelstruktur existiert, zählen
+// ALLE ihre Themen (ungekappt) – sonst die flache scannedTopics-Liste. So bleibt
+// die Prozentzahl/„X/Y"-Anzeige immer deckungsgleich mit den sichtbaren Themen.
+function pathTopics() {
+  if (moduleStructure?.kapitel?.length)
+    return moduleStructure.kapitel.flatMap(k => k.themen);
+  return scannedTopics;
+}
+
+// Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
 function topicsDoneAtDiff(diff) {
-  const current = new Set(scannedTopics);
+  const current = new Set(pathTopics());
   return new Set(
     learnedTopics.filter(t => t.endsWith('::' + diff)).map(t => t.split('::')[0]).filter(t => current.has(t))
   ).size;
 }
 
 function calculateMilestone() {
-  const total = scannedTopics.length;
+  const total = pathTopics().length;
 
   // Fortschritt PRO Stufe: Anteil der Themen, die auf genau diesem Niveau
   // durchgearbeitet wurden. So füllt sich jeder Stufen-Kreis nur durch Aufgaben
@@ -3947,7 +3957,7 @@ function renderSessionBanner() {
     const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const activeDiff = activeLvl.diff || 'einsteiger';
     const lSet = new Set(learnedTopics);
-    const next = scannedTopics.find(t => !lSet.has(t + '::' + activeDiff));
+    const next = pathTopics().find(t => !lSet.has(t + '::' + activeDiff));
     el.innerHTML = `
       <div class="session-done-card">
         <div class="session-done-title">🎉 Session geschafft!</div>
