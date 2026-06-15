@@ -981,13 +981,18 @@ html, body {
 .canvas-scroll-wrap {
   flex: 1; min-height: 0;
   overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: #fff;
+  -webkit-user-select: none; user-select: none;
 }
 
 #math-canvas {
   display: block; width: 100%;
   min-height: 2000px;
-  touch-action: none; /* disable browser default — JS handles finger scroll manually */
+  /* none = Browser fasst Touch nicht an; JS macht Finger-Scroll + Palm-Rejection selbst */
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
   cursor: crosshair; background: #fff;
 }
 [data-theme="dark"] .canvas-scroll-wrap { border-top: 1px solid #444; }

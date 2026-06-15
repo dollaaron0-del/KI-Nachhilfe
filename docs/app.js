@@ -281,6 +281,10 @@ let isErasing       = false;
 let canvasLastX     = 0, canvasLastY = 0;
 let undoStack       = [];
 let redoStack       = [];
+let penActive       = false;          // Stift liegt gerade auf → Touch komplett ignorieren (Palm-Rejection)
+let fingerScrollId  = null;           // PointerId des Fingers, der gerade scrollt
+let fingerStartY    = 0;
+let wrapScrollStart = 0;
 let savedCanvasData = null;
 let penColor        = '#1c1c1e';
 let penSize         = 'medium';   // 'fine' | 'medium' | 'thick'
@@ -2730,16 +2734,25 @@ function applyCtxStyle() {
 
 function setupCanvasEvents() {
   const canvas = document.getElementById('math-canvas');
-  let fingerStartY = 0, wrapScrollStart = 0;
+
+  const wrap = document.getElementById('canvas-scroll-wrap');
+  const PALM_SIZE = 45;   // Kontaktbreite/-höhe ab der wir von Handfläche ausgehen (CSS-px)
 
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') {
-      fingerStartY   = e.clientY;
-      wrapScrollStart = document.getElementById('canvas-scroll-wrap').scrollTop;
+      // Palm-Rejection: während der Stift zeichnet ODER bei großem Kontakt (Handfläche) nichts tun.
+      if (penActive || e.width > PALM_SIZE || e.height > PALM_SIZE) return;
+      // Echter Finger → Fläche per JS scrollen (kein natives pan-y, sonst scrollt auch die Handfläche).
+      fingerScrollId  = e.pointerId;
+      fingerStartY    = e.clientY;
+      wrapScrollStart = wrap.scrollTop;
+      canvas.setPointerCapture(e.pointerId);
       return;
     }
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
+    penActive = (e.pointerType === 'pen');
+    if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
     isDrawingCanvas = true;
     redoStack = [];
     const snap = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
@@ -2764,8 +2777,10 @@ function setupCanvasEvents() {
 
   canvas.addEventListener('pointermove', e => {
     if (e.pointerType === 'touch') {
-      const wrap = document.getElementById('canvas-scroll-wrap');
-      wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
+      // Nur der als Finger erkannte Pointer scrollt; Handfläche/weitere Touches ignorieren.
+      if (e.pointerId === fingerScrollId) {
+        wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
+      }
       return;
     }
     if (!isDrawingCanvas || !mathCtx) return;
@@ -2806,6 +2821,8 @@ function setupCanvasEvents() {
   }, { passive: false });
 
   const endDraw = (e) => {
+    if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
+    if (e.pointerId === fingerScrollId) fingerScrollId = null; // Finger-Scroll beendet
     if (!isDrawingCanvas) return;
     isDrawingCanvas = false;
     if (activeTool === 'line' && linePreviewData) {
@@ -3015,7 +3032,8 @@ async function checkHandwriting() {
   for (let i = 0; i < px.length; i += 4) {
     if (px[i] < 200 || px[i + 1] < 200 || px[i + 2] < 200) { hasInk = true; break; }
   }
-  if (!hasInk) { toast('Bitte zuerst eine Lösung auf die Zeichenfläche schreiben.', 'warn'); return; }
+  const hasTypedAnswer = (document.getElementById('rechnen-task-input')?.value.trim() || '').length > 0;
+  if (!hasInk && !hasTypedAnswer) { toast('Bitte zuerst eine Lösung in den Zeichen- oder Schreibbereich eingeben.', 'warn'); return; }
 
   // Show feedback sheet in loading state
   const overlay = document.getElementById('rechnen-feedback-overlay');
@@ -3024,22 +3042,30 @@ async function checkHandwriting() {
   overlay.classList.remove('hidden');
   const checkDone = startProgress('rechnen-check-bar', 'rechnen-check-pct', 15000);
 
-  const taskText  = document.getElementById('rechnen-task-input')?.value.trim() || currentAufgabe;
-  const docNote   = activeRechnenDoc ? `\n(Aktives Dokument: ${activeRechnenDoc})` : '';
+  const writtenText = document.getElementById('rechnen-task-input')?.value.trim() || '';
+  const taskText    = writtenText || currentAufgabe;
+  const docNote     = activeRechnenDoc ? `\n(Aktives Dokument: ${activeRechnenDoc})` : '';
+  // Eingetippter Text im Schreibbereich zählt mit zur Lösung
+  const writtenNote = writtenText
+    ? `\n\n**Im Schreibbereich getippter Text des Schülers (Teil der Lösung, gleichwertig zur Zeichnung berücksichtigen):**\n${writtenText}`
+    : '';
   const dataURL   = canvas.toDataURL('image/png');
   const base64   = dataURL.split(',')[1];
 
-  const checkPrompt = `Ein Schüler hat die folgende Aufgabe handschriftlich auf dem beigefügten Bild gelöst.
+  const checkPrompt = `Ein Schüler hat eine Aufgabe gelöst. Die Lösung kann in ZWEI Bereichen stehen:
+1. handschriftlich/gezeichnet auf dem beigefügten Bild (Zeichenbereich),
+2. als getippter Text im Schreibbereich (siehe unten).
+Berücksichtige BEIDE Bereiche gemeinsam als die vollständige Lösung des Schülers.
 
-**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}${docNote}
+**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}${docNote}${writtenNote}
 
-Analysiere die handgeschriebene Lösung im Bild und antworte auf Deutsch:
+Analysiere die gesamte Lösung (Bild + getippter Text) und antworte auf Deutsch:
 
 ## ✅ Richtig / ❌ Falsch
 Ist die finale Antwort korrekt? Eindeutige Aussage zuerst.
 
 ## Lösungsweg des Schülers
-Was erkennst du auf dem Bild? Wie ist der Schüler vorgegangen?
+Was erkennst du im Zeichenbereich und im Schreibbereich? Wie ist der Schüler vorgegangen?
 
 ## Fehleranalyse (nur wenn falsch)
 Wo genau liegt der Fehler? Erkläre präzise warum er falsch ist.
