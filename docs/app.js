@@ -2738,10 +2738,20 @@ function setupCanvasEvents() {
   const wrap = document.getElementById('canvas-scroll-wrap');
   const PALM_SIZE = 45;   // Kontaktbreite/-höhe ab der wir von Handfläche ausgehen (CSS-px)
 
+  // --- Diagnose-Anzeige (temporär) ---
+  const dbgEl = document.getElementById('touch-debug');
+  const showDbg = (tag, e, action) => {
+    if (!dbgEl) return;
+    dbgEl.textContent =
+      `${tag}: type=${e.pointerType} w=${(e.width||0).toFixed(0)} h=${(e.height||0).toFixed(0)} ` +
+      `press=${(e.pressure||0).toFixed(2)}\npenActive=${penActive} scrollId=${fingerScrollId} → ${action}`;
+  };
+
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') {
       // Palm-Rejection: während der Stift zeichnet ODER bei großem Kontakt (Handfläche) nichts tun.
-      if (penActive || e.width > PALM_SIZE || e.height > PALM_SIZE) return;
+      if (penActive || e.width > PALM_SIZE || e.height > PALM_SIZE) { showDbg('DOWN', e, 'IGNORIERT (palm)'); return; }
+      showDbg('DOWN', e, 'Finger-Scroll start');
       // Echter Finger → Fläche per JS scrollen (kein natives pan-y, sonst scrollt auch die Handfläche).
       fingerScrollId  = e.pointerId;
       fingerStartY    = e.clientY;
@@ -2780,11 +2790,15 @@ function setupCanvasEvents() {
       // Nur der als Finger erkannte Pointer scrollt; Handfläche/weitere Touches ignorieren.
       if (e.pointerId === fingerScrollId) {
         wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
+        showDbg('MOVE', e, `scrollTop=${wrap.scrollTop|0}`);
+      } else {
+        showDbg('MOVE', e, 'touch ignoriert (kein scrollId-match)');
       }
       return;
     }
     if (!isDrawingCanvas || !mathCtx) return;
     e.preventDefault();
+    showDbg('DRAW', e, 'zeichne');
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
 
