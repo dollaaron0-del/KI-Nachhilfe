@@ -2736,23 +2736,13 @@ function setupCanvasEvents() {
   const canvas = document.getElementById('math-canvas');
 
   const wrap = document.getElementById('canvas-scroll-wrap');
-  const PALM_SIZE = 45;   // Kontaktbreite/-höhe ab der wir von Handfläche ausgehen (CSS-px)
-
-  // --- Diagnose-Anzeige (temporär) ---
-  const dbgEl = document.getElementById('touch-debug');
-  const showDbg = (tag, e, action) => {
-    if (!dbgEl) return;
-    dbgEl.textContent =
-      `${tag}: type=${e.pointerType} w=${(e.width||0).toFixed(0)} h=${(e.height||0).toFixed(0)} ` +
-      `press=${(e.pressure||0).toFixed(2)}\npenActive=${penActive} scrollId=${fingerScrollId} → ${action}`;
-  };
 
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') {
-      // Palm-Rejection: während der Stift zeichnet ODER bei großem Kontakt (Handfläche) nichts tun.
-      if (penActive || e.width > PALM_SIZE || e.height > PALM_SIZE) { showDbg('DOWN', e, 'IGNORIERT (palm)'); return; }
-      showDbg('DOWN', e, 'Finger-Scroll start');
-      // Echter Finger → Fläche per JS scrollen (kein natives pan-y, sonst scrollt auch die Handfläche).
+      // Palm-Rejection: während der Stift zeichnet, alle Touches ignorieren.
+      // (Keine Größen-Heuristik – ein Fingerkontakt ist auf dem iPad oft >45px und würde sonst fälschlich geblockt.)
+      if (penActive) return;
+      // Finger → Fläche per JS scrollen (kein natives pan-y, sonst scrollt auch die Handfläche).
       fingerScrollId  = e.pointerId;
       fingerStartY    = e.clientY;
       wrapScrollStart = wrap.scrollTop;
@@ -2790,15 +2780,11 @@ function setupCanvasEvents() {
       // Nur der als Finger erkannte Pointer scrollt; Handfläche/weitere Touches ignorieren.
       if (e.pointerId === fingerScrollId) {
         wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
-        showDbg('MOVE', e, `scrollTop=${wrap.scrollTop|0}`);
-      } else {
-        showDbg('MOVE', e, 'touch ignoriert (kein scrollId-match)');
       }
       return;
     }
     if (!isDrawingCanvas || !mathCtx) return;
     e.preventDefault();
-    showDbg('DRAW', e, 'zeichne');
     const p        = canvasPos(e, canvas);
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
 
@@ -4454,16 +4440,12 @@ function onLernenDown(e) {
   const canvas = e.target;
   const wrap   = document.getElementById('lernen-canvas-wrap');
   const isDrawer = (e.pointerType === 'pen' || e.pointerType === 'mouse');
-  lernenDbg('DOWN', e, isDrawer ? 'Stift → zeichnen' : 'kein Stift → scrollen?');
 
   if (!isDrawer) {
     // Finger ODER Handfläche – zeichnen ist hier unmöglich (nur Stift/Maus zeichnen).
     // Palm-Rejection: während der Stift schreibt, alle Touches ignorieren.
     // (Keine Größen-Heuristik – ein Fingerkontakt ist auf dem iPad oft >45px und würde sonst fälschlich geblockt.)
-    if (lernenPenActive) {
-      lernenDbg('DOWN', e, 'IGNORIERT (Stift aktiv)');
-      return;
-    }
+    if (lernenPenActive) return;
     // Finger (oder ruhende Handfläche bei nicht schreibendem Stift) → Notizblock per JS scrollen.
     lernenFingerId = e.pointerId;
     lernenFingerY0 = e.clientY;
@@ -4492,14 +4474,12 @@ function onLernenMove(e) {
     if (e.pointerId === lernenFingerId) {
       const wrap = document.getElementById('lernen-canvas-wrap');
       wrap.scrollTop = lernenScroll0 + (lernenFingerY0 - e.clientY);
-      lernenDbg('SCROLL', e, `top=${wrap.scrollTop | 0}`);
     }
     return;
   }
   if (!isDrawingLernen || !lernenCtx) return;
   if (e.pointerId !== lernenActivePtr) return; // palm rejection
   e.preventDefault();
-  lernenDbg('DRAW', e, 'zeichne');
   const canvas = e.target;
   const r      = canvas.getBoundingClientRect();
   // getCoalescedEvents captures all intermediate points during fast strokes
@@ -4529,15 +4509,6 @@ function onLernenUp(e) {
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
-}
-
-// Temporäre Diagnose-Anzeige (Lernen-Bereich): zeigt live, was der Browser meldet.
-function lernenDbg(tag, e, action) {
-  const el = document.getElementById('touch-debug');
-  if (!el) return;
-  el.textContent =
-    `${tag}: type=${e.pointerType} w=${(e.width || 0).toFixed(0)} h=${(e.height || 0).toFixed(0)} ` +
-    `press=${(e.pressure || 0).toFixed(2)}\npenActive=${lernenPenActive} fingerId=${lernenFingerId} → ${action}`;
 }
 
 async function checkLernenSolution() {
