@@ -4075,7 +4075,6 @@ let lernenFingerId  = null;         // PointerId des scrollenden Fingers
 let lernenFingerY0  = 0;            // Start-Y des Finger-Scrolls
 let lernenScroll0   = 0;            // scrollTop bei Scroll-Beginn
 const LERNEN_HEIGHT = 2400;         // langer Notizblock (scrollbar), nicht nur bildschirmhoch
-const LERNEN_PALM   = 45;           // Kontaktgröße ab der wir Handfläche annehmen (CSS-px)
 let lernenTopicData = null;
 let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
@@ -4458,13 +4457,14 @@ function onLernenDown(e) {
   lernenDbg('DOWN', e, isDrawer ? 'Stift → zeichnen' : 'kein Stift → scrollen?');
 
   if (!isDrawer) {
-    // Finger ODER Handfläche – niemals zeichnen.
-    // Palm-Rejection: während der Stift schreibt oder bei großem Kontakt (Handfläche) nichts tun.
-    if (lernenPenActive || e.width > LERNEN_PALM || e.height > LERNEN_PALM) {
-      lernenDbg('DOWN', e, 'IGNORIERT (Handfläche/Stift aktiv)');
+    // Finger ODER Handfläche – zeichnen ist hier unmöglich (nur Stift/Maus zeichnen).
+    // Palm-Rejection: während der Stift schreibt, alle Touches ignorieren.
+    // (Keine Größen-Heuristik – ein Fingerkontakt ist auf dem iPad oft >45px und würde sonst fälschlich geblockt.)
+    if (lernenPenActive) {
+      lernenDbg('DOWN', e, 'IGNORIERT (Stift aktiv)');
       return;
     }
-    // Echter Finger → Notizblock per JS scrollen.
+    // Finger (oder ruhende Handfläche bei nicht schreibendem Stift) → Notizblock per JS scrollen.
     lernenFingerId = e.pointerId;
     lernenFingerY0 = e.clientY;
     lernenScroll0  = wrap.scrollTop;
