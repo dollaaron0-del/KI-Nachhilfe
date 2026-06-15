@@ -2691,6 +2691,22 @@ function initResizeHandle() {
 
 const CANVAS_HEIGHT = 2000;
 
+// Karo-Raster in die Canvas-Bitmap malen (immer NACH der weißen Grundfüllung aufrufen).
+// Helles Blau – alle Kanäle >200, damit die Tinten-Erkennung (checkHandwriting) es nicht als Schrift zählt.
+const GRID_STEP = 28;
+function drawGrid(ctx, w, h) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#d6e0ee';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  for (let x = GRID_STEP; x < w; x += GRID_STEP) { const px = Math.round(x) + 0.5; ctx.moveTo(px, 0); ctx.lineTo(px, h); }
+  for (let y = GRID_STEP; y < h; y += GRID_STEP) { const py = Math.round(y) + 0.5; ctx.moveTo(0, py); ctx.lineTo(w, py); }
+  ctx.stroke();
+  ctx.restore();
+}
+
 function initCanvas() {
   const canvas = document.getElementById('math-canvas');
   const wrap   = document.getElementById('canvas-scroll-wrap');
@@ -2704,6 +2720,7 @@ function initCanvas() {
   mathCtx.scale(dpr, dpr);
   mathCtx.fillStyle = '#ffffff';
   mathCtx.fillRect(0, 0, w, CANVAS_HEIGHT);
+  drawGrid(mathCtx, w, CANVAS_HEIGHT);
   if (savedCanvasData) {
     const img = new Image();
     img.onload = () => { mathCtx.drawImage(img, 0, 0, w, CANVAS_HEIGHT); applyCtxStyle(); };
@@ -2860,6 +2877,7 @@ function clearCanvas() {
   mathCtx.globalAlpha = 1;
   mathCtx.fillStyle = '#ffffff';
   mathCtx.fillRect(0, 0, r.width, r.height);
+  drawGrid(mathCtx, r.width, r.height);
   setActiveTool('pen');
 }
 
@@ -4369,6 +4387,7 @@ async function regenLernenTask() {
         const wrap = document.getElementById('lernen-canvas-wrap');
         lernenCtx.fillStyle = '#ffffff';
         lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
+        drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
       }
       const ta = document.getElementById('lernen-text-answer');
       if (ta) ta.value = '';
@@ -4389,6 +4408,7 @@ function retryLernenSameTask() {
     const wrap = document.getElementById('lernen-canvas-wrap');
     lernenCtx.fillStyle = '#ffffff';
     lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
+    drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
   }
   const ta = document.getElementById('lernen-text-answer');
   if (ta) ta.value = '';
@@ -4410,6 +4430,7 @@ function initLernenCanvas() {
   lernenCtx.scale(dpr, dpr);
   lernenCtx.fillStyle = '#ffffff';
   lernenCtx.fillRect(0, 0, w, h);
+  drawGrid(lernenCtx, w, h);
   lernenCtx.lineCap  = 'round';
   lernenCtx.lineJoin = 'round';
   // Remove any old listeners first (prevent accumulation across topic switches)
@@ -4876,6 +4897,7 @@ document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   const wrap = document.getElementById('lernen-canvas-wrap');
   lernenCtx.fillStyle = '#fff';
   lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
+  drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
   if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);
