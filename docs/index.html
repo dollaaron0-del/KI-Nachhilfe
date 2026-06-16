@@ -14,7 +14,7 @@
   <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=131" />
+  <link rel="stylesheet" href="style.css?v=133" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -127,6 +127,7 @@
     <button class="foot-btn" id="btn-export" title="Backup exportieren">💾</button>
     <button class="foot-btn" id="btn-import" title="Backup importieren">📥</button>
     <input type="file" id="import-input" accept=".json" style="display:none" />
+    <button class="foot-btn" id="btn-demo" title="Demo / Präsentation">🎬</button>
     <button class="foot-btn" id="btn-dark-toggle" title="Dark Mode">🌙</button>
     <button class="foot-btn" id="btn-logout" title="Abmelden">🚪</button>
   </div>
@@ -895,9 +896,67 @@
   </div>
 </div>
 
+<!-- ══ DEMO / PRÄSENTATIONS-SHEET ═════════════════════════════════════════ -->
+<div id="demo-sheet" class="sheet-overlay hidden">
+  <div class="sheet-bg" id="demo-bg"></div>
+  <div class="sheet demo-sheet">
+    <div class="sheet-handle"></div>
+    <h2 class="sheet-title">🎬 Demo &amp; Präsentation</h2>
+    <p class="demo-intro">Lade ein fertiges Demo-Fach <b>„Biologie – Photosynthese"</b> (mit Dokument, Karteikarten, Glossar und Quiz-Ergebnis) und nutze den Spickzettel unten, um in der Präsentation alle Features live vorzuführen.</p>
+    <button class="btn-primary" id="demo-load-btn">📚 Demo-Fach laden</button>
+    <div id="demo-status" class="sheet-status hidden"></div>
+
+    <div class="demo-guide">
+      <div class="demo-guide-title">Spickzettel – Feature für Feature</div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">🎓 Lernen</span>
+        <p>Tippe in den Chat: <code>Erklär mir die Photosynthese einfach in 3 Sätzen.</code></p>
+        <p>Dann die Schnell-Buttons zeigen: <b>🗺️ Diagramm</b>, <b>🧠 Mind-Map</b>, <b>🧮 Formeln</b>.</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">❓ Quiz</span>
+        <p>„Abfrage starten" → Frage beantworten, z.B. <code>In den Chloroplasten / Wortgleichung: CO₂ + Wasser → Glucose + Sauerstoff</code></p>
+        <p>Oder <b>⚡ Blitz-Quiz</b> (5 MC-Fragen). Nach 3 Antworten: <b>Lernstandsanalyse</b>.</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">📝 Klausur</span>
+        <p>Schwierigkeit wählen → <b>„Klausur generieren"</b>. Zeigt MC-, Kurzantwort- &amp; Aufsatzfragen.</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">🃏 Karten</span>
+        <p>Karteikarten durchblättern und bewerten (sind schon vorbereitet). Zeigt das Wiederhol-System (SRS).</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">🎯 Aufgaben</span>
+        <p>Thema <code>Photosynthese</code> wählen → <b>Aufgaben generieren</b>. Dann <b>„✏️ Im Rechnen lösen"</b>.</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">✏️ Rechnen / Zeichnen</span>
+        <p>Auf der Fläche mit Stift/Finger schreiben (Karo-Raster, Stift, Marker, Linie, Radierer). Palm-Rejection auf dem iPad zeigen.</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">📖 Glossar</span>
+        <p>Fach-Einstellungen → Glossar: Begriffe wie <code>Chlorophyll</code>, <code>Calvin-Zyklus</code> nachschlagen (schon befüllt).</p>
+      </div>
+
+      <div class="demo-step">
+        <span class="demo-step-tab">⭐ Drumherum</span>
+        <p>Streak-/XP-Anzeige, <b>🌙 Dark Mode</b>, <b>💾 Backup</b> exportieren – alles im Footer.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script defer src="app.js?v=131"></script>
+<script defer src="app.js?v=133"></script>
 
 </body>
 </html>

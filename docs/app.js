@@ -967,6 +967,103 @@ async function createSubject() {
   }
 }
 
+// ══ DEMO / PRÄSENTATION ════════════════════════════════════════════════════
+
+const DEMO_DOC = `Die Photosynthese
+
+Die Photosynthese ist der Prozess, mit dem grüne Pflanzen, Algen und einige Bakterien aus Lichtenergie chemische Energie gewinnen. Dabei werden Kohlenstoffdioxid (CO2) und Wasser (H2O) mithilfe von Lichtenergie in Glucose (Traubenzucker, C6H12O6) und Sauerstoff (O2) umgewandelt.
+
+Wortgleichung:
+Kohlenstoffdioxid + Wasser  --Lichtenergie-->  Glucose + Sauerstoff
+6 CO2 + 6 H2O  -->  C6H12O6 + 6 O2
+
+Ort der Photosynthese:
+Die Photosynthese findet in den Chloroplasten statt. Diese enthalten den grünen Farbstoff Chlorophyll, der das Sonnenlicht absorbiert. Ein Chloroplast besteht aus den Thylakoiden (gestapelt zu Grana) und dem umgebenden Stroma.
+
+Die zwei Teilreaktionen:
+1. Lichtreaktion (an den Thylakoidmembranen): Lichtenergie spaltet Wasser (Fotolyse). Dabei entstehen Sauerstoff, ATP (Energieträger) und NADPH. Der Sauerstoff wird als Nebenprodukt abgegeben.
+2. Dunkelreaktion / Calvin-Zyklus (im Stroma): Mit der Energie aus ATP und NADPH wird CO2 zu Glucose aufgebaut. Diese Reaktion benötigt kein Licht direkt, läuft aber meist tagsüber ab.
+
+Bedeutung:
+Die Photosynthese ist die Grundlage fast aller Nahrungsketten und liefert den Sauerstoff unserer Atmosphäre. Sie bindet CO2 und ist damit zentral für das Klima.
+
+Einflussfaktoren auf die Photosyntheserate sind die Lichtintensität, die CO2-Konzentration und die Temperatur (Limitierende Faktoren nach dem Gesetz des Minimums).`;
+
+const DEMO_CARDS = [
+  { front: 'Wo in der Pflanzenzelle findet die Photosynthese statt?',
+    back: 'In den **Chloroplasten** – genauer an den Thylakoiden (Lichtreaktion) und im Stroma (Calvin-Zyklus). Sie enthalten den Farbstoff Chlorophyll.' },
+  { front: 'Wie lautet die Wortgleichung der Photosynthese?',
+    back: 'Kohlenstoffdioxid + Wasser → Glucose + Sauerstoff\n\n6 CO₂ + 6 H₂O → C₆H₁₂O₆ + 6 O₂ (mit Lichtenergie).' },
+  { front: 'Was passiert in der Lichtreaktion?',
+    back: 'An den Thylakoidmembranen wird Wasser durch Lichtenergie gespalten (Fotolyse). Es entstehen **Sauerstoff**, **ATP** und **NADPH**.' },
+  { front: 'Was geschieht im Calvin-Zyklus (Dunkelreaktion)?',
+    back: 'Im Stroma wird CO₂ mithilfe der Energie aus ATP und NADPH zu **Glucose** aufgebaut. Direktes Licht ist dafür nicht nötig.' },
+  { front: 'Welche Faktoren begrenzen die Photosyntheserate?',
+    back: 'Lichtintensität, CO₂-Konzentration und Temperatur (limitierende Faktoren nach dem Gesetz des Minimums).' },
+];
+
+const DEMO_GLOSSAR = [
+  { term: 'Chlorophyll',  definition: 'Grüner Blattfarbstoff in den Chloroplasten, der das Sonnenlicht für die Photosynthese absorbiert.' },
+  { term: 'Chloroplast',  definition: 'Zellorganell der Pflanzen, in dem die Photosynthese abläuft. Enthält Thylakoide und Stroma.' },
+  { term: 'Thylakoid',    definition: 'Membransystem im Chloroplasten; Ort der Lichtreaktion. Zu Stapeln (Grana) angeordnet.' },
+  { term: 'Stroma',       definition: 'Flüssigkeit im Inneren des Chloroplasten; Ort des Calvin-Zyklus (Dunkelreaktion).' },
+  { term: 'Calvin-Zyklus', definition: 'Dunkelreaktion der Photosynthese: Aufbau von Glucose aus CO₂ mithilfe von ATP und NADPH.' },
+  { term: 'Fotolyse',     definition: 'Spaltung von Wasser durch Lichtenergie in der Lichtreaktion; setzt Sauerstoff frei.' },
+];
+
+function showDemoSheet() {
+  const st = document.getElementById('demo-status');
+  st.classList.add('hidden'); st.textContent = '';
+  const btn = document.getElementById('demo-load-btn');
+  btn.disabled = false; btn.textContent = '📚 Demo-Fach laden';
+  document.getElementById('demo-sheet').classList.remove('hidden');
+}
+
+async function loadDemoSubject() {
+  const btn = document.getElementById('demo-load-btn');
+  const st  = document.getElementById('demo-status');
+  btn.disabled = true; btn.textContent = 'Wird angelegt…';
+  st.className = 'sheet-status info'; st.classList.remove('hidden');
+  st.textContent = 'Lege Demo-Fach an…';
+
+  try {
+    const id   = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const subj = { id, name: 'Biologie – Photosynthese', icon: '🌿', color: '#34c759',
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      fileCount: 1, quizCount: 0, lastScore: null };
+    const meta = { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
+    await Promise.all([DB.addSubject(subj), DB.setMeta(id, meta)]);
+
+    st.textContent = 'Lade Dokument, Karten & Glossar…';
+    const now = Date.now();
+    await api(`/api/subjects/${id}/documents/text`, {
+      method: 'POST',
+      body: JSON.stringify({ filename: 'Photosynthese (Demo).txt', content: DEMO_DOC }),
+    });
+    await Promise.all([
+      DB.setCards(id, DEMO_CARDS.map(c => ({ front: c.front, back: c.back, ef: 2.5, interval: 1, repetitions: 0, due: now }))),
+      DB.setGlossar(id, DEMO_GLOSSAR),
+      DB.addQuizResult(id, 4, 5).catch(() => {}),
+    ]);
+
+    st.className = 'sheet-status success';
+    st.textContent = '✓ Demo-Fach „Biologie – Photosynthese" ist bereit!';
+    document.getElementById('demo-sheet').classList.add('hidden');
+    toast('Demo-Fach geladen 🌿', 'success');
+    await openSubject(subj);
+  } catch (e) {
+    st.className = 'sheet-status error';
+    st.textContent = 'Fehler: ' + e.message;
+    btn.disabled = false; btn.textContent = '📚 Demo-Fach laden';
+  }
+}
+
+document.getElementById('btn-demo')?.addEventListener('click', showDemoSheet);
+document.getElementById('demo-load-btn')?.addEventListener('click', loadDemoSubject);
+document.getElementById('demo-sheet')?.addEventListener('click', e => {
+  if (!e.target.closest('.sheet')) document.getElementById('demo-sheet').classList.add('hidden');
+});
+
 // ══ OPEN SUBJECT ═══════════════════════════════════════════════════════════
 
 async function openSubject(subj) {
@@ -4081,7 +4178,8 @@ let lernenScroll0   = 0;            // scrollTop bei Scroll-Beginn
 const LERNEN_HEIGHT = 2400;         // langer Notizblock (scrollbar), nicht nur bildschirmhoch
 let lernenTopicData = null;
 let lernenQaMsgs    = [];
-let lernenAnswerMode = 'canvas'; // 'canvas' | 'text'
+let lernenAnswerMode = 'canvas'; // 'canvas' | 'text' — gesteuert nur, welcher Eingabebereich sichtbar ist
+let lernenHasInk    = false;     // true sobald auf die Zeichenfläche geschrieben wurde (für kombinierte Prüfung)
 let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual override
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
@@ -4115,6 +4213,7 @@ function openTopicView(topic) {
   lernenTopicData = null;
   lernenQaMsgs    = [];
   lernenAttempts  = 0;
+  lernenHasInk    = false;
   lernenCtx       = null;
   lernenActivePtr = null;
   isDrawingLernen = false;
@@ -4389,6 +4488,7 @@ async function regenLernenTask() {
         lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
         drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
       }
+      lernenHasInk = false;
       const ta = document.getElementById('lernen-text-answer');
       if (ta) ta.value = '';
       document.getElementById('lernen-done-btn').classList.add('hidden');
@@ -4412,6 +4512,7 @@ function retryLernenSameTask() {
   }
   const ta = document.getElementById('lernen-text-answer');
   if (ta) ta.value = '';
+  lernenHasInk = false;
   const rb = document.getElementById('lernen-result-bar');
   if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
 }
@@ -4517,6 +4618,7 @@ function onLernenMove(e) {
       lernenCtx.globalCompositeOperation = 'source-over';
       lernenCtx.strokeStyle = lernenPenColor;
       lernenCtx.lineWidth   = 2.5;
+      lernenHasInk = true;
     }
     lernenCtx.stroke();
     lernenLastX = x; lernenLastY = y;
@@ -4574,14 +4676,38 @@ Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exak
 
 ${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}`;
 
-    if (lernenAnswerMode === 'text') {
-      const answerText = document.getElementById('lernen-text-answer').value.trim();
-      if (!answerText) {
-        toast('Bitte zuerst eine Antwort eingeben.', 'warn', 3000);
-        checkBtn.disabled = false; checkBtn.innerHTML = '✅ Prüfen';
-        if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
-        return;
-      }
+    // Beide Eingabebereiche gemeinsam prüfen: Der Umschalter ✏️/⌨️ steuert nur,
+    // was gerade sichtbar ist – die Antwort kann aus Zeichnung UND/ODER Text bestehen.
+    const answerText = document.getElementById('lernen-text-answer')?.value.trim() || '';
+    const hasInk     = lernenHasInk && !!lernenCtx;
+    if (!answerText && !hasInk) {
+      toast('Bitte zuerst eine Antwort zeichnen oder eingeben.', 'warn', 3000);
+      checkBtn.disabled = false; checkBtn.innerHTML = '✅ Prüfen';
+      if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
+      return;
+    }
+
+    if (hasInk) {
+      // Zeichnung vorhanden → Vision; getippten Text (falls vorhanden) zusätzlich mitschicken.
+      const canvas = document.getElementById('lernen-canvas');
+      const flat = document.createElement('canvas');
+      flat.width = canvas.width; flat.height = canvas.height;
+      const fc = flat.getContext('2d');
+      fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
+      fc.drawImage(canvas, 0, 0);
+      const base64 = flat.toDataURL('image/png').split(',')[1];
+      const textPart = answerText
+        ? `\n\nZusätzlich getippte Antwort des Studenten: ${answerText}\nWerte Zeichnung UND getippten Text zusammen als eine einzige Antwort.`
+        : '';
+      const result = await claudeLocalVision(
+        base64,
+        `Aufgabe: ${lernenTopicData.aufgabe}${textPart}\n\n${EVAL_SYS}`,
+        sysBlocks()
+      );
+      ev = parseJsonResponse(result);
+      if (!ev) throw new Error('Keine Auswertung');
+    } else {
+      // Nur getippter Text.
       const raw = await claudeLocal(
         [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
         [{ type: 'text', text: EVAL_SYS }],
@@ -4592,22 +4718,6 @@ ${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}`;
         console.error('parseJsonResponse failed, raw response:', raw?.slice(0, 300));
         throw new Error('Keine Auswertung');
       }
-    } else {
-      if (!lernenCtx) return;
-      const canvas = document.getElementById('lernen-canvas');
-      const flat = document.createElement('canvas');
-      flat.width = canvas.width; flat.height = canvas.height;
-      const fc = flat.getContext('2d');
-      fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
-      fc.drawImage(canvas, 0, 0);
-      const base64 = flat.toDataURL('image/png').split(',')[1];
-      const result = await claudeLocalVision(
-        base64,
-        `Aufgabe: ${lernenTopicData.aufgabe}\n\n${EVAL_SYS}`,
-        sysBlocks()
-      );
-      ev = parseJsonResponse(result);
-      if (!ev) throw new Error('Keine Auswertung');
     }
 
     lernenAttempts++;
@@ -4898,6 +5008,7 @@ document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   lernenCtx.fillStyle = '#fff';
   lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
   drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
+  lernenHasInk = false;
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
   if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);

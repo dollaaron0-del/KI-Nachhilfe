@@ -1651,6 +1651,11 @@ html, body {
   overflow-y: auto;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
+  /* Aufgabentext nie selektierbar – sonst markiert der Stift beim Zeichnen
+     Zeichen in der Aufgabenstellung. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 /* Drag handle between task area and canvas/toolbar */
 .lernen-task-resize {
@@ -2134,3 +2139,19 @@ html, body {
 }
 .elaborate-input:focus { border-color: var(--green); }
 .elaborate-row { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ══ DEMO / PRÄSENTATIONS-SHEET ══════════════════════════════════════════ */
+.demo-sheet { max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.demo-intro { font-size: 14px; color: var(--label-secondary); line-height: 1.5; margin: 6px 0 14px; }
+.demo-intro b { color: var(--label); }
+.demo-status { margin-top: 10px; }
+.demo-guide { margin-top: 18px; border-top: 1px solid var(--separator); padding-top: 14px; }
+.demo-guide-title { font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .5px; color: var(--label-secondary); margin-bottom: 12px; }
+.demo-step { padding: 10px 12px; margin-bottom: 8px; border-radius: 12px; background: var(--surface); }
+.demo-step-tab { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent);
+  margin-bottom: 4px; }
+.demo-step p { font-size: 14px; line-height: 1.5; margin: 4px 0; color: var(--label); }
+.demo-step p b { color: var(--label); }
+.demo-step code { background: var(--bg); border: 1px solid var(--separator); border-radius: 6px;
+  padding: 1px 6px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
