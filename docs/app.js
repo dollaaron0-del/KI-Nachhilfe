@@ -305,6 +305,7 @@ let currentExamText      = '';
 let learnedTopics        = [];
 let currentExplainerTopic = null;
 let rechnenDiff     = 'mittel';
+let rechnenLastFeedback = '';   // letztes Prüf-Feedback derselben Aufgabe (konsistente Re-Prüfung)
 let mathCtx         = null;
 let isDrawingCanvas = false;
 let isErasing       = false;
@@ -2922,6 +2923,7 @@ function injectSolveButtons(tasksPart) {
 
 function sendToRechnen(text) {
   currentAufgabe = text;
+  rechnenLastFeedback = '';
   savedCanvasData = null;
   const input = document.getElementById('rechnen-task-input');
   if (input) input.value = text;
@@ -3342,6 +3344,7 @@ Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
     const taskInput = document.getElementById('rechnen-task-input');
     taskInput.value = aufgabe.trim();
     currentAufgabe  = aufgabe.trim();
+    rechnenLastFeedback = '';
     savedCanvasData = null;
     undoStack       = [];
     clearCanvas();
@@ -3382,12 +3385,32 @@ async function checkHandwriting() {
   const dataURL   = canvas.toDataURL('image/png');
   const base64   = dataURL.split(',')[1];
 
+  // Bewertungsmaßstab an den gewählten Schwierigkeitsgrad koppeln: rechnerische
+  // Fehler bleiben auf jedem Level Fehler, aber bei leichten Aufgaben wird das
+  // Verständnis wohlwollend bewertet, bei Experte/Prüfungsnah streng.
+  const RECHNEN_TOLERANZ = {
+    leicht:       `BEWERTUNGSMASSSTAB – LEICHT (wohlwollend): Es zählt das richtige Endergebnis und der grobe Lösungsweg. Sei großzügig bei Notation, Zwischenschritten und Formulierung. Kleinere formale Ungenauigkeiten NICHT als Fehler werten. Wenn das Ergebnis stimmt, ist die Aufgabe richtig – auch wenn der Weg knapp ist.`,
+    mittel:       `BEWERTUNGSMASSSTAB – MITTEL: Endergebnis und nachvollziehbarer Lösungsweg zählen. Wesentliche Rechenfehler benennen, aber kleinere Notations-Ungenauigkeiten tolerieren.`,
+    schwer:       `BEWERTUNGSMASSSTAB – SCHWER: Lösungsweg und Ergebnis müssen korrekt und vollständig sein. Auch Zwischenschritte prüfen.`,
+    pruefungsnah: `BEWERTUNGSMASSSTAB – PRÜFUNGSNAH (Klausurmaßstab): Bewerte wie ein strenger Korrektor. Saubere Notation, vollständige Begründung und exakte Ergebnisse erforderlich. Jeder Zwischenschritt wird geprüft.`,
+    experte:      `BEWERTUNGSMASSSTAB – EXPERTE (sehr streng): Maximal anspruchsvoll. Jede Ungenauigkeit in Notation, Begründung oder Rechnung benennen. Nur eine vollständig saubere Lösung gilt als korrekt.`,
+  };
+  const toleranzNote = RECHNEN_TOLERANZ[rechnenDiff] || RECHNEN_TOLERANZ.mittel;
+
+  // Re-Prüfung: vorheriges Feedback mitschicken, damit die KI konsistent bleibt
+  // und nicht bei jeder Runde neue/widersprüchliche Fehler "entdeckt".
+  const reCheckNote = rechnenLastFeedback
+    ? `\n\n**WICHTIG – das ist eine erneute Prüfung derselben Aufgabe.** Du hast diese Lösung vorher schon einmal bewertet. Dein vorheriges Feedback war:\n"""\n${rechnenLastFeedback}\n"""\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – führe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, es sei denn, die Lösung wurde dort tatsächlich verändert und ist jetzt falsch. Bestätige ausdrücklich, welche der zuvor genannten Fehler nun korrigiert sind.`
+    : '';
+
   const checkPrompt = `Ein Schüler hat eine Aufgabe gelöst. Die Lösung kann in ZWEI Bereichen stehen:
 1. handschriftlich/gezeichnet auf dem beigefügten Bild (Zeichenbereich),
 2. als getippter Text im Schreibbereich (siehe unten).
 Berücksichtige BEIDE Bereiche gemeinsam als die vollständige Lösung des Schülers.
 
-**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}${docNote}${writtenNote}
+${toleranzNote}
+
+**Aufgabe:** ${taskText || '(keine Aufgabe angegeben – analysiere was du siehst)'}${docNote}${writtenNote}${reCheckNote}
 
 Analysiere die gesamte Lösung (Bild + getippter Text) und antworte auf Deutsch:
 
@@ -3408,6 +3431,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
   try {
     const feedback = await claudeLocalVision(base64, checkPrompt, sysBlocks(), 1800);
     checkDone();
+    rechnenLastFeedback = feedback;
     document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(feedback));
     document.getElementById('rechnen-sheet-loading').classList.add('hidden');
     document.getElementById('rechnen-sheet-result').classList.remove('hidden');
@@ -4398,6 +4422,7 @@ let lernenHasInk    = false;     // true sobald auf die Zeichenfläche geschrieb
 let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual override
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
+let lernenLastEval    = null;         // letzte KI-Auswertung derselben Aufgabe (konsistente Re-Prüfung)
 
 // ── Spaced Review: Vergessenskurve für Lernpfad-Themen ─────────────────────
 // topicMeta["Thema::diff"] = { ts: <zuletzt gelernt>, attempts: <Versuche bis korrekt> }
@@ -4428,6 +4453,7 @@ function openTopicView(topic) {
   lernenTopicData = null;
   lernenQaMsgs    = [];
   lernenAttempts  = 0;
+  lernenLastEval  = null;
   lernenHasInk    = false;
   lernenCtx       = null;
   lernenActivePtr = null;
@@ -4710,6 +4736,7 @@ async function regenLernenTask() {
       const rb = document.getElementById('lernen-result-bar');
       if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
       lernenAttempts = 0;
+      lernenLastEval = null;
       toast('Neue Aufgabe generiert', 'success', 2000);
     } else {
       toast('Keine neue Aufgabe erhalten', 'warn');
@@ -4876,8 +4903,25 @@ async function checkLernenSolution() {
       schwer: `NIVEAU FORTGESCHRITTEN: Präzise Fachsprache wird erwartet. Fehlende oder falsch verwendete zentrale Fachbegriffe senken die Bewertung. Musterlösung in vollständiger Fachsprache.`,
       pruefungsnah: `NIVEAU PRÜFUNGSNAH: Klausurmaßstab. Exakte Fachterminologie, vollständige Begründungen und saubere Notation wie in einer Prüfung erforderlich – bewerte wie ein strenger Korrektor. Musterlösung als vollständige Klausur-Musterlösung.`,
     };
+    // Strenge der Bewertung an das Niveau koppeln: Einsteiger wohlwollend,
+    // Prüfungsnah/Experte streng. (Rechnerische Fehler bleiben überall Fehler.)
+    const STRICTNESS = {
+      einsteiger:   `Bewerte WOHLWOLLEND und ermutigend. Es geht um das grundsätzliche Verständnis, nicht um Perfektion. Im Zweifel zugunsten des Studenten entscheiden.`,
+      leicht:       `Bewerte fair und eher wohlwollend. Kleinere Ungenauigkeiten nicht überbewerten.`,
+      mittel:       `Bewerte fair und ausgewogen.`,
+      schwer:       `Bewerte streng. Vollständigkeit und Genauigkeit zählen.`,
+      pruefungsnah: `Bewerte SEHR STRENG nach Klausurmaßstab.`,
+    };
+    const strictNote = STRICTNESS[lernenCurrentDiff] || STRICTNESS.einsteiger;
+
+    // Re-Prüfung: vorherige Auswertung mitgeben, damit die KI konsistent bleibt
+    // und nicht bei jeder Runde neue/widersprüchliche Fehler "entdeckt".
+    const reCheckNote = lernenLastEval
+      ? `\n\nWICHTIG – ERNEUTE PRÜFUNG DERSELBEN AUFGABE. Deine vorherige Auswertung war:\nscore: ${lernenLastEval.score}\nfeedback: ${lernenLastEval.feedback || ''}\neinschaetzung: ${lernenLastEval.einschaetzung || ''}\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – bringe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, außer der Student hat sie verändert und sie sind jetzt falsch. Erkenne ausdrücklich an, welche zuvor genannten Fehler nun korrigiert sind. Der score darf bei einer korrigierten Antwort NICHT sinken.`
+      : '';
+
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
-Bewerte SEHR STRENG:
+${strictNote}
 {
   "score": 0,
   "understood": false,
@@ -4890,7 +4934,7 @@ KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder En
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
 Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.
 
-${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}`;
+${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}${reCheckNote}`;
 
     // Beide Eingabebereiche gemeinsam prüfen: Der Umschalter ✏️/⌨️ steuert nur,
     // was gerade sichtbar ist – die Antwort kann aus Zeichnung UND/ODER Text bestehen.
@@ -4937,6 +4981,7 @@ ${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}`;
     }
 
     lernenAttempts++;
+    lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung };
     const understood = ev.understood === true && ev.score >= 2;
     if (ev.score >= 2) comboUp(); else comboReset();
     const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
