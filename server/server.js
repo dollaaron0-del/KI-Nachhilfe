@@ -471,6 +471,25 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Fester Demo-Account: legt bei Bedarf einen vorab freigeschalteten Demo-Benutzer
+// an (ohne Telegram-Freischaltung) und gibt ein Token zurück. Alle Demo-Besucher
+// teilen sich dasselbe Konto und damit dasselbe Demo-Fach. ON CONFLICT macht den
+// Aufruf race-sicher, falls mehrere Besucher gleichzeitig zum ersten Mal klicken.
+const DEMO_USERNAME = 'demo';
+app.post('/api/auth/demo', async (req, res) => {
+  try {
+    const hash = await bcrypt.hash(require('crypto').randomBytes(18).toString('hex'), 10);
+    await pool.query(
+      `INSERT INTO users (username, password_hash, approved, is_admin)
+       VALUES ($1,$2,true,false) ON CONFLICT (username) DO NOTHING`,
+      [DEMO_USERNAME, hash]
+    );
+    const { rows } = await pool.query('SELECT id, username FROM users WHERE username=$1', [DEMO_USERNAME]);
+    const token = jwt.sign({ id: rows[0].id, username: rows[0].username, is_admin: false }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: rows[0].username, is_admin: false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT is_admin FROM users WHERE id=$1', [req.user.id]);

@@ -218,6 +218,36 @@ document.getElementById('auth-submit-btn')?.addEventListener('click', async () =
   })
 );
 
+// Demo ansehen: meldet sich am festen, vorab freigeschalteten Demo-Account an
+// (ohne Registrierung/Telegram-Freischaltung). Existiert noch kein Demo-Fach,
+// wird es einmalig automatisch geseedet, damit die Demo sofort gefüllt ist.
+document.getElementById('auth-demo-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('auth-demo-btn');
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden'); errEl.style.color = '';
+  btn.disabled = true; const label = btn.textContent; btn.textContent = '…';
+  try {
+    stopApprovalPolling();
+    const r = await fetch('/api/auth/demo', { method: 'POST', headers: { 'content-type': 'application/json' } }); // raw-fetch-ok: erzeugt erst das Token
+    const data = await r.json();
+    if (!r.ok) { errEl.textContent = data.error || 'Demo nicht verfügbar.'; errEl.classList.remove('hidden'); return; }
+    authToken    = data.token;
+    authUsername = data.username;
+    authIsAdmin  = false;
+    localStorage.setItem('auth_token',    authToken);
+    localStorage.setItem('auth_username', authUsername);
+    localStorage.setItem('auth_is_admin', '0');
+    onAuthSuccess();
+    // Demo-Fach nur beim allerersten Mal anlegen – danach ist es im Account vorhanden.
+    const subs = await DB.subjects();
+    if (!subs.length) await loadDemoSubject();
+  } catch (e) {
+    errEl.textContent = 'Verbindungsfehler.'; errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+});
+
 document.getElementById('btn-logout')?.addEventListener('click', () => {
   authToken = ''; authUsername = '';
   localStorage.removeItem('auth_token'); localStorage.removeItem('auth_username');

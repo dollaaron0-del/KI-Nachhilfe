@@ -14,7 +14,7 @@
   <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=134" />
+  <link rel="stylesheet" href="style.css?v=138" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -44,6 +44,9 @@
       </div>
       <div id="auth-error" class="auth-error hidden"></div>
       <button class="btn-primary" id="auth-submit-btn" style="width:100%;margin-top:8px">Anmelden</button>
+      <div class="auth-divider"><span>oder</span></div>
+      <button class="btn-secondary" id="auth-demo-btn" style="width:100%">🎬 Demo ansehen</button>
+      <p class="setup-hint" style="text-align:center;margin:8px 0 0;font-size:13px">Ohne Konto – mit fertigem Beispiel-Fach.</p>
     </div>
   </div>
 </div>
@@ -956,7 +959,7 @@
 
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script defer src="app.js?v=137"></script>
+<script defer src="app.js?v=138"></script>
 
 </body>
 </html>
