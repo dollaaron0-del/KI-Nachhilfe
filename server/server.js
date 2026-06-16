@@ -639,15 +639,18 @@ app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) =>
 
 // Accept pre-extracted text (from client-side PDF.js)
 app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) => {
-  const { filename, content } = req.body;
+  const { filename, content, skipCards } = req.body;
   if (!filename || !content) return res.status(400).json({ error: 'filename und content erforderlich' });
   try {
     const { rows } = await pool.query(
       'INSERT INTO documents (subject_id,filename,content) VALUES ($1,$2,$3) RETURNING id,filename,uploaded_at',
       [req.params.id, filename, content]
     );
-    // Auto-generate cards in background
-    autoGenerateCards(req.params.id, filename, content).catch(e => console.error('Auto-cards:', e.message));
+    // Auto-generate cards in background (skipCards: z. B. beim vorab geseedeten
+    // Demo-Fach, das bereits fertige Karten mitbringt).
+    if (!skipCards) {
+      autoGenerateCards(req.params.id, filename, content).catch(e => console.error('Auto-cards:', e.message));
+    }
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

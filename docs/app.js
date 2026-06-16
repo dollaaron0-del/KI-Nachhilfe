@@ -971,23 +971,39 @@ async function createSubject() {
 
 const DEMO_DOC = `Die Photosynthese
 
-Die Photosynthese ist der Prozess, mit dem grüne Pflanzen, Algen und einige Bakterien aus Lichtenergie chemische Energie gewinnen. Dabei werden Kohlenstoffdioxid (CO2) und Wasser (H2O) mithilfe von Lichtenergie in Glucose (Traubenzucker, C6H12O6) und Sauerstoff (O2) umgewandelt.
+1. Überblick
+Die Photosynthese ist der Prozess, mit dem grüne Pflanzen, Algen und einige Bakterien aus Lichtenergie chemische Energie gewinnen. Dabei werden Kohlenstoffdioxid (CO2) und Wasser (H2O) mithilfe von Lichtenergie in Glucose (Traubenzucker, C6H12O6) und Sauerstoff (O2) umgewandelt. Die Photosynthese ist damit eine endergone Reaktion: Es wird Energie (Licht) aufgenommen und in den chemischen Bindungen der Glucose gespeichert.
 
 Wortgleichung:
 Kohlenstoffdioxid + Wasser  --Lichtenergie-->  Glucose + Sauerstoff
 6 CO2 + 6 H2O  -->  C6H12O6 + 6 O2
 
-Ort der Photosynthese:
-Die Photosynthese findet in den Chloroplasten statt. Diese enthalten den grünen Farbstoff Chlorophyll, der das Sonnenlicht absorbiert. Ein Chloroplast besteht aus den Thylakoiden (gestapelt zu Grana) und dem umgebenden Stroma.
+2. Ort der Photosynthese
+Die Photosynthese findet in den Chloroplasten statt. Diese enthalten den grünen Farbstoff Chlorophyll, der das Sonnenlicht absorbiert. Ein Chloroplast ist von einer Doppelmembran umgeben und besteht im Inneren aus den Thylakoiden (scheibenförmige Membranstapel, die zu Grana gestapelt sind) und dem umgebenden Stroma (Grundsubstanz). Chlorophyll absorbiert vor allem rotes und blaues Licht und reflektiert grünes Licht – deshalb erscheinen Blätter grün.
 
-Die zwei Teilreaktionen:
-1. Lichtreaktion (an den Thylakoidmembranen): Lichtenergie spaltet Wasser (Fotolyse). Dabei entstehen Sauerstoff, ATP (Energieträger) und NADPH. Der Sauerstoff wird als Nebenprodukt abgegeben.
-2. Dunkelreaktion / Calvin-Zyklus (im Stroma): Mit der Energie aus ATP und NADPH wird CO2 zu Glucose aufgebaut. Diese Reaktion benötigt kein Licht direkt, läuft aber meist tagsüber ab.
+3. Die zwei Teilreaktionen
+3.1 Lichtreaktion (an den Thylakoidmembranen)
+Lichtenergie wird vom Chlorophyll absorbiert und spaltet Wasser (Fotolyse). Dabei entstehen Sauerstoff, ATP (Energieträger) und NADPH (Reduktionsmittel). Der Sauerstoff wird als Nebenprodukt an die Umgebung abgegeben. Die Lichtreaktion ist also der Schritt, der Lichtenergie in chemisch nutzbare Energie (ATP, NADPH) umwandelt.
 
-Bedeutung:
-Die Photosynthese ist die Grundlage fast aller Nahrungsketten und liefert den Sauerstoff unserer Atmosphäre. Sie bindet CO2 und ist damit zentral für das Klima.
+3.2 Dunkelreaktion / Calvin-Zyklus (im Stroma)
+Mit der Energie aus ATP und NADPH wird CO2 schrittweise zu Glucose aufgebaut (CO2-Fixierung). Diese Reaktion benötigt kein Licht direkt, läuft aber meist tagsüber ab, weil sie auf die Produkte der Lichtreaktion angewiesen ist. Das Schlüsselenzym ist die RuBisCO.
 
-Einflussfaktoren auf die Photosyntheserate sind die Lichtintensität, die CO2-Konzentration und die Temperatur (Limitierende Faktoren nach dem Gesetz des Minimums).`;
+Vergleich der Teilreaktionen:
+- Lichtreaktion: Ort Thylakoidmembran; braucht Licht + Wasser; liefert O2, ATP, NADPH.
+- Calvin-Zyklus: Ort Stroma; braucht CO2, ATP, NADPH; liefert Glucose.
+
+4. Bedeutung
+Die Photosynthese ist die Grundlage fast aller Nahrungsketten (Produzenten bilden die erste Trophiestufe) und liefert den Sauerstoff unserer Atmosphäre. Sie bindet CO2 und ist damit zentral für den globalen Kohlenstoffkreislauf und das Klima. Die Photosynthese ist die Umkehrung der Zellatmung: Was bei der Photosynthese aufgebaut wird (Glucose, O2), wird bei der Zellatmung wieder abgebaut, um Energie freizusetzen.
+
+5. Einflussfaktoren auf die Photosyntheserate
+Die Photosyntheserate hängt von mehreren Faktoren ab:
+- Lichtintensität: Bei wenig Licht steigt die Rate mit der Lichtmenge, ab einem Sättigungspunkt nicht mehr.
+- CO2-Konzentration: Mehr CO2 erhöht die Rate bis zur Sättigung.
+- Temperatur: Da Enzyme beteiligt sind, gibt es ein Optimum (meist 20–30 °C); zu hohe Temperaturen schädigen die Enzyme.
+Es gilt das Gesetz des Minimums (Liebig): Der knappste Faktor begrenzt die Gesamtrate – die übrigen Faktoren können sie dann nicht weiter steigern (limitierende Faktoren).
+
+6. Nachweis
+Der gebildete Sauerstoff lässt sich z. B. an einer Wasserpflanze (Wasserpest) durch aufsteigende Gasbläschen nachweisen. Die Glucose bzw. die daraus gebildete Stärke kann man mit der Jod-Stärke-Probe (Blaufärbung) im Blatt nachweisen.`;
 
 const DEMO_CARDS = [
   { front: 'Wo in der Pflanzenzelle findet die Photosynthese statt?',
@@ -1029,6 +1045,105 @@ const DEMO_STRUCTURE = {
 };
 const DEMO_TOPICS = DEMO_STRUCTURE.kapitel.flatMap(k => k.themen);
 
+// Zweites Dokument: eine "Altklausur" → schaltet den prüfungsnahen Modus frei
+// (hasExamDocs erkennt das Wort "Altklausur" im Dateinamen) und liefert dem
+// Klausur-Generator echten Stil-/Aufgabenkontext (doc_type=altklausur).
+const DEMO_ALTKLAUSUR = `Altklausur Biologie – Thema: Photosynthese
+Bearbeitungszeit: 45 Minuten · Erreichbare Punkte: 30
+
+Aufgabe 1 (6 P): Erkläre in eigenen Worten, was man unter Photosynthese versteht, und gib die Wortgleichung an.
+
+Aufgabe 2 (8 P): Beschrifte einen Chloroplasten (Doppelmembran, Thylakoide/Grana, Stroma) und ordne den Bestandteilen die jeweilige Teilreaktion zu.
+
+Aufgabe 3 (10 P): Vergleiche Lichtreaktion und Calvin-Zyklus tabellarisch (Ort, Ausgangsstoffe, Produkte, Lichtabhängigkeit).
+
+Aufgabe 4 (6 P): In einem Versuch wird eine Wasserpest bei steigender Lichtintensität beobachtet. Erkläre den erwarteten Verlauf der Photosyntheserate und nenne das zugrunde liegende Prinzip (limitierende Faktoren).`;
+
+// Vorab gespeicherte Übungs-Aufgaben (Reiter "Aufgaben" → Gespeicherte Aufgaben).
+// fullResult enthält den Trenner "--- ## Musterlösungen", damit Lösungen separat
+// ein-/ausblendbar sind (siehe restoreAufgabe).
+const DEMO_AUFGABEN = [
+  {
+    id: 9000001,
+    topic: 'Lichtreaktion & Calvin-Zyklus',
+    type: 'uebung',
+    tasksPart: `## Übungsaufgaben: Lichtreaktion & Calvin-Zyklus
+
+1. Nenne den Ort, an dem die Lichtreaktion abläuft, und die drei Produkte, die dabei entstehen.
+2. Erkläre, warum der Calvin-Zyklus auf die Lichtreaktion angewiesen ist, obwohl er selbst kein Licht benötigt.
+3. Ordne zu: Welche Stoffe sind Ausgangsstoffe, welche Produkte des Calvin-Zyklus?
+4. Begründe, warum bei der Photosynthese Sauerstoff entsteht und woher dieser stammt.`,
+    fullResult: `## Übungsaufgaben: Lichtreaktion & Calvin-Zyklus
+
+1. Nenne den Ort, an dem die Lichtreaktion abläuft, und die drei Produkte, die dabei entstehen.
+2. Erkläre, warum der Calvin-Zyklus auf die Lichtreaktion angewiesen ist, obwohl er selbst kein Licht benötigt.
+3. Ordne zu: Welche Stoffe sind Ausgangsstoffe, welche Produkte des Calvin-Zyklus?
+4. Begründe, warum bei der Photosynthese Sauerstoff entsteht und woher dieser stammt.
+
+---
+
+## Musterlösungen
+
+1. Die Lichtreaktion läuft an den **Thylakoidmembranen** ab. Produkte: **Sauerstoff (O₂)**, **ATP** und **NADPH**.
+2. Der Calvin-Zyklus benötigt **ATP und NADPH** aus der Lichtreaktion als Energie- und Reduktionsmittel, um CO₂ zu Glucose aufzubauen. Ohne diese Produkte fehlt ihm die Energie – deshalb läuft er praktisch nur, wenn zuvor die Lichtreaktion stattgefunden hat.
+3. **Ausgangsstoffe:** CO₂, ATP, NADPH. **Produkte:** Glucose (Zucker), ADP und NADP⁺ (werden zur Lichtreaktion zurückgeführt).
+4. Der Sauerstoff entsteht bei der **Fotolyse**, also der Spaltung von **Wasser (H₂O)** in der Lichtreaktion. Der freigesetzte O₂ stammt damit aus dem Wasser, nicht aus dem CO₂.`,
+    createdAt: '2026-06-10T09:15:00.000Z',
+  },
+  {
+    id: 9000002,
+    topic: 'Einflussfaktoren der Photosyntheserate',
+    type: 'klausur',
+    tasksPart: `## Mini-Klausur: Einflussfaktoren der Photosyntheserate
+
+1. (4 P) Nenne die drei wichtigsten Faktoren, die die Photosyntheserate beeinflussen.
+2. (3 P) Erkläre das "Gesetz des Minimums" am Beispiel einer Pflanze bei viel Licht, aber wenig CO₂.
+3. (3 P) Skizziere (in Worten) den Verlauf der Photosyntheserate bei steigender Lichtintensität und erkläre den Sättigungsbereich.`,
+    fullResult: `## Mini-Klausur: Einflussfaktoren der Photosyntheserate
+
+1. (4 P) Nenne die drei wichtigsten Faktoren, die die Photosyntheserate beeinflussen.
+2. (3 P) Erkläre das "Gesetz des Minimums" am Beispiel einer Pflanze bei viel Licht, aber wenig CO₂.
+3. (3 P) Skizziere (in Worten) den Verlauf der Photosyntheserate bei steigender Lichtintensität und erkläre den Sättigungsbereich.
+
+---
+
+## Lösungsschlüssel
+
+1. **Lichtintensität**, **CO₂-Konzentration** und **Temperatur**. (Je Faktor 1 P, + 1 P für Vollständigkeit.)
+2. Der **knappste Faktor begrenzt** die Gesamtrate. Steht viel Licht, aber wenig CO₂ zur Verfügung, kann die Pflanze das viele Licht nicht nutzen – die Rate wird durch das fehlende CO₂ begrenzt. Mehr Licht steigert die Rate dann **nicht** weiter.
+3. Bei **wenig Licht** steigt die Rate zunächst **annähernd linear** mit der Lichtintensität. Ab einem bestimmten Punkt (Sättigung) wird ein anderer Faktor (z. B. CO₂ oder Temperatur) limitierend, sodass die Kurve **abflacht** und trotz mehr Licht **konstant** bleibt.`,
+    createdAt: '2026-06-12T16:40:00.000Z',
+  },
+];
+
+// Vorab gespeicherte Probeklausur (Reiter "Klausur" → gespeicherte Klausuren).
+const DEMO_KLAUSUR = {
+  id: 9100001,
+  diff: 'pruefungsnah',
+  content: `# Probeklausur: Photosynthese
+Bearbeitungszeit: 45 Minuten · Erreichbare Punkte: 30
+
+**Aufgabe 1 (6 P)** – Definiere den Begriff Photosynthese und gib die vollständige Reaktionsgleichung (mit Summenformeln) an.
+
+**Aufgabe 2 (8 P)** – Beschreibe den Aufbau eines Chloroplasten und ordne den Bestandteilen Thylakoid und Stroma die jeweils dort ablaufende Teilreaktion zu.
+
+**Aufgabe 3 (10 P)** – Vergleiche Lichtreaktion und Calvin-Zyklus in einer Tabelle (Ort, Ausgangsstoffe, Produkte, Lichtabhängigkeit).
+
+**Aufgabe 4 (6 P)** – Eine Wasserpest wird bei zunehmender Lichtintensität beobachtet. Beschreibe den erwarteten Verlauf der Photosyntheserate und erkläre ihn mit dem Prinzip der limitierenden Faktoren.
+
+---
+
+## Lösungsschlüssel
+
+**Aufgabe 1 (6 P):** Photosynthese = Aufbau von Glucose aus CO₂ und H₂O mithilfe von Lichtenergie, wobei O₂ frei wird (3 P). Gleichung: 6 CO₂ + 6 H₂O → C₆H₁₂O₆ + 6 O₂ (3 P).
+
+**Aufgabe 2 (8 P):** Chloroplast: Doppelmembran außen (1 P), innen Thylakoide (zu Grana gestapelt) (2 P) und Stroma (2 P). Zuordnung: Lichtreaktion an der **Thylakoidmembran** (1,5 P), Calvin-Zyklus im **Stroma** (1,5 P).
+
+**Aufgabe 3 (10 P):** Lichtreaktion: Ort Thylakoidmembran, Ausgangsstoffe H₂O + Licht, Produkte O₂/ATP/NADPH, lichtabhängig. Calvin-Zyklus: Ort Stroma, Ausgangsstoffe CO₂/ATP/NADPH, Produkt Glucose, nicht direkt lichtabhängig. (Je korrekter Zelleintrag ca. 1 P.)
+
+**Aufgabe 4 (6 P):** Bei wenig Licht steigt die Rate annähernd linear (2 P). Ab dem Sättigungspunkt flacht sie ab, weil ein anderer Faktor (CO₂/Temperatur) limitierend wird (2 P). Prinzip: der knappste Faktor begrenzt die Gesamtrate – Gesetz des Minimums (2 P).`,
+};
+
 function showDemoSheet() {
   const st = document.getElementById('demo-status');
   st.classList.add('hidden'); st.textContent = '';
@@ -1048,16 +1163,32 @@ async function loadDemoSubject() {
     const id   = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const subj = { id, name: 'Biologie – Photosynthese', icon: '🌿', color: '#34c759',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      fileCount: 1, quizCount: 0, lastScore: null };
+      fileCount: 2, quizCount: 0, lastScore: null };
     const meta = { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
     await Promise.all([DB.addSubject(subj), DB.setMeta(id, meta)]);
 
-    st.textContent = 'Lade Dokument, Karten & Glossar…';
+    // Dokumente hochladen. skipCards:true verhindert die serverseitige
+    // KI-Kartenerzeugung im Hintergrund – sonst würden die fertig geseedeten
+    // 5 Demo-Karten nachträglich von ~12 KI-Karten überschrieben/ergänzt.
+    st.textContent = 'Lade Dokumente (Skript + Altklausur)…';
     const now = Date.now();
     await api(`/api/subjects/${id}/documents/text`, {
       method: 'POST',
-      body: JSON.stringify({ filename: 'Photosynthese (Demo).txt', content: DEMO_DOC }),
+      body: JSON.stringify({ filename: 'Photosynthese – Skript (Demo).txt', content: DEMO_DOC, skipCards: true }),
     });
+    const altklausurDoc = await api(`/api/subjects/${id}/documents/text`, {
+      method: 'POST',
+      body: JSON.stringify({ filename: 'Altklausur Photosynthese (Demo).txt', content: DEMO_ALTKLAUSUR, skipCards: true }),
+    });
+    // Altklausur als Klausur-Dokument taggen → liefert dem Klausur-Generator
+    // Stilkontext und schaltet zusätzlich den prüfungsnahen Modus frei.
+    if (altklausurDoc?.id != null) {
+      await api(`/api/subjects/${id}/documents/${altklausurDoc.id}`, {
+        method: 'PATCH', body: JSON.stringify({ doc_type: 'altklausur' }),
+      }).catch(() => {});
+    }
+
+    st.textContent = 'Lade Karten, Glossar, Aufgaben & Klausur…';
     await Promise.all([
       DB.setCards(id, DEMO_CARDS.map(c => ({ front: c.front, back: c.back, ef: 2.5, interval: 1, repetitions: 0, due: now }))),
       DB.setGlossar(id, DEMO_GLOSSAR),
@@ -1067,6 +1198,13 @@ async function loadDemoSubject() {
       api(`/api/subjects/${id}/structure`, {
         method: 'POST',
         body: JSON.stringify({ structure: DEMO_STRUCTURE, topics: DEMO_TOPICS }),
+      }).catch(() => {}),
+      // Fertige Übungsaufgaben vorab speichern (erscheinen unter "Gespeicherte Aufgaben").
+      ...DEMO_AUFGABEN.map(a => DB.saveAufgabe(id, a)),
+      // Fertige Probeklausur vorab speichern (erscheint unter "Gespeicherte Klausuren").
+      api(`/api/subjects/${id}/klausuren`, {
+        method: 'POST',
+        body: JSON.stringify({ id: DEMO_KLAUSUR.id, diff: DEMO_KLAUSUR.diff, content: DEMO_KLAUSUR.content }),
       }).catch(() => {}),
     ]);
 
