@@ -2875,6 +2875,14 @@ function setupCanvasEvents() {
 
   const wrap = document.getElementById('canvas-scroll-wrap');
 
+  // Solange der Stift zeichnet (Rechnen ODER Lernen), darf ein gleichzeitiger
+  // Finger-/Handflächenkontakt KEINE Textmarkierung in der Aufgabenstellung
+  // auslösen. selectstart global (Capture) abfangen reicht – die Palm-Rejection
+  // auf der Fläche selbst verhindert Markierungen außerhalb nicht.
+  document.addEventListener('selectstart', e => {
+    if (penActive || isDrawingCanvas || lernenPenActive) e.preventDefault();
+  }, true);
+
   canvas.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch') {
       // Palm-Rejection: während der Stift zeichnet, alle Touches ignorieren.
@@ -2890,6 +2898,7 @@ function setupCanvasEvents() {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     penActive = (e.pointerType === 'pen');
+    if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
     if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
     isDrawingCanvas = true;
     redoStack = [];
@@ -2987,6 +2996,16 @@ function setupCanvasEvents() {
 function canvasPos(e, canvas) {
   const r = canvas.getBoundingClientRect();
   return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+// Entfernt eine (durch gleichzeitigen Handflächen-/Finger-Kontakt) entstandene
+// Textmarkierung – außer der Fokus liegt gerade in einem Eingabefeld.
+function clearTextSelection() {
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')) return;
+  sel.removeAllRanges();
 }
 
 function clearCanvas() {
@@ -4604,6 +4623,7 @@ function onLernenDown(e) {
   e.preventDefault();
   if (lernenActivePtr !== null) return; // bereits ein Stift aktiv
   lernenPenActive = true;
+  clearTextSelection();                 // evtl. durch Handfläche entstandene Markierung wegnehmen
   lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
   lernenActivePtr = e.pointerId;
   canvas.setPointerCapture(e.pointerId); // keep events even if pointer leaves canvas
