@@ -1011,6 +1011,24 @@ const DEMO_GLOSSAR = [
   { term: 'Fotolyse',     definition: 'Spaltung von Wasser durch Lichtenergie in der Lichtreaktion; setzt Sauerstoff frei.' },
 ];
 
+const DEMO_STRUCTURE = {
+  kapitel: [
+    { titel: 'Grundlagen der Photosynthese',
+      lernziel: 'Du kannst erklären, was Photosynthese ist und warum sie für das Leben wichtig ist.',
+      themen: ['Definition Photosynthese', 'Wortgleichung', 'Bedeutung für Ökosysteme'] },
+    { titel: 'Ort & Aufbau',
+      lernziel: 'Du kannst den Chloroplasten und seine Bestandteile beschreiben.',
+      themen: ['Chloroplast', 'Chlorophyll', 'Thylakoide & Stroma'] },
+    { titel: 'Die zwei Teilreaktionen',
+      lernziel: 'Du kannst Licht- und Dunkelreaktion unterscheiden und zuordnen.',
+      themen: ['Lichtreaktion', 'Fotolyse des Wassers', 'Calvin-Zyklus'] },
+    { titel: 'Einflussfaktoren',
+      lernziel: 'Du kannst die limitierenden Faktoren der Photosyntheserate nennen.',
+      themen: ['Lichtintensität', 'CO₂-Konzentration', 'Temperatur'] },
+  ],
+};
+const DEMO_TOPICS = DEMO_STRUCTURE.kapitel.flatMap(k => k.themen);
+
 function showDemoSheet() {
   const st = document.getElementById('demo-status');
   st.classList.add('hidden'); st.textContent = '';
@@ -1044,6 +1062,12 @@ async function loadDemoSubject() {
       DB.setCards(id, DEMO_CARDS.map(c => ({ front: c.front, back: c.back, ef: 2.5, interval: 1, repetitions: 0, due: now }))),
       DB.setGlossar(id, DEMO_GLOSSAR),
       DB.addQuizResult(id, 4, 5).catch(() => {}),
+      // Themen + Lernpfad-Struktur vorab seeden → Aufgaben/Lernpfad zeigen sofort
+      // Themen, ohne dass in der Präsentation ein KI-Scan abgewartet werden muss.
+      api(`/api/subjects/${id}/structure`, {
+        method: 'POST',
+        body: JSON.stringify({ structure: DEMO_STRUCTURE, topics: DEMO_TOPICS }),
+      }).catch(() => {}),
     ]);
 
     st.className = 'sheet-status success';
