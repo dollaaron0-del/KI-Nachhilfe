@@ -1190,6 +1190,10 @@ async function loadDemoSubject() {
 
     st.textContent = 'Lade Karten, Glossar, Aufgaben & Klausur…';
     await Promise.all([
+      // Lokalen Dokumenttext setzen → sessionTxt wird in openSubject daraus
+      // gefüllt. Ohne das sieht der Prompt (docsForPrompt/sysBlocks) keine
+      // Unterlagen, und Quiz/Chat/Klausur fordern fälschlich zum Upload auf.
+      DB.setContent(id, `${DEMO_DOC}\n\n${DEMO_ALTKLAUSUR}`),
       DB.setCards(id, DEMO_CARDS.map(c => ({ front: c.front, back: c.back, ef: 2.5, interval: 1, repetitions: 0, due: now }))),
       DB.setGlossar(id, DEMO_GLOSSAR),
       DB.addQuizResult(id, 4, 5).catch(() => {}),
