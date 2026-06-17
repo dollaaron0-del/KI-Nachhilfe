@@ -528,6 +528,38 @@ function parseJsonResponse(raw) {
   if (cb) { const r = tryParse(cb[1]); if (r) return r; }
   const ob = raw.match(/\{[\s\S]*\}/);
   if (ob) { const r = tryParse(ob[0]); if (r) return r; }
+  // Last resort: max_tokens hat das JSON mitten im String gekappt (keine
+  // schließende "}") – längsten gültigen Präfix retten, offene Strings/Klammern
+  // schließen. Rettet z.B. eine Blitz-Frage, deren "explanation" abgeschnitten ist.
+  return salvageTruncatedJson(raw) || null;
+}
+
+// Versucht, ein abgeschnittenes JSON-Objekt zu reparieren: kürzt vom Ende her,
+// schließt einen offenen String und die offenen {} / [] und parst den längsten
+// Teil, der noch valide ist. Gibt null zurück, wenn nichts zu retten ist.
+function salvageTruncatedJson(raw) {
+  const start = raw.indexOf('{');
+  if (start < 0) return null;
+  const s = raw.slice(start);
+  for (let end = s.length; end > 1; end--) {
+    const frag = s.slice(0, end);
+    let inStr = false, esc = false;
+    const stack = [];
+    for (const c of frag) {
+      if (esc)        { esc = false; continue; }
+      if (c === '\\') { esc = true;  continue; }
+      if (c === '"')  { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '{' || c === '[') stack.push(c === '{' ? '}' : ']');
+      else if (c === '}' || c === ']') stack.pop();
+    }
+    let cand = frag;
+    if (inStr) cand += '"';
+    cand = cand.replace(/[,:]\s*$/, '');       // hängendes Komma/Doppelpunkt kappen
+    for (let i = stack.length - 1; i >= 0; i--) cand += stack[i];
+    try { return JSON.parse(cand); } catch {}
+    try { return JSON.parse(repairJson(cand)); } catch {}
+  }
   return null;
 }
 
@@ -2192,7 +2224,10 @@ Antworte NUR als JSON (kein Text davor oder danach):
   let data, lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
+      // 400 schnitt Frage+Optionen+Erklärung gelegentlich ab → JSON ohne
+      // schließende "}" → parseJsonResponse lieferte null → "Ungültige Antwort"
+      // bei jedem Versuch (deterministisch). 800 gibt genug Luft.
+      const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 800);
       const parsed = parseJsonResponse(raw);
       if (!parsed) throw new Error('Ungültige Antwort');
       if (!Array.isArray(parsed.options) || parsed.options.length < 2) throw new Error('Ungültige Antwortoptionen');
