@@ -644,7 +644,7 @@ async function buildDocOverview() {
 }
 
 function sysBlocks(extra = '') {
-  return [
+  const blocks = [
     {
       type: 'text',
       text: `Du bist ein erfahrener Nachhilfelehrer für das Fach "${sessionMeta?.name || ''}". Du verwendest gezielt moderne lernpsychologische Methoden.
@@ -685,10 +685,16 @@ MATHEMATIK: Für mathematische Formeln und Gleichungen verwende LaTeX-Notation.
 Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$
 Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
 
-Antworte immer auf Deutsch.${prefCalculator ? `\n\nTASCHENRECHNER: Der Student nutzt einen ${prefCalculator}. Gib bei Rechenaufgaben gezielte Tipps wie man die Berechnung auf diesem Modell effizient eingibt — Tasten, Menüpfade, Modi, nützliche eingebaute Funktionen. Erwähne konkrete Schritte (z.B. "Drücke MENU → 4 → 2" beim Casio).` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}${extra ? '\n\n' + extra : ''}`,
+Antworte immer auf Deutsch.${prefCalculator ? `\n\nTASCHENRECHNER: Der Student nutzt einen ${prefCalculator}. Gib bei Rechenaufgaben gezielte Tipps wie man die Berechnung auf diesem Modell effizient eingibt — Tasten, Menüpfade, Modi, nützliche eingebaute Funktionen. Erwähne konkrete Schritte (z.B. "Drücke MENU → 4 → 2" beim Casio).` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}`,
       cache_control: { type: 'ephemeral' },
     },
   ];
+  // Aufruf-spezifische Instruktionen (z.B. Quiz-Prompt mit der Liste bereits
+  // gestellter Fragen) wechseln pro Anfrage. Sie kommen in einen EIGENEN, nicht
+  // gecachten Block NACH dem Cache-Breakpoint – so bleibt der teure Unterlagen-
+  // Block byte-identisch und der Prompt-Cache greift über alle Fragen hinweg.
+  if (extra) blocks.push({ type: 'text', text: extra });
+  return blocks;
 }
 
 // ── Dark Mode ──────────────────────────────────────────────────────────────
