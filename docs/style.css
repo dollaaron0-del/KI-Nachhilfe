@@ -25,6 +25,18 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Palm-Rejection app-weit: Der Handballen darf beim Schreiben mit dem Stift
+   NIRGENDS Text markieren. Der globale selectstart-Guard greift zu spät, wenn
+   die Handfläche vor dem Stift aufsetzt – darum ist Text grundsätzlich nicht
+   markierbar, nur echte Eingabefelder bleiben editierbar/markierbar. */
+body {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea, [contenteditable="true"], [contenteditable=""] {
+  -webkit-user-select: text; user-select: text;
+}
+
 .screen { display: none; width: 100%; height: 100dvh; position: absolute; inset: 0; flex-direction: column; }
 .screen.active { display: flex; }
 .hidden { display: none !important; }
