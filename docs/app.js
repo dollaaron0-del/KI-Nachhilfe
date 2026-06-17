@@ -1847,6 +1847,8 @@ document.getElementById('quiz-start-btn')?.addEventListener('click', fetchQuesti
 document.getElementById('quiz-submit')?.addEventListener('click',    submitAnswer);
 document.getElementById('quiz-next')?.addEventListener('click',      fetchQuestion);
 document.getElementById('quiz-stop')?.addEventListener('click',      () => switchToAnalysis());
+document.getElementById('quiz-retry-btn')?.addEventListener('click', fetchQuestion);
+document.getElementById('quiz-back-btn')?.addEventListener('click',  () => showQuizState(document.getElementById('quiz-idle')));
 document.getElementById('quiz-answer')?.addEventListener('keydown',  e => { if (e.key === 'Enter' && e.ctrlKey) submitAnswer(); });
 // Konfidenz-Buttons: einblenden sobald der Nutzer schreibt, deaktivieren bei Löschen
 document.getElementById('quiz-answer')?.addEventListener('input', e => {
@@ -1891,6 +1893,9 @@ async function fetchQuestion() {
     '<div class="typing-dots"><span></span><span></span><span></span></div>';
   document.getElementById('quiz-answer').value = '';
   document.getElementById('quiz-submit').disabled = true;
+  // Frage-Eingabe zeigen, evtl. übrige Fehler-Buttons ausblenden
+  document.getElementById('quiz-a-area')?.classList.remove('hidden');
+  document.getElementById('quiz-q-error-btns')?.classList.add('hidden');
   showQuizState(document.getElementById('quiz-q'));
 
   const done   = sessionMeta.quizStats.questions.length;
@@ -1921,20 +1926,35 @@ Abwechslung: Mix aus Verständnis, Anwendung und Zusammenhängen.
 ${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
 Antworte NUR mit der Frage, ohne Kommentar.`;
 
-  try {
-    const q = await claudeLocal([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
-    sessionMeta.currentQuestion = q.trim();
-    await DB.setMeta(sessionId, sessionMeta);
-    document.getElementById('q-box').textContent = q.trim();
-    const qsc = sessionMeta.quizStats.questions;
-    const sc  = qsc.reduce((a, x) => a + x.score, 0);
-    document.getElementById('q-num').textContent   = `Frage ${done + 1}`;
-    document.getElementById('q-score').textContent = qsc.length ? `${sc}/${qsc.length * 3} Pkt.` : '';
-    document.getElementById('quiz-submit').disabled = false;
-    document.getElementById('quiz-answer').focus();
-  } catch (e) {
-    document.getElementById('q-box').textContent = '⚠️ ' + e.message;
+  // Modell-/Netzfehler sind oft kurzlebig – einmal automatisch neu versuchen,
+  // bevor wir den Nutzer mit einer Fehlermeldung behelligen.
+  let q, lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await claudeLocal([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
+      if (!r || !r.trim()) throw new Error('Leere Antwort');
+      q = r.trim(); break;
+    } catch (e) { lastErr = e; }
   }
+  if (!q) { showQuizError(lastErr?.message || 'Frage konnte nicht geladen werden'); return; }
+
+  sessionMeta.currentQuestion = q;
+  await DB.setMeta(sessionId, sessionMeta);
+  document.getElementById('q-box').textContent = q;
+  const qsc = sessionMeta.quizStats.questions;
+  const sc  = qsc.reduce((a, x) => a + x.score, 0);
+  document.getElementById('q-num').textContent   = `Frage ${done + 1}`;
+  document.getElementById('q-score').textContent = qsc.length ? `${sc}/${qsc.length * 3} Pkt.` : '';
+  document.getElementById('quiz-submit').disabled = false;
+  document.getElementById('quiz-answer').focus();
+}
+
+// Frage konnte nicht geladen werden: Eingabe verstecken, Wiederholen/Zurück anbieten,
+// damit der Nutzer nicht das ganze Fach verlassen muss.
+function showQuizError(msg) {
+  document.getElementById('q-box').textContent = '⚠️ ' + msg;
+  document.getElementById('quiz-a-area')?.classList.add('hidden');
+  document.getElementById('quiz-q-error-btns')?.classList.remove('hidden');
 }
 
 async function submitAnswer() {
@@ -2105,6 +2125,7 @@ async function fetchBlitzQuestion() {
   document.getElementById('blitz-q-box').innerHTML =
     '<div class="typing-dots"><span></span><span></span><span></span></div>';
   document.getElementById('mc-grid').innerHTML = '';
+  document.getElementById('blitz-error-btns')?.classList.add('hidden');
 
   const blitzPrompt = `Erstelle EINE Multiple-Choice-Frage für "${sessionMeta.name}".
 Teste echtes Verständnis, nicht reines Faktenwissen.
@@ -2112,36 +2133,48 @@ Antworte NUR als JSON (kein Text davor oder danach):
 {"question":"<Frage>","options":["A: <Text>","B: <Text>","C: <Text>","D: <Text>"],"correct":0,"explanation":"<Kurze Erklärung warum richtig>"}
 "correct" ist der 0-basierte Index der richtigen Option (0=A, 1=B, 2=C, 3=D).`;
 
-  try {
-    const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Ungültige Antwort');
-    const data = parseJsonLoose(m[0]);
-    if (!Array.isArray(data.options) || data.options.length < 2) throw new Error('Ungültige Antwortoptionen');
-    // Local models sometimes encode the index as a string ("2") or letter ("C")
-    // instead of a number — normalise so the strict i===correct compare works.
-    let correct = data.correct;
-    if (typeof correct === 'string') {
-      const t = correct.trim().toUpperCase();
-      correct = /^[A-D]$/.test(t) ? t.charCodeAt(0) - 65 : parseInt(t, 10);
-    }
-    if (!Number.isInteger(correct) || correct < 0 || correct >= data.options.length)
-      throw new Error('Ungültiger Lösungsindex');
-    data.correct = correct;
-    document.getElementById('blitz-q-box').textContent = data.question;
-    const grid = document.getElementById('mc-grid');
-    data.options.forEach((opt, i) => {
-      const btn = document.createElement('button');
-      btn.className = 'mc-btn';
-      const label = opt.replace(/^[A-D]:\s*/, '');
-      btn.innerHTML = `<span class="mc-letter">${['A','B','C','D'][i]}</span>${esc(label)}`;
-      btn.addEventListener('click', () =>
-        selectBlitzAnswer(i, data.correct, data.question, data.explanation, grid, data.options));
-      grid.appendChild(btn);
-    });
-  } catch (e) {
-    document.getElementById('blitz-q-box').textContent = '⚠️ ' + e.message;
+  // Lokale Modelle liefern gelegentlich kaputtes JSON – bis zu zweimal automatisch
+  // neu versuchen, bevor wir den Blitz mit einer Fehlermeldung abbrechen.
+  let data, lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 400);
+      const parsed = parseJsonResponse(raw);
+      if (!parsed) throw new Error('Ungültige Antwort');
+      if (!Array.isArray(parsed.options) || parsed.options.length < 2) throw new Error('Ungültige Antwortoptionen');
+      // Local models sometimes encode the index as a string ("2") or letter ("C")
+      // instead of a number — normalise so the strict i===correct compare works.
+      let correct = parsed.correct;
+      if (typeof correct === 'string') {
+        const t = correct.trim().toUpperCase();
+        correct = /^[A-D]$/.test(t) ? t.charCodeAt(0) - 65 : parseInt(t, 10);
+      }
+      if (!Number.isInteger(correct) || correct < 0 || correct >= parsed.options.length)
+        throw new Error('Ungültiger Lösungsindex');
+      parsed.correct = correct;
+      data = parsed; break;
+    } catch (e) { lastErr = e; }
   }
+  if (!data) { showBlitzError(lastErr?.message || 'Frage konnte nicht geladen werden'); return; }
+
+  document.getElementById('blitz-q-box').textContent = data.question;
+  const grid = document.getElementById('mc-grid');
+  data.options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'mc-btn';
+    const label = opt.replace(/^[A-D]:\s*/, '');
+    btn.innerHTML = `<span class="mc-letter">${['A','B','C','D'][i]}</span>${esc(label)}`;
+    btn.addEventListener('click', () =>
+      selectBlitzAnswer(i, data.correct, data.question, data.explanation, grid, data.options));
+    grid.appendChild(btn);
+  });
+}
+
+// Blitz-Frage fehlgeschlagen: Wiederholen/Zurück anbieten statt Sackgasse.
+function showBlitzError(msg) {
+  document.getElementById('blitz-q-box').textContent = '⚠️ ' + msg;
+  document.getElementById('mc-grid').innerHTML = '';
+  document.getElementById('blitz-error-btns')?.classList.remove('hidden');
 }
 
 function selectBlitzAnswer(chosen, correct, question, explanation, grid, options) {
@@ -2194,6 +2227,8 @@ function endBlitz() {
 document.getElementById('blitz-again-btn')?.addEventListener('click', startBlitz);
 document.getElementById('blitz-stop-btn')?.addEventListener('click', () => switchToAnalysis());
 document.getElementById('blitz-stop-btn2')?.addEventListener('click', () => switchToAnalysis());
+document.getElementById('blitz-retry-btn')?.addEventListener('click', fetchBlitzQuestion);
+document.getElementById('blitz-back-btn')?.addEventListener('click', () => showQuizState(document.getElementById('quiz-idle')));
 
 // ══ EXAM ══════════════════════════════════════════════════════════════════
 

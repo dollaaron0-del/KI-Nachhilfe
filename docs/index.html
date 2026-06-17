@@ -14,7 +14,7 @@
   <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=139" />
+  <link rel="stylesheet" href="style.css?v=140" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -227,7 +227,11 @@
         <div class="q-box" id="q-box">
           <div class="typing-dots"><span></span><span></span><span></span></div>
         </div>
-        <div class="a-area">
+        <div class="quiz-btns hidden" id="quiz-q-error-btns">
+          <button class="btn-primary"   id="quiz-retry-btn">🔄 Nochmal versuchen</button>
+          <button class="btn-secondary" id="quiz-back-btn">← Zurück</button>
+        </div>
+        <div class="a-area" id="quiz-a-area">
           <textarea id="quiz-answer" placeholder="Deine Antwort…" rows="4" maxlength="3000"></textarea>
           <div id="quiz-confidence" class="quiz-confidence hidden">
             <p class="confidence-label">Wie sicher bist du bei dieser Antwort?</p>
@@ -263,6 +267,10 @@
         </div>
         <div class="q-box" id="blitz-q-box"></div>
         <div class="mc-grid" id="mc-grid"></div>
+        <div class="quiz-btns hidden" id="blitz-error-btns">
+          <button class="btn-primary"   id="blitz-retry-btn">🔄 Nochmal versuchen</button>
+          <button class="btn-secondary" id="blitz-back-btn">← Zurück</button>
+        </div>
         <button class="btn-secondary btn-sm" id="blitz-stop-btn">Beenden</button>
       </div>
       <div id="quiz-blitz-done" class="cx-state hidden">
@@ -895,7 +903,7 @@
       <button class="btn-primary" id="settings-save-btn" onclick="settingsSave()">Speichern</button>
       <button class="btn-secondary" id="settings-close-btn" onclick="document.getElementById('settings-sheet').classList.add('hidden')">Abbrechen</button>
     </div>
-    <div style="text-align:center;font-size:11px;color:var(--text2);margin-top:14px;opacity:.7;">App-Version <span id="app-version">v139</span></div>
+    <div style="text-align:center;font-size:11px;color:var(--text2);margin-top:14px;opacity:.7;">App-Version <span id="app-version">v140</span></div>
   </div>
 </div>
 
@@ -959,7 +967,7 @@
 
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script defer src="app.js?v=139"></script>
+<script defer src="app.js?v=140"></script>
 
 </body>
 </html>
