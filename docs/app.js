@@ -1900,6 +1900,63 @@ function showQuizState(el) {
   el.classList.remove('hidden');
 }
 
+// Baut den (zustandsabhängigen) Prompt für die nächste Quiz-Frage.
+// `done` = Anzahl bereits beantworteter Fragen → bestimmt Nummer, Avoid-Liste
+// und Schwerpunkt. Als eigene Funktion, damit Prefetch und fetchQuestion exakt
+// denselben Prompt erzeugen.
+function buildQuestionPrompt(done) {
+  const avoid = sessionMeta.quizStats.questions.slice(-8).map(q => q.question).join('\n- ');
+  // Gezieltes Retrieval: gelernte Themen abfragen festigt sie (Testing-Effekt),
+  // schwache Themen brauchen die meiste Übung.
+  const learnedNames = [...new Set(learnedTopics.map(t => t.split('::')[0]))]
+    .filter(t => scannedTopics.includes(t));
+  const weak = getWeakTopics(sessionMeta.quizStats.questions).slice(0, 4);
+  let focusInstr = '';
+  if (weak.length && done % 2 === 0) {
+    focusInstr = `\nSCHWERPUNKT: Stelle die Frage zu einem dieser Themen, bei denen der Student noch Schwächen zeigt: ${weak.join(', ')}.`;
+  } else if (learnedNames.length) {
+    const pick = learnedNames[Math.floor(Math.random() * learnedNames.length)];
+    focusInstr = `\nSCHWERPUNKT: Stelle die Frage zum kürzlich gelernten Thema "${pick}" – aktives Erinnern festigt das Wissen.`;
+  }
+
+  return `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
+${focusInstr}
+Bevorzuge Fragen die echtes Verständnis testen:
+- "Erkläre warum…" / "Was passiert wenn…"
+- Transferfragen: Konzept auf neue Situation anwenden
+- Zusammenhänge: "Wie hängt X mit Y zusammen?"
+- Kein reines Faktenwissen oder Definitionen auswendig lernen
+
+Abwechslung: Mix aus Verständnis, Anwendung und Zusammenhängen.
+${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
+Antworte NUR mit der Frage, ohne Kommentar.`;
+}
+
+// Holt eine Frage vom Modell. Modell-/Netzfehler sind oft kurzlebig → einmal
+// automatisch neu versuchen. Wirft erst, wenn beide Versuche scheitern.
+async function generateQuestionText(prompt) {
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await claudeLocal([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
+      if (!r || !r.trim()) throw new Error('Leere Antwort');
+      return r.trim();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('Frage konnte nicht geladen werden');
+}
+
+// Prefetch: lädt die nächste Frage schon während der Nutzer das Feedback liest.
+// Best-effort – Fehler werden geschluckt, fetchQuestion lädt dann normal nach.
+function prefetchNextQuestion() {
+  if (!sessionMeta || !sessionId) return;
+  const done = sessionMeta.quizStats.questions.length;
+  if (nextQ && nextQ.forSession === sessionId && nextQ.forDone === done) return; // läuft schon
+  const promise = generateQuestionText(buildQuestionPrompt(done));
+  promise.catch(() => {}); // keine unhandled rejection bis fetchQuestion awaitet
+  nextQ = { promise, forDone: done, forSession: sessionId };
+}
+
 async function fetchQuestion() {
   if (!sessionMeta) return;
   // Reset confidence for each new question
@@ -1915,45 +1972,21 @@ async function fetchQuestion() {
   document.getElementById('quiz-q-error-btns')?.classList.add('hidden');
   showQuizState(document.getElementById('quiz-q'));
 
-  const done   = sessionMeta.quizStats.questions.length;
-  const avoid  = sessionMeta.quizStats.questions.slice(-8).map(q => q.question).join('\n- ');
+  const done = sessionMeta.quizStats.questions.length;
 
-  // Gezieltes Retrieval: gelernte Themen abfragen festigt sie (Testing-Effekt),
-  // schwache Themen brauchen die meiste Übung.
-  const learnedNames = [...new Set(learnedTopics.map(t => t.split('::')[0]))]
-    .filter(t => scannedTopics.includes(t));
-  const weak = getWeakTopics(sessionMeta.quizStats.questions).slice(0, 4);
-  let focusInstr = '';
-  if (weak.length && done % 2 === 0) {
-    focusInstr = `\nSCHWERPUNKT: Stelle die Frage zu einem dieser Themen, bei denen der Student noch Schwächen zeigt: ${weak.join(', ')}.`;
-  } else if (learnedNames.length) {
-    const pick = learnedNames[Math.floor(Math.random() * learnedNames.length)];
-    focusInstr = `\nSCHWERPUNKT: Stelle die Frage zum kürzlich gelernten Thema "${pick}" – aktives Erinnern festigt das Wissen.`;
+  // Vorab geladene Frage nutzen (oder den laufenden Prefetch abwarten statt einen
+  // zweiten Request zu starten). Nur wenn sie zu genau diesem Fach+Stand passt.
+  let promise;
+  if (nextQ && nextQ.forSession === sessionId && nextQ.forDone === done) {
+    promise = nextQ.promise;
+  } else {
+    promise = generateQuestionText(buildQuestionPrompt(done));
   }
+  nextQ = null;
 
-  const prompt = `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
-${focusInstr}
-Bevorzuge Fragen die echtes Verständnis testen:
-- "Erkläre warum…" / "Was passiert wenn…"
-- Transferfragen: Konzept auf neue Situation anwenden
-- Zusammenhänge: "Wie hängt X mit Y zusammen?"
-- Kein reines Faktenwissen oder Definitionen auswendig lernen
-
-Abwechslung: Mix aus Verständnis, Anwendung und Zusammenhängen.
-${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
-Antworte NUR mit der Frage, ohne Kommentar.`;
-
-  // Modell-/Netzfehler sind oft kurzlebig – einmal automatisch neu versuchen,
-  // bevor wir den Nutzer mit einer Fehlermeldung behelligen.
-  let q, lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const r = await claudeLocal([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
-      if (!r || !r.trim()) throw new Error('Leere Antwort');
-      q = r.trim(); break;
-    } catch (e) { lastErr = e; }
-  }
-  if (!q) { showQuizError(lastErr?.message || 'Frage konnte nicht geladen werden'); return; }
+  let q;
+  try { q = await promise; }
+  catch (e) { showQuizError(e?.message || 'Frage konnte nicht geladen werden'); return; }
 
   sessionMeta.currentQuestion = q;
   await DB.setMeta(sessionId, sessionMeta);
@@ -2000,11 +2033,12 @@ Antworte NUR als JSON:
   try {
     const raw = await claudeLocal(
       [{ role: 'user', content: `Frage: ${sessionMeta.currentQuestion}\n\nAntwort: ${answer}` }],
-      sysBlocks(evalPrompt), 700,
+      sysBlocks(evalPrompt), 1200,  // 700 schnitt Feedback+Musterantwort ab → JSON unvollständig
     );
-    const m  = raw.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('Ungültige Modellantwort');
-    const ev = parseJsonLoose(m[0]);
+    // Robust parsen wie beim Blitz (v140): handhabt ```json-Fences und kaputte
+    // Zeilenumbrüche in Strings – sonst scheitert die Bewertung unnötig oft.
+    const ev = parseJsonResponse(raw);
+    if (!ev) throw new Error('Ungültige Modellantwort');
     // Harden the model's score: clamp to a valid 0–3 integer so array lookups
     // (labels/classes), XP and the stored quiz result can't break on
     // out-of-range, string or null values.
@@ -2077,6 +2111,9 @@ Antworte NUR als JSON:
     }
 
     showQuizState(document.getElementById('quiz-fb'));
+    // Nächste Frage schon laden, während der Nutzer das Feedback liest – beim
+    // Klick auf "Weiter" erscheint sie dann praktisch sofort.
+    prefetchNextQuestion();
     refreshAnalysisState();
     sessionTick('quiz');
     if (!isOverconfident && ev.score >= 2) {
@@ -4487,6 +4524,7 @@ const REVIEW_AFTER_WEAK_MS   = 3 * 86400000;
 // ── v98: Lern-Psychologie Extras ──────────────────────────────────────────
 let quizConfidence  = 0;      // 1=unsicher, 2=eher sicher, 3=sehr sicher (0=nicht gesetzt)
 let lastFbTopicName = '';     // Thema der letzten Quiz-Frage (für "Vertiefen")
+let nextQ = null;             // Prefetch: { promise, forDone, forSession } – nächste Quiz-Frage vorab geladen
 let interleavedMode = false;  // Lernpfad-Reihenfolge über Kapitel mischen
 
 function topicReviewDue(key) {
