@@ -656,6 +656,19 @@ app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Return the full text of ALL documents. Server-side fallback to rebuild the
+// local prompt context (sessionTxt) on a fresh browser/device — or the shared
+// demo account — where localforage is empty even though the server has docs.
+app.get('/api/subjects/:id/documents/content', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT filename, content FROM documents WHERE subject_id=$1 ORDER BY uploaded_at ASC',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Accept pre-extracted text (from client-side PDF.js)
 app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) => {
   const { filename, content, skipCards } = req.body;

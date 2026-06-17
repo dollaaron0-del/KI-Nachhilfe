@@ -1282,6 +1282,17 @@ async function openSubject(subj) {
     sessionMeta.files = serverDocs.map(d => ({ name: d.filename, uploadedAt: d.uploaded_at }));
   }
   sessionTxt = await DB.content(subj.id);
+  // Fallback: Der Prompt-Kontext (sessionTxt) liegt nur lokal (localforage).
+  // Auf einem frischen Browser/Gerät – oder im geteilten Demo-Account – ist er
+  // leer, obwohl der Server Dokumente hat (serverDocs). Dann Volltext vom
+  // Server nachladen und lokal cachen, damit Quiz/Chat/Klausur Kontext sehen.
+  if (!sessionTxt && serverDocs.length) {
+    const rows = await api(`/api/subjects/${subj.id}/documents/content`).catch(() => null);
+    if (Array.isArray(rows) && rows.length) {
+      sessionTxt = rows.map(r => r.content).filter(Boolean).join('\n\n');
+      if (sessionTxt) DB.setContent(subj.id, sessionTxt).catch(() => {});
+    }
+  }
   examDocContext = await loadExamDocContext(subj.id);
   customPrompt = subj.custom_prompt || '';
   const serverTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => null);
