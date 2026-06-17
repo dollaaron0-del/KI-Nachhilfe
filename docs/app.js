@@ -293,6 +293,7 @@ let selAufgabenDiff = 'mittel';
 let examAnsVis   = false;
 let blitzIdx       = 0;
 let blitzResults   = [];
+let blitzNext      = null;      // Prefetch: { promise, forIdx } – nächste Blitz-Frage vorab geladen
 let scannedTopics  = [];
 let moduleStructure = null; // { kapitel: [{titel, lernziel, themen:[...]}] }
 let selTopic       = null;
@@ -306,6 +307,8 @@ let learnedTopics        = [];
 let currentExplainerTopic = null;
 let rechnenDiff     = 'mittel';
 let rechnenLastFeedback = '';   // letztes Prüf-Feedback derselben Aufgabe (konsistente Re-Prüfung)
+let rechnenNextTask = null;     // Prefetch: { promise, diff, forSession } – nächste Aufgabe vorab geladen
+let rechnenLoesung  = null;     // Prefetch: { aufgabe, promise, text } – Musterlösung vorab generiert
 let mathCtx         = null;
 let isDrawingCanvas = false;
 let isErasing       = false;
@@ -1350,6 +1353,7 @@ async function openSubject(subj) {
   topicMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
+  rechnenNextTask = null; rechnenLoesung = null; blitzNext = null; // Prefetches des vorigen Fachs verwerfen
 
   document.getElementById('header-label').textContent = `${subj.emoji || subj.icon || '📚'}  ${subj.name}`;
   updateXpChip();
@@ -1936,8 +1940,12 @@ function showQuizState(el) {
 // `done` = Anzahl bereits beantworteter Fragen → bestimmt Nummer, Avoid-Liste
 // und Schwerpunkt. Als eigene Funktion, damit Prefetch und fetchQuestion exakt
 // denselben Prompt erzeugen.
-function buildQuestionPrompt(done) {
-  const avoid = sessionMeta.quizStats.questions.slice(-8).map(q => q.question).join('\n- ');
+function buildQuestionPrompt(done, extraAvoid) {
+  const avoidList = sessionMeta.quizStats.questions.slice(-8).map(q => q.question);
+  // Beim frühen Prefetch ist die aktuelle Frage noch nicht in der Historie –
+  // sie wird zusätzlich übergeben, damit die nächste Frage sie nicht wiederholt.
+  if (extraAvoid) avoidList.push(extraAvoid);
+  const avoid = avoidList.join('\n- ');
   // Gezieltes Retrieval: gelernte Themen abfragen festigt sie (Testing-Effekt),
   // schwache Themen brauchen die meiste Übung.
   const learnedNames = [...new Set(learnedTopics.map(t => t.split('::')[0]))]
@@ -1989,6 +1997,18 @@ function prefetchNextQuestion() {
   nextQ = { promise, forDone: done, forSession: sessionId };
 }
 
+// Früher Prefetch: lädt die nächste Frage schon, WÄHREND der Nutzer die aktuelle
+// beantwortet (nicht erst beim Feedback). forDone = der Stand NACH dem Beantworten
+// der aktuellen Frage – passt damit zum done, das fetchQuestion danach berechnet.
+function prefetchUpcomingQuestion(currentQ) {
+  if (!sessionMeta || !sessionId) return;
+  const upcomingDone = sessionMeta.quizStats.questions.length + 1;
+  if (nextQ && nextQ.forSession === sessionId && nextQ.forDone === upcomingDone) return; // läuft schon
+  const promise = generateQuestionText(buildQuestionPrompt(upcomingDone, currentQ));
+  promise.catch(() => {});
+  nextQ = { promise, forDone: upcomingDone, forSession: sessionId };
+}
+
 async function fetchQuestion() {
   if (!sessionMeta) return;
   // Reset confidence for each new question
@@ -2029,6 +2049,11 @@ async function fetchQuestion() {
   document.getElementById('q-score').textContent = qsc.length ? `${sc}/${qsc.length * 3} Pkt.` : '';
   document.getElementById('quiz-submit').disabled = false;
   document.getElementById('quiz-answer').focus();
+
+  // Nächste Frage schon laden, während der Nutzer DIESE beantwortet – so ist sie
+  // beim "Weiter" praktisch immer fertig (der Feedback-Prefetch greift dann nur
+  // noch als Fallback, falls dieser hier scheitern sollte).
+  prefetchUpcomingQuestion(q);
 }
 
 // Frage konnte nicht geladen werden: Eingabe verstecken, Wiederholen/Zurück anbieten,
@@ -2200,27 +2225,19 @@ Antworte NUR als JSON: {"subtopics":["<Titel 1>","<Titel 2>","<Titel 3>"]}`),
 function startBlitz() {
   blitzIdx = 0;
   blitzResults = [];
+  blitzNext = null;
   fetchBlitzQuestion();
 }
 
-async function fetchBlitzQuestion() {
-  showQuizState(document.getElementById('quiz-blitz-q'));
-  document.getElementById('blitz-q-num').textContent = `Frage ${blitzIdx + 1}/5`;
-  document.getElementById('blitz-q-score').textContent = blitzResults.length
-    ? `${blitzResults.filter(r => r.correct).length}/${blitzResults.length} richtig` : '';
-  document.getElementById('blitz-q-box').innerHTML =
-    '<div class="typing-dots"><span></span><span></span><span></span></div>';
-  document.getElementById('mc-grid').innerHTML = '';
-  document.getElementById('blitz-error-btns')?.classList.add('hidden');
-
+// Holt EINE Blitz-Frage vom Modell. Lokale Modelle liefern gelegentlich kaputtes
+// JSON – bis zu zweimal automatisch neu versuchen, bevor wir aufgeben (wirft dann).
+async function genBlitzQuestion() {
   const blitzPrompt = `Erstelle EINE Multiple-Choice-Frage für "${sessionMeta.name}".
 Teste echtes Verständnis, nicht reines Faktenwissen.
 Antworte NUR als JSON (kein Text davor oder danach):
 {"question":"<Frage>","options":["A: <Text>","B: <Text>","C: <Text>","D: <Text>"],"correct":0,"explanation":"<Kurze Erklärung warum richtig>"}
 "correct" ist der 0-basierte Index der richtigen Option (0=A, 1=B, 2=C, 3=D).`;
 
-  // Lokale Modelle liefern gelegentlich kaputtes JSON – bis zu zweimal automatisch
-  // neu versuchen, bevor wir den Blitz mit einer Fehlermeldung abbrechen.
   let data, lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -2244,7 +2261,43 @@ Antworte NUR als JSON (kein Text davor oder danach):
       data = parsed; break;
     } catch (e) { lastErr = e; }
   }
-  if (!data) { showBlitzError(lastErr?.message || 'Frage konnte nicht geladen werden'); return; }
+  if (!data) throw (lastErr || new Error('Frage konnte nicht geladen werden'));
+  return data;
+}
+
+// Prefetch: lädt die nächste Blitz-Frage schon, während der Nutzer die aktuelle
+// beantwortet. Best-effort – Fehler werden geschluckt, fetchBlitzQuestion lädt
+// dann normal nach.
+function prefetchBlitzQuestion(forIdx) {
+  if (!sessionMeta) return;
+  if (blitzNext && blitzNext.forIdx === forIdx) return; // läuft schon
+  const promise = genBlitzQuestion();
+  promise.catch(() => {});
+  blitzNext = { promise, forIdx };
+}
+
+async function fetchBlitzQuestion() {
+  showQuizState(document.getElementById('quiz-blitz-q'));
+  document.getElementById('blitz-q-num').textContent = `Frage ${blitzIdx + 1}/5`;
+  document.getElementById('blitz-q-score').textContent = blitzResults.length
+    ? `${blitzResults.filter(r => r.correct).length}/${blitzResults.length} richtig` : '';
+  document.getElementById('blitz-q-box').innerHTML =
+    '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  document.getElementById('mc-grid').innerHTML = '';
+  document.getElementById('blitz-error-btns')?.classList.add('hidden');
+
+  // Vorab geladene Frage nutzen, falls sie zu genau diesem Stand passt – sonst
+  // (oder bei Prefetch-Fehler) frisch laden.
+  let data;
+  try {
+    if (blitzNext && blitzNext.forIdx === blitzIdx) {
+      const p = blitzNext.promise; blitzNext = null;
+      data = await p;
+    } else {
+      blitzNext = null;
+      data = await genBlitzQuestion();
+    }
+  } catch (e) { showBlitzError(e?.message || 'Frage konnte nicht geladen werden'); return; }
 
   document.getElementById('blitz-q-box').textContent = data.question;
   const grid = document.getElementById('mc-grid');
@@ -2257,6 +2310,9 @@ Antworte NUR als JSON (kein Text davor oder danach):
       selectBlitzAnswer(i, data.correct, data.question, data.explanation, grid, data.options));
     grid.appendChild(btn);
   });
+
+  // Nächste Frage schon vorab laden, während der Nutzer antwortet (außer der letzten).
+  if (blitzIdx + 1 < 5) prefetchBlitzQuestion(blitzIdx + 1);
 }
 
 // Blitz-Frage fehlgeschlagen: Wiederholen/Zurück anbieten statt Sackgasse.
@@ -3442,6 +3498,63 @@ Beantworte kurz und präzise. Gib einen hilfreichen Hinweis – keine vollständ
   msgs.scrollTop = msgs.scrollHeight;
 }
 
+// Prompt für eine einzelne Rechen-Aufgabe. `avoid` (optional) hält den Prefetch
+// davon ab, dieselbe Aufgabe wie die gerade bearbeitete erneut zu erzeugen.
+function buildRechnenAufgabePrompt(avoid) {
+  const avoidNote = avoid
+    ? `\n\nDie neue Aufgabe MUSS sich inhaltlich klar von dieser unterscheiden (andere Zahlen/Szenario):\n"""\n${avoid}\n"""`
+    : '';
+  return `Erstelle EINE einzelne Aufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
+
+Regeln:
+- Genau eine Aufgabe, klar und präzise formuliert
+- Leicht = direkte Berechnung (1–2 Schritte) | Mittel = mehrere Schritte | Schwer = komplexe Aufgabe
+- Verwende LaTeX für alle Formeln und Gleichungen ($$...$$)
+- Schließe mit einer klaren Handlungsaufforderung: "Berechne:", "Bestimme:", "Löse:" etc.
+- Keine Lösung – NUR die Aufgabenstellung${avoidNote}
+
+Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
+}
+
+function genRechnenAufgabe(avoid) {
+  return claudeLocal([{ role: 'user', content: 'Aufgabe erstellen.' }], sysBlocks(buildRechnenAufgabePrompt(avoid)), 500);
+}
+
+// System-Prompt für die Standalone-Musterlösung (hängt nur an der Aufgabe, nicht
+// an der Schülerlösung) – wird vom Prefetch und vom Inline-Fallback geteilt.
+function rechnenLoesungSys() {
+  return `Löse die folgende Aufgabe vollständig und korrekt – AUSSCHLIESSLICH auf Basis des Lernstoffs von "${sessionMeta?.name || ''}".
+Gib NUR den vollständigen Lösungsweg als Markdown mit LaTeX-Notation ($$...$$) zurück – keine Einleitung, keine Anrede, keine Bewertung.`;
+}
+
+// Musterlösung der aktuellen Aufgabe schon erzeugen, während der Nutzer rechnet.
+// Beim "Prüfen" steht sie dann sofort bereit (Vision-Call muss sie nicht liefern).
+function prefetchRechnenLoesung(aufgabe) {
+  if (!sessionMeta || !aufgabe) return;
+  if (rechnenLoesung && rechnenLoesung.aufgabe === aufgabe) return; // läuft schon / fertig
+  const sys = rechnenLoesungSys();
+  const entry = { aufgabe, promise: null, text: '' };
+  entry.promise = (async () => {
+    try {
+      const r = await claudeLocal([{ role: 'user', content: `Aufgabe: ${aufgabe}` }], sysBlocks(sys), 1200);
+      const txt = (r || '').trim();
+      if (rechnenLoesung === entry) entry.text = txt; // nur cachen wenn noch aktuell
+      return txt;
+    } catch { return ''; }
+  })();
+  entry.promise.catch(() => {});
+  rechnenLoesung = entry;
+}
+
+// Nächste Aufgabe vorab laden, während der Nutzer die aktuelle bearbeitet.
+function prefetchRechnenAufgabe(avoid) {
+  if (!sessionMeta || !sessionId) return;
+  if (rechnenNextTask && rechnenNextTask.forSession === sessionId && rechnenNextTask.diff === rechnenDiff) return;
+  const promise = genRechnenAufgabe(avoid);
+  promise.catch(() => {});
+  rechnenNextTask = { promise, diff: rechnenDiff, forSession: sessionId };
+}
+
 async function generateMathAufgabe() {
   if (!sessionMeta) { toast('Bitte zuerst ein Fach öffnen.', 'warn'); return; }
   const spinner = document.getElementById('rechnen-gen-spinner');
@@ -3449,22 +3562,16 @@ async function generateMathAufgabe() {
   spinner.classList.remove('hidden');
   btn.disabled = true;
 
-  const prompt = `Erstelle EINE einzelne Aufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
-
-Regeln:
-- Genau eine Aufgabe, klar und präzise formuliert
-- Leicht = direkte Berechnung (1–2 Schritte) | Mittel = mehrere Schritte | Schwer = komplexe Aufgabe
-- Verwende LaTeX für alle Formeln und Gleichungen ($$...$$)
-- Schließe mit einer klaren Handlungsaufforderung: "Berechne:", "Bestimme:", "Löse:" etc.
-- Keine Lösung – NUR die Aufgabenstellung
-
-Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
-
   try {
-    const aufgabe = await claudeLocal(
-      [{ role: 'user', content: 'Aufgabe erstellen.' }],
-      sysBlocks(prompt), 500,
-    );
+    // Vorab geladene Aufgabe nutzen, falls sie zu Fach+Schwierigkeit passt – sonst frisch laden.
+    let aufgabe;
+    if (rechnenNextTask && rechnenNextTask.forSession === sessionId && rechnenNextTask.diff === rechnenDiff) {
+      const p = rechnenNextTask.promise; rechnenNextTask = null;
+      aufgabe = await p;
+    } else {
+      rechnenNextTask = null;
+      aufgabe = await genRechnenAufgabe();
+    }
     const taskInput = document.getElementById('rechnen-task-input');
     taskInput.value = aufgabe.trim();
     currentAufgabe  = aufgabe.trim();
@@ -3472,6 +3579,9 @@ Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
     savedCanvasData = null;
     undoStack       = [];
     clearCanvas();
+    rechnenLoesung = null;
+    prefetchRechnenLoesung(currentAufgabe);   // Musterlösung im Hintergrund vorbereiten
+    prefetchRechnenAufgabe(currentAufgabe);   // nächste Aufgabe im Hintergrund vorbereiten
   } catch (e) {
     toast('Fehler: ' + e.message, 'error');
   } finally {
@@ -3547,16 +3657,27 @@ Was erkennst du im Zeichenbereich und im Schreibbereich? Wie ist der Schüler vo
 ## Fehleranalyse (nur wenn falsch)
 Wo genau liegt der Fehler? Erkläre präzise warum er falsch ist.
 
-## Musterlösung
-Vollständiger korrekter Lösungsweg mit LaTeX-Notation ($$...$$).
-
-Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was du erkennst.`;
+Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was du erkennst.
+(Die Musterlösung wird separat angezeigt – schreibe sie NICHT selbst.)`;
 
   try {
-    const feedback = await claudeLocalVision(base64, checkPrompt, sysBlocks(), 1800);
+    // Vision-Call bewertet nur die Schülerlösung – die Musterlösung kommt aus dem
+    // Prefetch (sofort) bzw. wird, falls keiner vorliegt, jetzt einmalig nachgeladen.
+    const feedbackP = claudeLocalVision(base64, checkPrompt, sysBlocks(), 1400);
+    let loesungP;
+    if (rechnenLoesung && rechnenLoesung.aufgabe === taskText) {
+      loesungP = rechnenLoesung.promise;
+    } else {
+      loesungP = claudeLocal([{ role: 'user', content: `Aufgabe: ${taskText}` }], sysBlocks(rechnenLoesungSys()), 1200)
+        .then(r => (r || '').trim()).catch(() => '');
+    }
+    const feedback = await feedbackP;
+    let loesung = '';
+    try { loesung = await loesungP || ''; } catch { loesung = ''; }
+    const full = loesung ? `${feedback}\n\n## Musterlösung\n${loesung}` : feedback;
     checkDone();
-    rechnenLastFeedback = feedback;
-    document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(feedback));
+    rechnenLastFeedback = full;
+    document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(full));
     document.getElementById('rechnen-sheet-loading').classList.add('hidden');
     document.getElementById('rechnen-sheet-result').classList.remove('hidden');
   } catch (e) {
@@ -4548,6 +4669,51 @@ let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
 let lernenLastEval    = null;         // letzte KI-Auswertung derselben Aufgabe (konsistente Re-Prüfung)
 
+// Bewertungsmaßstab/Strenge an das Niveau gekoppelt (Modul-Ebene, damit sowohl die
+// Prüfung als auch der Musterlösungs-Prefetch dasselbe Niveau verwenden).
+const LERN_GRADE_STD = {
+  einsteiger: `NIVEAU EINSTEIGER: Bewerte das konzeptuelle Verständnis. Eigene Worte und Alltagssprache sind völlig in Ordnung – Fachbegriffe sind NICHT erforderlich, solange die Kernidee inhaltlich stimmt. Die Musterlösung ("loesung") ebenfalls in einfacher, zugänglicher Sprache schreiben.`,
+  leicht: `NIVEAU GRUNDLAGEN: Eigene Worte sind in Ordnung. Grobe Begriffsverwechslungen zählen als Fehler, aber exakte Fachterminologie ist nicht nötig. Musterlösung in einfacher Sprache mit den wichtigsten Grundbegriffen.`,
+  mittel: `NIVEAU LERNENDER: Die zentralen Fachbegriffe des Themas sollten korrekt verwendet werden. Kleinere sprachliche Ungenauigkeiten sind ok, wenn das Verständnis klar erkennbar ist. Musterlösung mit korrekten Fachbegriffen.`,
+  schwer: `NIVEAU FORTGESCHRITTEN: Präzise Fachsprache wird erwartet. Fehlende oder falsch verwendete zentrale Fachbegriffe senken die Bewertung. Musterlösung in vollständiger Fachsprache.`,
+  pruefungsnah: `NIVEAU PRÜFUNGSNAH: Klausurmaßstab. Exakte Fachterminologie, vollständige Begründungen und saubere Notation wie in einer Prüfung erforderlich – bewerte wie ein strenger Korrektor. Musterlösung als vollständige Klausur-Musterlösung.`,
+};
+const LERN_STRICTNESS = {
+  einsteiger:   `Bewerte WOHLWOLLEND und ermutigend. Es geht um das grundsätzliche Verständnis, nicht um Perfektion. Im Zweifel zugunsten des Studenten entscheiden.`,
+  leicht:       `Bewerte fair und eher wohlwollend. Kleinere Ungenauigkeiten nicht überbewerten.`,
+  mittel:       `Bewerte fair und ausgewogen.`,
+  schwer:       `Bewerte streng. Vollständigkeit und Genauigkeit zählen.`,
+  pruefungsnah: `Bewerte SEHR STRENG nach Klausurmaßstab.`,
+};
+
+// Musterlösung-Prefetch: Die Lösung einer Aufgabe hängt NICHT von der Antwort des
+// Studenten ab – sie kann also schon generiert werden, während er die Aufgabe noch
+// bearbeitet. Beim "Prüfen" steht sie dann sofort bereit und die Bewertung wird
+// kürzer (sie muss die Lösung nicht mehr selbst ausformulieren).
+let lernenLoesung = null; // { aufgabe, promise, text } – text gesetzt sobald fertig
+
+function prefetchLernenLoesung() {
+  if (!lernenTopicData || !lernenTopicData.aufgabe) return;
+  const aufgabe = lernenTopicData.aufgabe;
+  if (lernenLoesung && lernenLoesung.aufgabe === aufgabe) return; // läuft schon / fertig
+  const gradeNote = LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger;
+  const sys = `Löse die folgende Übungsaufgabe vollständig und korrekt – AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.
+${gradeNote}
+Gib NUR die Musterlösung zurück (Markdown-Fließtext, KEIN JSON, keine Einleitung, keine Anrede). Bei Teilaufgaben (a/b/c oder 1/2/3) bekommt JEDE Teilaufgabe einen eigenen Absatz, beginnend mit der Bezeichnung fett: **a)** ...
+Bei Rechenaufgaben: rechne jeden Schritt sauber und nachvollziehbar vor.`;
+  const entry = { aufgabe, promise: null, text: '' };
+  entry.promise = (async () => {
+    try {
+      const r = await claudeLocal([{ role: 'user', content: `Aufgabe: ${aufgabe}` }], sysBlocks(sys), 1500);
+      const txt = (r || '').trim();
+      if (lernenLoesung === entry) entry.text = txt; // nur cachen wenn noch aktuell
+      return txt;
+    } catch { return ''; }
+  })();
+  entry.promise.catch(() => {});
+  lernenLoesung = entry;
+}
+
 // ── Spaced Review: Vergessenskurve für Lernpfad-Themen ─────────────────────
 // topicMeta["Thema::diff"] = { ts: <zuletzt gelernt>, attempts: <Versuche bis korrekt> }
 // Sicher gekonnt (1 Versuch) → nach 7 Tagen fällig; wacklig (≥2 Versuche) → nach 3 Tagen.
@@ -4576,6 +4742,7 @@ function saveTopicMeta() {
 function openTopicView(topic) {
   currentExplainerTopic = topic;
   lernenTopicData = null;
+  lernenLoesung   = null; // Musterlösung-Prefetch des vorherigen Themas verwerfen
   lernenQaMsgs    = [];
   lernenAttempts  = 0;
   lernenLastEval  = null;
@@ -4766,6 +4933,7 @@ async function loadTopicContent(topic, forceFresh = false) {
   if (cached) {
     lernenTopicData = cached;
     renderTopicContent(topic, cached);
+    prefetchLernenLoesung(); // Musterlösung im Hintergrund vorbereiten
     return;
   }
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
@@ -4795,6 +4963,7 @@ async function loadTopicContent(topic, forceFresh = false) {
     localforage.setItem(lernenCacheKey(topic), data).catch(() => {});
     stopProg();
     renderTopicContent(topic, data);
+    prefetchLernenLoesung(); // Musterlösung im Hintergrund vorbereiten
   } catch (e) {
     // Stale guard: don't show error for a topic the user already navigated away from
     if (currentExplainerTopic !== topic) { stopProg(); return; }
@@ -4862,6 +5031,8 @@ async function regenLernenTask() {
       if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
       lernenAttempts = 0;
       lernenLastEval = null;
+      lernenLoesung = null;        // alte Musterlösung verwerfen
+      prefetchLernenLoesung();     // für die neue Aufgabe vorbereiten
       toast('Neue Aufgabe generiert', 'success', 2000);
     } else {
       toast('Keine neue Aufgabe erhalten', 'warn');
@@ -5018,31 +5189,30 @@ async function checkLernenSolution() {
   }
   try {
     let ev;
-    // Bewertungsmaßstab an das Niveau koppeln, auf dem die Aufgabe generiert wurde:
-    // Rechenfehler bleiben auf jedem Level Fehler, aber die Sprach-/Fachbegriff-
-    // Erwartung steigt erst mit dem Schwierigkeitsgrad.
-    const GRADE_STD = {
-      einsteiger: `NIVEAU EINSTEIGER: Bewerte das konzeptuelle Verständnis. Eigene Worte und Alltagssprache sind völlig in Ordnung – Fachbegriffe sind NICHT erforderlich, solange die Kernidee inhaltlich stimmt. Die Musterlösung ("loesung") ebenfalls in einfacher, zugänglicher Sprache schreiben.`,
-      leicht: `NIVEAU GRUNDLAGEN: Eigene Worte sind in Ordnung. Grobe Begriffsverwechslungen zählen als Fehler, aber exakte Fachterminologie ist nicht nötig. Musterlösung in einfacher Sprache mit den wichtigsten Grundbegriffen.`,
-      mittel: `NIVEAU LERNENDER: Die zentralen Fachbegriffe des Themas sollten korrekt verwendet werden. Kleinere sprachliche Ungenauigkeiten sind ok, wenn das Verständnis klar erkennbar ist. Musterlösung mit korrekten Fachbegriffen.`,
-      schwer: `NIVEAU FORTGESCHRITTEN: Präzise Fachsprache wird erwartet. Fehlende oder falsch verwendete zentrale Fachbegriffe senken die Bewertung. Musterlösung in vollständiger Fachsprache.`,
-      pruefungsnah: `NIVEAU PRÜFUNGSNAH: Klausurmaßstab. Exakte Fachterminologie, vollständige Begründungen und saubere Notation wie in einer Prüfung erforderlich – bewerte wie ein strenger Korrektor. Musterlösung als vollständige Klausur-Musterlösung.`,
-    };
-    // Strenge der Bewertung an das Niveau koppeln: Einsteiger wohlwollend,
-    // Prüfungsnah/Experte streng. (Rechnerische Fehler bleiben überall Fehler.)
-    const STRICTNESS = {
-      einsteiger:   `Bewerte WOHLWOLLEND und ermutigend. Es geht um das grundsätzliche Verständnis, nicht um Perfektion. Im Zweifel zugunsten des Studenten entscheiden.`,
-      leicht:       `Bewerte fair und eher wohlwollend. Kleinere Ungenauigkeiten nicht überbewerten.`,
-      mittel:       `Bewerte fair und ausgewogen.`,
-      schwer:       `Bewerte streng. Vollständigkeit und Genauigkeit zählen.`,
-      pruefungsnah: `Bewerte SEHR STRENG nach Klausurmaßstab.`,
-    };
-    const strictNote = STRICTNESS[lernenCurrentDiff] || STRICTNESS.einsteiger;
+    // Bewertungsmaßstab/Strenge sind an das Niveau gekoppelt (Konstanten auf Modul-Ebene).
+    const strictNote = LERN_STRICTNESS[lernenCurrentDiff] || LERN_STRICTNESS.einsteiger;
+
+    // Vorab generierte Musterlösung nutzen, falls schon fertig: spart der Bewertung
+    // das erneute Ausformulieren (kürzere Antwort = schneller). Nur verwenden wenn
+    // sie zur aktuellen Aufgabe gehört und bereits vorliegt – sonst normal bewerten.
+    let preLoesung = '';
+    if (lernenLoesung && lernenLoesung.aufgabe === lernenTopicData.aufgabe) {
+      try { preLoesung = await lernenLoesung.promise || ''; } catch { preLoesung = ''; }
+    }
 
     // Re-Prüfung: vorherige Auswertung mitgeben, damit die KI konsistent bleibt
     // und nicht bei jeder Runde neue/widersprüchliche Fehler "entdeckt".
     const reCheckNote = lernenLastEval
       ? `\n\nWICHTIG – ERNEUTE PRÜFUNG DERSELBEN AUFGABE. Deine vorherige Auswertung war:\nscore: ${lernenLastEval.score}\nfeedback: ${lernenLastEval.feedback || ''}\neinschaetzung: ${lernenLastEval.einschaetzung || ''}\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – bringe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, außer der Student hat sie verändert und sie sind jetzt falsch. Erkenne ausdrücklich an, welche zuvor genannten Fehler nun korrigiert sind. Der score darf bei einer korrigierten Antwort NICHT sinken.`
+      : '';
+
+    // Wenn die Musterlösung bereits vorliegt: dem Modell als verbindlichen Maßstab
+    // mitgeben und das loesung-Feld leer lassen – wir setzen sie unten selbst ein.
+    const loesungField = preLoesung
+      ? `"loesung": "" (LEER LASSEN – die Musterlösung ist bereits bekannt und wird separat angezeigt)`
+      : `"loesung": "Vollständige Musterlösung. Bei Teilaufgaben (a/b/c oder 1/2/3) bekommt JEDE Teilaufgabe einen eigenen Absatz, getrennt durch \\n\\n. Beginne jeden Absatz mit der Teilaufgaben-Bezeichnung fett: **a)** ..."`;
+    const knownLoesungNote = preLoesung
+      ? `\n\nDIE KORREKTE MUSTERLÖSUNG IST BEREITS BEKANNT (nutze sie als verbindlichen Maßstab für die Bewertung; schreibe sie NICHT erneut, lass das Feld "loesung" leer):\n"""\n${preLoesung}\n"""`
       : '';
 
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
@@ -5051,7 +5221,7 @@ ${strictNote}
   "score": 0,
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
-  "loesung": "Vollständige Musterlösung. Bei Teilaufgaben (a/b/c oder 1/2/3) bekommt JEDE Teilaufgabe einen eigenen Absatz, getrennt durch \\n\\n. Beginne jeden Absatz mit der Teilaufgaben-Bezeichnung fett: **a)** ...",
+  ${loesungField},
   "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."
 }
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
@@ -5059,7 +5229,7 @@ KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder En
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
 Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.
 
-${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}${reCheckNote}`;
+${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
 
     // Beide Eingabebereiche gemeinsam prüfen: Der Umschalter ✏️/⌨️ steuert nur,
     // was gerade sichtbar ist – die Antwort kann aus Zeichnung UND/ODER Text bestehen.
@@ -5104,6 +5274,10 @@ ${GRADE_STD[lernenCurrentDiff] || GRADE_STD.einsteiger}${reCheckNote}`;
         throw new Error('Keine Auswertung');
       }
     }
+
+    // Bereits vorab generierte Musterlösung einsetzen (das Modell hat das Feld leer
+    // gelassen, damit die Bewertung schneller war).
+    if (preLoesung) ev.loesung = preLoesung;
 
     lernenAttempts++;
     lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung };
