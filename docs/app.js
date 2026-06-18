@@ -315,6 +315,7 @@ let isErasing       = false;
 let canvasLastX     = 0, canvasLastY = 0;
 let undoStack       = [];
 let redoStack       = [];
+let lastCanvasSnapshot = null;        // Canvas-Stand vom Ende des letzten Strichs = Undo-Basis des nächsten Strichs (so kein getImageData am Strich-Anfang)
 let penActive       = false;          // Stift liegt gerade auf → Touch komplett ignorieren (Palm-Rejection)
 let canvasPenId     = null;           // PointerId des aktuell zeichnenden Stifts (nur dieser malt)
 let fingerScrollId  = null;           // PointerId des Fingers, der gerade scrollt
@@ -1353,7 +1354,7 @@ async function openSubject(subj) {
   learnedTopics = rawLearned.map(t => (t.includes('::') ? t : t + '::einsteiger'));
   topicMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
   selTopic = null;
-  currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = [];
+  currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = []; lastCanvasSnapshot = null;
   rechnenNextTask = null; rechnenLoesung = null; blitzNext = null; // Prefetches des vorigen Fachs verwerfen
 
   document.getElementById('header-label').textContent = `${subj.emoji || subj.icon || '📚'}  ${subj.name}`;
@@ -3185,11 +3186,16 @@ function initCanvas() {
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   if (savedCanvasData) {
     const img = new Image();
-    img.onload = () => { mathCtx.drawImage(img, 0, 0, w, CANVAS_HEIGHT); applyCtxStyle(); };
+    img.onload = () => {
+      mathCtx.drawImage(img, 0, 0, w, CANVAS_HEIGHT);
+      applyCtxStyle();
+      lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
+    };
     img.src = savedCanvasData;
     savedCanvasData = null;
   } else {
     applyCtxStyle();
+    lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
   }
   undoStack = []; redoStack = [];
 }
@@ -3245,14 +3251,20 @@ function setupCanvasEvents() {
     if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
     isDrawingCanvas = true;
     redoStack = [];
-    const snap = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
-    undoStack.push(snap);
-    if (undoStack.length > 8) undoStack.shift();
+    // Undo-Snapshot ist der Canvas-Stand vom ENDE des letzten Strichs – KEIN teures
+    // getImageData hier am Strich-Anfang. Der volle Readback einer ~1400×4000-Bitmap
+    // blockierte sonst den Main-Thread genau beim Aufsetzen, sodass der erste
+    // Stiftkontakt "verschluckt" wurde und man neu ansetzen musste.
+    if (lastCanvasSnapshot) {
+      undoStack.push(lastCanvasSnapshot);
+      if (undoStack.length > 8) undoStack.shift();
+    }
     const p = canvasPos(e, canvas);
     canvasLastX = p.x; canvasLastY = p.y;
 
     if (activeTool === 'line') {
-      linePreviewData = snap;
+      // Linien-Vorschau braucht den aktuellen Pixelstand (selten benutzt → Stall ok).
+      linePreviewData = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
       return;
     }
     if (activeTool === 'pen' || activeTool === 'highlighter') {
@@ -3346,10 +3358,17 @@ function setupCanvasEvents() {
       linePreviewData = null;
     }
     mathCtx.globalAlpha = 1;
+    // Schwerer getImageData-Readback jetzt am Strich-ENDE (Stift hebt ohnehin ab,
+    // ein kurzes Stocken ist hier unsichtbar) statt am Anfang. Ergebnis ist die
+    // Undo-Basis für den nächsten Strich.
+    lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
   };
   canvas.addEventListener('pointerup',     endDraw);
   canvas.addEventListener('pointercancel', endDraw);
-  canvas.addEventListener('pointerleave',  endDraw);
+  // KEIN pointerleave → endDraw: dank setPointerCapture feuert pointerup zuverlässig,
+  // auch wenn der Stift den Canvas-Rand verlässt. pointerleave kann dagegen direkt
+  // nach dem Aufsetzen (oder beim Pencil-Hover) spurious feuern und beendete den
+  // gerade begonnenen Strich sofort → erster Kontakt ohne Strich.
   canvas.addEventListener('contextmenu',   e => e.preventDefault());
 }
 
@@ -3377,6 +3396,7 @@ function clearCanvas() {
   mathCtx.globalAlpha = 1;
   mathCtx.globalCompositeOperation = 'source-over';
   mathCtx.clearRect(0, 0, r.width, r.height);
+  lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
   setActiveTool('pen');
 }
 
@@ -3396,14 +3416,18 @@ function undoCanvas() {
   if (!mathCtx || !undoStack.length) return;
   const canvas = document.getElementById('math-canvas');
   redoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
-  mathCtx.putImageData(undoStack.pop(), 0, 0);
+  const prev = undoStack.pop();
+  mathCtx.putImageData(prev, 0, 0);
+  lastCanvasSnapshot = prev; // neue Undo-Basis = wiederhergestellter Stand
 }
 
 function redoCanvas() {
   if (!mathCtx || !redoStack.length) return;
   const canvas = document.getElementById('math-canvas');
   undoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
-  mathCtx.putImageData(redoStack.pop(), 0, 0);
+  const next = redoStack.pop();
+  mathCtx.putImageData(next, 0, 0);
+  lastCanvasSnapshot = next; // neue Undo-Basis = wiederhergestellter Stand
 }
 
 // ── Rechnen difficulty select ──────────────────────────────────────────────
