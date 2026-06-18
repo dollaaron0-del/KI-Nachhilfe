@@ -316,6 +316,7 @@ let canvasLastX     = 0, canvasLastY = 0;
 let undoStack       = [];
 let redoStack       = [];
 let penActive       = false;          // Stift liegt gerade auf → Touch komplett ignorieren (Palm-Rejection)
+let canvasPenId     = null;           // PointerId des aktuell zeichnenden Stifts (nur dieser malt)
 let fingerScrollId  = null;           // PointerId des Fingers, der gerade scrollt
 let fingerStartY    = 0;
 let wrapScrollStart = 0;
@@ -3236,7 +3237,9 @@ function setupCanvasEvents() {
       return;
     }
     e.preventDefault();
+    if (canvasPenId !== null && e.pointerId !== canvasPenId) return; // schon ein Stift aktiv
     canvas.setPointerCapture(e.pointerId);
+    canvasPenId = e.pointerId;
     penActive = (e.pointerType === 'pen');
     if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
     if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
@@ -3271,9 +3274,22 @@ function setupCanvasEvents() {
       return;
     }
     if (!isDrawingCanvas || !mathCtx) return;
+    if (e.pointerId !== canvasPenId) return; // nur der zeichnende Stift malt (Palm-Rejection)
     e.preventDefault();
-    const p        = canvasPos(e, canvas);
-    const pressure = e.pressure > 0 ? e.pressure : 0.5;
+
+    if (activeTool === 'line') {
+      // Restore snapshot and draw fresh preview line (Vorschau braucht nur den Endpunkt)
+      const p = canvasPos(e, canvas);
+      mathCtx.putImageData(linePreviewData, 0, 0);
+      mathCtx.globalAlpha  = 1;
+      mathCtx.strokeStyle  = penColor;
+      mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
+      mathCtx.beginPath();
+      mathCtx.moveTo(canvasLastX, canvasLastY);
+      mathCtx.lineTo(p.x, p.y);
+      mathCtx.stroke();
+      return;
+    }
 
     if (activeTool === 'eraser') {
       // Tinte wirklich entfernen (Bitmap transparent machen), statt weiß zu übermalen –
@@ -3286,34 +3302,34 @@ function setupCanvasEvents() {
       mathCtx.globalAlpha  = 0.35;
       mathCtx.strokeStyle  = '#FFD60A';
       mathCtx.lineWidth    = PEN_BASE[penSize] * 10;
-    } else if (activeTool === 'line') {
-      // Restore snapshot and draw fresh preview line
-      mathCtx.putImageData(linePreviewData, 0, 0);
+    } else {
       mathCtx.globalAlpha  = 1;
       mathCtx.strokeStyle  = penColor;
-      mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
+    }
+
+    // getCoalescedEvents liefert ALLE Zwischenpunkte eines schnellen Strichs –
+    // sonst gehen beim schnellen (Text-)Schreiben Punkte verloren und der Strich
+    // bricht ab, sodass man ihn nachzieht ("doppelte" Striche).
+    const pts = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
+    for (const pt of pts) {
+      const p = canvasPos(pt, canvas);
+      if (activeTool === 'pen') {
+        const pressure = pt.pressure > 0 ? pt.pressure : 0.5;
+        mathCtx.lineWidth = Math.max(0.5, pressure * PEN_BASE[penSize] * 1.8);
+      }
       mathCtx.beginPath();
       mathCtx.moveTo(canvasLastX, canvasLastY);
       mathCtx.lineTo(p.x, p.y);
       mathCtx.stroke();
-      return;
-    } else {
-      mathCtx.globalAlpha  = 1;
-      mathCtx.strokeStyle  = penColor;
-      mathCtx.lineWidth    = Math.max(0.5, pressure * PEN_BASE[penSize] * 1.8);
+      canvasLastX = p.x; canvasLastY = p.y;
     }
-
-    mathCtx.beginPath();
-    mathCtx.moveTo(canvasLastX, canvasLastY);
-    mathCtx.lineTo(p.x, p.y);
-    mathCtx.stroke();
     if (activeTool === 'eraser') mathCtx.globalCompositeOperation = 'source-over';
-    canvasLastX = p.x; canvasLastY = p.y;
   }, { passive: false });
 
   const endDraw = (e) => {
     if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
     if (e.pointerId === fingerScrollId) fingerScrollId = null; // Finger-Scroll beendet
+    if (e.pointerId === canvasPenId) canvasPenId = null;       // Stift losgelassen
     if (!isDrawingCanvas) return;
     isDrawingCanvas = false;
     if (activeTool === 'line' && linePreviewData) {
