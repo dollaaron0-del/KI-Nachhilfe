@@ -3148,6 +3148,10 @@ async function initRechnen() {
     savedCanvasData = await localforage.getItem(`canvas_${sessionId}`).catch(() => null);
   }
   requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
+  // Erste/nächste Aufgabe schon vorladen, sobald die Löse-Ansicht offen ist – so ist
+  // der erste "Aufgabe erstellen"-Klick kein kalter LLM-Roundtrip mehr. Dedupt selbst
+  // (Fach + Schwierigkeit), läuft also nicht doppelt, wenn schon eine vorgeladen ist.
+  if (sessionMeta && sessionId) prefetchRechnenAufgabe(currentAufgabe);
 }
 
 function initResizeHandle() {
@@ -3475,6 +3479,9 @@ function redoCanvas() {
 // ── Rechnen difficulty select ──────────────────────────────────────────────
 document.getElementById('rechnen-diff-sel')?.addEventListener('change', e => {
   rechnenDiff = e.target.value;
+  // Die vorgeladene Aufgabe hat noch die alte Schwierigkeit → für die neue Stufe
+  // neu vorladen, damit der nächste Klick wieder sofort die passende Aufgabe hat.
+  if (sessionMeta && sessionId) prefetchRechnenAufgabe(currentAufgabe);
 });
 
 // ── Rechnen generate ───────────────────────────────────────────────────────
