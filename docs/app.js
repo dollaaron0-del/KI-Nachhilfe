@@ -313,9 +313,13 @@ let mathCtx         = null;
 let isDrawingCanvas = false;
 let isErasing       = false;
 let canvasLastX     = 0, canvasLastY = 0;
-let undoStack       = [];
-let redoStack       = [];
-let lastCanvasSnapshot = null;        // Canvas-Stand vom Ende des letzten Strichs = Undo-Basis des nächsten Strichs (so kein getImageData am Strich-Anfang)
+// Striche als Vektoren (Punkt-Listen) statt Bitmap-Snapshots. Damit kostet das
+// Strich-Ende KEIN getImageData mehr (auf dem iPad ~24 MB GPU-Readback, der beim
+// schnellen Schreiben zwischen jedem kurzen Strich stockte). Undo/Redo = neu zeichnen.
+let strokes         = [];             // committete Striche: { tool, color, size, pts:[{x,y,p}] }
+let redoStrokes     = [];             // für Redo zurückgelegte Striche
+let currentStroke   = null;           // gerade in Arbeit
+let baseImage       = null;           // geladenes PNG (Vorsession) als Hintergrund-Ebene
 let penActive       = false;          // Stift liegt gerade auf → Touch komplett ignorieren (Palm-Rejection)
 let canvasPenId     = null;           // PointerId des aktuell zeichnenden Stifts (nur dieser malt)
 let fingerScrollId  = null;           // PointerId des Fingers, der gerade scrollt
@@ -325,7 +329,6 @@ let savedCanvasData = null;
 let penColor        = '#1c1c1e';
 let penSize         = 'medium';   // 'fine' | 'medium' | 'thick'
 let activeTool      = 'pen';      // 'pen' | 'eraser' | 'highlighter' | 'line'
-let linePreviewData = null;
 
 // ── DB (server-backed) ────────────────────────────────────────────────────
 // Session-expiry handling. A 401 from any api() call means the token is gone or
@@ -1354,7 +1357,7 @@ async function openSubject(subj) {
   learnedTopics = rawLearned.map(t => (t.includes('::') ? t : t + '::einsteiger'));
   topicMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
   selTopic = null;
-  currentAufgabe = ''; savedCanvasData = null; mathCtx = null; undoStack = []; lastCanvasSnapshot = null;
+  currentAufgabe = ''; savedCanvasData = null; mathCtx = null; strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   rechnenNextTask = null; rechnenLoesung = null; blitzNext = null; // Prefetches des vorigen Fachs verwerfen
 
   document.getElementById('header-label').textContent = `${subj.emoji || subj.icon || '📚'}  ${subj.name}`;
@@ -3184,20 +3187,75 @@ function initCanvas() {
   mathCtx = canvas.getContext('2d');
   mathCtx.scale(dpr, dpr);
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
+  strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   if (savedCanvasData) {
     const img = new Image();
     img.onload = () => {
+      baseImage = img;                       // Hintergrund-Ebene für späteres Neu-Zeichnen
       mathCtx.drawImage(img, 0, 0, w, CANVAS_HEIGHT);
       applyCtxStyle();
-      lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
     };
     img.src = savedCanvasData;
     savedCanvasData = null;
   } else {
     applyCtxStyle();
-    lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
   }
-  undoStack = []; redoStack = [];
+}
+
+// Einen gespeicherten Strich originalgetreu nachzeichnen (für Undo/Redo & Line-Vorschau).
+function drawStroke(ctx, s) {
+  const pts = s.pts;
+  if (!pts || !pts.length) return;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (s.tool === 'eraser') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = 1; ctx.strokeStyle = '#000';
+  } else if (s.tool === 'highlighter') {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.35; ctx.strokeStyle = '#FFD60A';
+  } else { // pen | line
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1; ctx.strokeStyle = s.color;
+  }
+  if (s.tool === 'line') {
+    ctx.lineWidth = PEN_BASE[s.size] * 2;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    ctx.stroke();
+  } else {
+    if (s.tool === 'pen' || s.tool === 'highlighter') {
+      const r = Math.max(0.5, (pts[0].p || 0.5) * PEN_BASE[s.size]);
+      ctx.beginPath();
+      ctx.fillStyle = s.tool === 'highlighter' ? 'rgba(255,214,10,0.35)' : s.color;
+      ctx.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (let i = 1; i < pts.length; i++) {
+      if (s.tool === 'pen')         ctx.lineWidth = Math.max(0.5, (pts[i].p || 0.5) * PEN_BASE[s.size] * 1.8);
+      else if (s.tool === 'eraser') ctx.lineWidth = PEN_BASE[s.size] * 12;
+      else                          ctx.lineWidth = PEN_BASE[s.size] * 10;
+      ctx.beginPath();
+      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+      ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+}
+
+// Komplett neu zeichnen: Hintergrund-PNG + alle committeten Striche. Ersetzt die
+// teuren Bitmap-Snapshots – Canvas-Zeichnen ist billig (hunderte Striche < 16 ms).
+function redrawCanvas() {
+  if (!mathCtx) return;
+  const r = document.getElementById('math-canvas').getBoundingClientRect();
+  mathCtx.globalCompositeOperation = 'source-over';
+  mathCtx.globalAlpha = 1;
+  mathCtx.clearRect(0, 0, r.width, r.height);
+  if (baseImage) mathCtx.drawImage(baseImage, 0, 0, r.width, CANVAS_HEIGHT);
+  for (const s of strokes) drawStroke(mathCtx, s);
+  applyCtxStyle();
 }
 
 const PEN_BASE = { fine: 1.0, medium: 2.0, thick: 4.5 };
@@ -3250,22 +3308,15 @@ function setupCanvasEvents() {
     if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
     if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
     isDrawingCanvas = true;
-    redoStack = [];
-    // Undo-Snapshot ist der Canvas-Stand vom ENDE des letzten Strichs – KEIN teures
-    // getImageData hier am Strich-Anfang. Der volle Readback einer ~1400×4000-Bitmap
-    // blockierte sonst den Main-Thread genau beim Aufsetzen, sodass der erste
-    // Stiftkontakt "verschluckt" wurde und man neu ansetzen musste.
-    if (lastCanvasSnapshot) {
-      undoStack.push(lastCanvasSnapshot);
-      if (undoStack.length > 8) undoStack.shift();
-    }
+    redoStrokes = [];
     const p = canvasPos(e, canvas);
     canvasLastX = p.x; canvasLastY = p.y;
+    // Neuen Strich als Vektor mitschreiben – kein getImageData mehr beim Aufsetzen.
+    currentStroke = { tool: activeTool, color: penColor, size: penSize,
+                      pts: [{ x: p.x, y: p.y, p: (e.pressure || 0.5) }] };
 
     if (activeTool === 'line') {
-      // Linien-Vorschau braucht den aktuellen Pixelstand (selten benutzt → Stall ok).
-      linePreviewData = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
-      return;
+      return; // Vorschau läuft über redrawCanvas() im pointermove
     }
     if (activeTool === 'pen' || activeTool === 'highlighter') {
       applyCtxStyle();
@@ -3290,9 +3341,10 @@ function setupCanvasEvents() {
     e.preventDefault();
 
     if (activeTool === 'line') {
-      // Restore snapshot and draw fresh preview line (Vorschau braucht nur den Endpunkt)
+      // Bestehende Striche neu zeichnen, dann frische Vorschau-Linie obendrauf.
       const p = canvasPos(e, canvas);
-      mathCtx.putImageData(linePreviewData, 0, 0);
+      redrawCanvas();
+      mathCtx.globalCompositeOperation = 'source-over';
       mathCtx.globalAlpha  = 1;
       mathCtx.strokeStyle  = penColor;
       mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
@@ -3334,6 +3386,7 @@ function setupCanvasEvents() {
       mathCtx.lineTo(p.x, p.y);
       mathCtx.stroke();
       canvasLastX = p.x; canvasLastY = p.y;
+      if (currentStroke) currentStroke.pts.push({ x: p.x, y: p.y, p: (pt.pressure > 0 ? pt.pressure : 0.5) });
     }
     if (activeTool === 'eraser') mathCtx.globalCompositeOperation = 'source-over';
   }, { passive: false });
@@ -3344,24 +3397,21 @@ function setupCanvasEvents() {
     if (e.pointerId === canvasPenId) canvasPenId = null;       // Stift losgelassen
     if (!isDrawingCanvas) return;
     isDrawingCanvas = false;
-    if (activeTool === 'line' && linePreviewData) {
-      // Finalize the line at the last position
-      const p = canvasPos(e, canvas);
-      mathCtx.putImageData(linePreviewData, 0, 0);
-      mathCtx.globalAlpha  = 1;
-      mathCtx.strokeStyle  = penColor;
-      mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
-      mathCtx.beginPath();
-      mathCtx.moveTo(canvasLastX, canvasLastY);
-      mathCtx.lineTo(p.x, p.y);
-      mathCtx.stroke();
-      linePreviewData = null;
+    if (currentStroke) {
+      if (activeTool === 'line') {
+        const p = canvasPos(e, canvas);
+        currentStroke.pts = [currentStroke.pts[0], { x: p.x, y: p.y }];
+      }
+      strokes.push(currentStroke);
+      currentStroke = null;
     }
+    // Kein getImageData mehr – der Strich liegt schon live auf der Canvas und ist
+    // zusätzlich als Vektor in `strokes` gesichert. Line-Tool einmal sauber
+    // nachzeichnen (überschreibt die letzte Vorschau).
+    if (activeTool === 'line') redrawCanvas();
     mathCtx.globalAlpha = 1;
-    // Schwerer getImageData-Readback jetzt am Strich-ENDE (Stift hebt ohnehin ab,
-    // ein kurzes Stocken ist hier unsichtbar) statt am Anfang. Ergebnis ist die
-    // Undo-Basis für den nächsten Strich.
-    lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
+    mathCtx.globalCompositeOperation = 'source-over';
+    applyCtxStyle();
   };
   canvas.addEventListener('pointerup',     endDraw);
   canvas.addEventListener('pointercancel', endDraw);
@@ -3390,13 +3440,11 @@ function clearTextSelection() {
 function clearCanvas() {
   if (!mathCtx) return;
   if (sessionId) localforage.removeItem(`canvas_${sessionId}`).catch(() => {});
-  const canvas = document.getElementById('math-canvas');
-  const r      = canvas.getBoundingClientRect();
-  undoStack = []; redoStack = [];
+  const r = document.getElementById('math-canvas').getBoundingClientRect();
+  strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   mathCtx.globalAlpha = 1;
   mathCtx.globalCompositeOperation = 'source-over';
   mathCtx.clearRect(0, 0, r.width, r.height);
-  lastCanvasSnapshot = mathCtx.getImageData(0, 0, canvas.width, canvas.height);
   setActiveTool('pen');
 }
 
@@ -3413,21 +3461,15 @@ function setActiveTool(tool) {
 }
 
 function undoCanvas() {
-  if (!mathCtx || !undoStack.length) return;
-  const canvas = document.getElementById('math-canvas');
-  redoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
-  const prev = undoStack.pop();
-  mathCtx.putImageData(prev, 0, 0);
-  lastCanvasSnapshot = prev; // neue Undo-Basis = wiederhergestellter Stand
+  if (!mathCtx || !strokes.length) return;
+  redoStrokes.push(strokes.pop());
+  redrawCanvas();
 }
 
 function redoCanvas() {
-  if (!mathCtx || !redoStack.length) return;
-  const canvas = document.getElementById('math-canvas');
-  undoStack.push(mathCtx.getImageData(0, 0, canvas.width, canvas.height));
-  const next = redoStack.pop();
-  mathCtx.putImageData(next, 0, 0);
-  lastCanvasSnapshot = next; // neue Undo-Basis = wiederhergestellter Stand
+  if (!mathCtx || !redoStrokes.length) return;
+  strokes.push(redoStrokes.pop());
+  redrawCanvas();
 }
 
 // ── Rechnen difficulty select ──────────────────────────────────────────────
@@ -3606,8 +3648,7 @@ async function generateMathAufgabe() {
     currentAufgabe  = aufgabe.trim();
     rechnenLastFeedback = '';
     savedCanvasData = null;
-    undoStack       = [];
-    clearCanvas();
+    clearCanvas();   // setzt strokes/redoStrokes/baseImage zurück
     rechnenLoesung = null;
     prefetchRechnenLoesung(currentAufgabe);   // Musterlösung im Hintergrund vorbereiten
     prefetchRechnenAufgabe(currentAufgabe);   // nächste Aufgabe im Hintergrund vorbereiten
