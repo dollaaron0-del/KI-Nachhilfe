@@ -3305,7 +3305,13 @@ function setupCanvasEvents() {
       return;
     }
     e.preventDefault();
-    if (canvasPenId !== null && e.pointerId !== canvasPenId) return; // schon ein Stift aktiv
+    // Ein neuer Stift-/Maus-Kontakt startet IMMER einen neuen Strich. Es gibt nur EINEN
+    // Pencil – das frühere "schon ein Stift aktiv"-ID-Match (canvasPenId !== e.pointerId
+    // → return) schützte vor nichts, konnte aber Striche komplett verschlucken: kam das
+    // pointerup des vorigen Strichs nicht an (Pointer-Capture-Verlust in iPad-Safari),
+    // blieb canvasPenId gesetzt und JEDER Folgestrich mit neuer pointerId wurde verworfen
+    // ("Strich wird nicht erkannt"). Stattdessen übernehmen wir den neuen Kontakt.
+    if (currentStroke) { strokes.push(currentStroke); currentStroke = null; } // verwaisten Strich sichern
     canvas.setPointerCapture(e.pointerId);
     canvasPenId = e.pointerId;
     penActive = (e.pointerType === 'pen');
@@ -3419,6 +3425,13 @@ function setupCanvasEvents() {
   };
   canvas.addEventListener('pointerup',     endDraw);
   canvas.addEventListener('pointercancel', endDraw);
+  // Sicherheitsnetz: Verliert iPad-Safari den Pointer-Capture, kommt pointerup u.U.
+  // NICHT auf der Canvas an → canvasPenId/penActive blieben hängen und der nächste
+  // Strich würde nicht starten. Auf window fangen wir auch diese Fälle ab; endDraw ist
+  // idempotent (isDrawingCanvas-Guard), die Canvas-Listener feuern ohnehin zuerst.
+  window.addEventListener('pointerup',     endDraw);
+  window.addEventListener('pointercancel', endDraw);
+  canvas.addEventListener('lostpointercapture', e => { if (e.pointerId === canvasPenId) endDraw(e); });
   // KEIN pointerleave → endDraw: dank setPointerCapture feuert pointerup zuverlässig,
   // auch wenn der Stift den Canvas-Rand verlässt. pointerleave kann dagegen direkt
   // nach dem Aufsetzen (oder beim Pencil-Hover) spurious feuern und beendete den
