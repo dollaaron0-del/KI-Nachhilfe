@@ -3166,21 +3166,9 @@ function initResizeHandle() {
 
 const CANVAS_HEIGHT = 2000;
 
-// Karo-Raster in die Canvas-Bitmap malen (immer NACH der weißen Grundfüllung aufrufen).
-// Helles Blau – alle Kanäle >200, damit die Tinten-Erkennung (checkHandwriting) es nicht als Schrift zählt.
-const GRID_STEP = 28;
-function drawGrid(ctx, w, h) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
-  ctx.strokeStyle = '#d6e0ee';
-  ctx.lineWidth   = 1;
-  ctx.beginPath();
-  for (let x = GRID_STEP; x < w; x += GRID_STEP) { const px = Math.round(x) + 0.5; ctx.moveTo(px, 0); ctx.lineTo(px, h); }
-  for (let y = GRID_STEP; y < h; y += GRID_STEP) { const py = Math.round(y) + 0.5; ctx.moveTo(0, py); ctx.lineTo(w, py); }
-  ctx.stroke();
-  ctx.restore();
-}
+// Das Karo-Raster wird NICHT mehr in die Bitmap gemalt, sondern liegt als
+// CSS-Hintergrund (#math-canvas in style.css) hinter der transparenten Canvas.
+// Dadurch kann der Radierer es nicht treffen – er löscht nur die Tinte.
 
 function initCanvas() {
   const canvas = document.getElementById('math-canvas');
@@ -3193,9 +3181,7 @@ function initCanvas() {
   canvas.height = Math.round(CANVAS_HEIGHT * dpr);
   mathCtx = canvas.getContext('2d');
   mathCtx.scale(dpr, dpr);
-  mathCtx.fillStyle = '#ffffff';
-  mathCtx.fillRect(0, 0, w, CANVAS_HEIGHT);
-  drawGrid(mathCtx, w, CANVAS_HEIGHT);
+  // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   if (savedCanvasData) {
     const img = new Image();
     img.onload = () => { mathCtx.drawImage(img, 0, 0, w, CANVAS_HEIGHT); applyCtxStyle(); };
@@ -3290,9 +3276,12 @@ function setupCanvasEvents() {
     const pressure = e.pressure > 0 ? e.pressure : 0.5;
 
     if (activeTool === 'eraser') {
+      // Tinte wirklich entfernen (Bitmap transparent machen), statt weiß zu übermalen –
+      // so bleibt das CSS-Raster dahinter erhalten.
       mathCtx.globalAlpha  = 1;
       mathCtx.lineWidth    = PEN_BASE[penSize] * 12;
-      mathCtx.strokeStyle  = '#ffffff';
+      mathCtx.globalCompositeOperation = 'destination-out';
+      mathCtx.strokeStyle  = '#000';
     } else if (activeTool === 'highlighter') {
       mathCtx.globalAlpha  = 0.35;
       mathCtx.strokeStyle  = '#FFD60A';
@@ -3318,6 +3307,7 @@ function setupCanvasEvents() {
     mathCtx.moveTo(canvasLastX, canvasLastY);
     mathCtx.lineTo(p.x, p.y);
     mathCtx.stroke();
+    if (activeTool === 'eraser') mathCtx.globalCompositeOperation = 'source-over';
     canvasLastX = p.x; canvasLastY = p.y;
   }, { passive: false });
 
@@ -3369,9 +3359,8 @@ function clearCanvas() {
   const r      = canvas.getBoundingClientRect();
   undoStack = []; redoStack = [];
   mathCtx.globalAlpha = 1;
-  mathCtx.fillStyle = '#ffffff';
-  mathCtx.fillRect(0, 0, r.width, r.height);
-  drawGrid(mathCtx, r.width, r.height);
+  mathCtx.globalCompositeOperation = 'source-over';
+  mathCtx.clearRect(0, 0, r.width, r.height);
   setActiveTool('pen');
 }
 
@@ -3594,10 +3583,11 @@ async function checkHandwriting() {
   if (!mathCtx) return;
   const canvas = document.getElementById('math-canvas');
 
+  // Bitmap ist transparent (nur Tinte) – Tinte über den Alpha-Kanal erkennen.
   const px = mathCtx.getImageData(0, 0, canvas.width, canvas.height).data;
   let hasInk = false;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i] < 200 || px[i + 1] < 200 || px[i + 2] < 200) { hasInk = true; break; }
+  for (let i = 3; i < px.length; i += 4) {
+    if (px[i] > 10) { hasInk = true; break; }
   }
   const hasTypedAnswer = (document.getElementById('rechnen-task-input')?.value.trim() || '').length > 0;
   if (!hasInk && !hasTypedAnswer) { toast('Bitte zuerst eine Lösung in den Zeichen- oder Schreibbereich eingeben.', 'warn'); return; }
@@ -3616,7 +3606,15 @@ async function checkHandwriting() {
   const writtenNote = writtenText
     ? `\n\n**Im Schreibbereich getippter Text des Schülers (Teil der Lösung, gleichwertig zur Zeichnung berücksichtigen):**\n${writtenText}`
     : '';
-  const dataURL   = canvas.toDataURL('image/png');
+  // Transparente Bitmap auf weißen Grund flachrechnen, damit die Vision-API
+  // die Tinte auf Weiß sieht (statt auf transparentem/schwarzem Grund).
+  const flat = document.createElement('canvas');
+  flat.width = canvas.width; flat.height = canvas.height;
+  const fc = flat.getContext('2d');
+  fc.fillStyle = '#ffffff';
+  fc.fillRect(0, 0, flat.width, flat.height);
+  fc.drawImage(canvas, 0, 0);
+  const dataURL   = flat.toDataURL('image/png');
   const base64   = dataURL.split(',')[1];
 
   // Bewertungsmaßstab an den gewählten Schwierigkeitsgrad koppeln: rechnerische
@@ -5018,10 +5016,8 @@ async function regenLernenTask() {
       localforage.setItem(lernenCacheKey(topic), lernenTopicData).catch(() => {});
       // Clear canvas and textarea for fresh start
       if (lernenCtx) {
-        const wrap = document.getElementById('lernen-canvas-wrap');
-        lernenCtx.fillStyle = '#ffffff';
-        lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
-        drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
+        lernenCtx.globalCompositeOperation = 'source-over';
+        lernenCtx.clearRect(0, 0, document.getElementById('lernen-canvas-wrap').clientWidth, LERNEN_HEIGHT);
       }
       lernenHasInk = false;
       const ta = document.getElementById('lernen-text-answer');
@@ -5044,9 +5040,8 @@ async function regenLernenTask() {
 function retryLernenSameTask() {
   if (lernenCtx) {
     const wrap = document.getElementById('lernen-canvas-wrap');
-    lernenCtx.fillStyle = '#ffffff';
-    lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
-    drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
+    lernenCtx.globalCompositeOperation = 'source-over';
+    lernenCtx.clearRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
   }
   const ta = document.getElementById('lernen-text-answer');
   if (ta) ta.value = '';
@@ -5067,9 +5062,7 @@ function initLernenCanvas() {
   canvas.height = Math.round(h * dpr);
   lernenCtx = canvas.getContext('2d');
   lernenCtx.scale(dpr, dpr);
-  lernenCtx.fillStyle = '#ffffff';
-  lernenCtx.fillRect(0, 0, w, h);
-  drawGrid(lernenCtx, w, h);
+  // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   lernenCtx.lineCap  = 'round';
   lernenCtx.lineJoin = 'round';
   // Remove any old listeners first (prevent accumulation across topic switches)
@@ -5565,9 +5558,8 @@ document.getElementById('lernen-regen-btn')?.addEventListener('click', regenLern
 document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   if (!lernenCtx) return;
   const wrap = document.getElementById('lernen-canvas-wrap');
-  lernenCtx.fillStyle = '#fff';
-  lernenCtx.fillRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
-  drawGrid(lernenCtx, wrap.clientWidth, LERNEN_HEIGHT);
+  lernenCtx.globalCompositeOperation = 'source-over';
+  lernenCtx.clearRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
   lernenHasInk = false;
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {

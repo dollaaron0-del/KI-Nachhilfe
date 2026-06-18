@@ -1013,10 +1013,17 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
   touch-action: none;
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;
-  cursor: crosshair; background: #fff;
+  cursor: crosshair;
+  /* Karo-Raster liegt als CSS-Hintergrund HINTER der (transparenten) Bitmap.
+     So kann der Radierer es nicht wegradieren – er löscht nur die Tinte und
+     gibt das Raster wieder frei. Weiß bleibt als Grundfarbe für die Vision-API. */
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, #d6e0ee 1px, transparent 1px),
+    linear-gradient(to bottom, #d6e0ee 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 [data-theme="dark"] .canvas-scroll-wrap { border-top: 1px solid #444; }
-[data-theme="dark"] #math-canvas { background: #fff; } /* white needed for vision API */
 
 /* Result state */
 #rechnen-result { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px; gap: 14px; display: flex; flex-direction: column; }
@@ -1900,6 +1907,13 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+  /* Karo-Raster als CSS-Hintergrund hinter der transparenten Bitmap –
+     der Radierer (destination-out) gibt es wieder frei, statt es zu löschen. */
+  background-color: #fff;
+  background-image:
+    linear-gradient(to right, #d6e0ee 1px, transparent 1px),
+    linear-gradient(to bottom, #d6e0ee 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
 /* ── Milestone stepper ───────────────────────────────────────────────────── */
