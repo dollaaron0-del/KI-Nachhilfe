@@ -1342,12 +1342,14 @@ async function openSubject(subj) {
   examDocContext = await loadExamDocContext(subj.id);
   customPrompt = subj.custom_prompt || '';
   const serverTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => null);
-  scannedTopics = (serverTopics && serverTopics.length)
+  scannedTopics = dedupeTopics((serverTopics && serverTopics.length)
     ? serverTopics
-    : (await localforage.getItem(`st_${subj.id}`).catch(() => null)) || [];
+    : (await localforage.getItem(`st_${subj.id}`).catch(() => null)) || []);
 
   const serverStruct = await api(`/api/subjects/${subj.id}/structure`).catch(() => null);
-  moduleStructure = serverStruct || (await localforage.getItem(`ms_${subj.id}`).catch(() => null));
+  // Beinah-Duplikate (gleiches Thema, anderer Name) auch in bereits gespeicherten
+  // Strukturen entfernen – sonst doppeln sie im Lernpfad bis zum nächsten Re-Scan.
+  moduleStructure = dedupeStructure(serverStruct || (await localforage.getItem(`ms_${subj.id}`).catch(() => null)));
 
   const serverLearned = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => null);
   const rawLearned = (serverLearned && serverLearned.length)
@@ -2927,7 +2929,7 @@ async function scanTopics() {
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
-    scannedTopics = parseJsonLoose(m[0]).filter(t => typeof t === 'string').slice(0, 20);
+    scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 20);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     api(`/api/subjects/${sessionId}/topics`, {
@@ -4253,6 +4255,47 @@ const MILESTONE_LEVELS = [
 
 // ══ LERNEN (Lernpfad + Meilensteine) ═════════════════════════════════════
 
+// Normalisiert Themennamen für die Duplikat-Erkennung: Kleinschreibung, Umlaute
+// und Sub-/Hochzeichen auf ASCII (CO₂ → co2), führende Artikel sowie alle Satz-
+// und Sonderzeichen entfernt, Leerzeichen kollabiert. So gelten z. B.
+// "Die Lichtreaktion" und "Lichtreaktion" oder "CO₂-Konzentration" und
+// "CO2 Konzentration" als dasselbe Thema.
+function normTopic(t) {
+  return String(t)
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')   // Diakritika/Sub-/Hochzeichen → ASCII
+    .toLowerCase()
+    .replace(/^(der|die|das|den|dem|des|the|ein|eine)\s+/, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// Entfernt Beinah-Duplikate aus einer flachen Themenliste (erster Treffer gewinnt).
+function dedupeTopics(arr) {
+  const seen = new Set();
+  return (arr || []).reduce((out, t) => {
+    if (typeof t !== 'string') return out;
+    const key = normTopic(t);
+    if (key && !seen.has(key)) { seen.add(key); out.push(t.trim()); }
+    return out;
+  }, []);
+}
+
+// Entfernt Beinah-Duplikate über ALLE Kapitel hinweg und wirft leere Kapitel raus.
+function dedupeStructure(struct) {
+  if (!struct?.kapitel?.length) return struct;
+  const seen = new Set();
+  const kapitel = struct.kapitel.map(k => ({
+    ...k,
+    themen: (k.themen || []).reduce((out, t) => {
+      if (typeof t !== 'string') return out;
+      const key = normTopic(t);
+      if (key && !seen.has(key)) { seen.add(key); out.push(t.trim()); }
+      return out;
+    }, []),
+  })).filter(k => k.themen && k.themen.length);
+  return { ...struct, kapitel };
+}
+
 // Einzige Wahrheitsquelle für die Themen des Lernpfads: exakt die Liste, die auch
 // in loadLernpfad() gerendert wird. Wenn eine Kapitelstruktur existiert, zählen
 // ALLE ihre Themen (ungekappt) – sonst die flache scannedTopics-Liste. So bleibt
@@ -5537,9 +5580,9 @@ async function scanModuleStructure(btn) {
     const kapitel = (data.kapitel || []).filter(k =>
       k && typeof k.titel === 'string' && Array.isArray(k.themen) && k.themen.length);
     if (!kapitel.length) throw new Error('Keine Kapitel gefunden');
-    const seen = new Set();
-    kapitel.forEach(k => { k.themen = k.themen.filter(t => typeof t === 'string' && !seen.has(t) && seen.add(t)); });
-    moduleStructure = { kapitel: kapitel.filter(k => k.themen.length) };
+    // Beinah-Duplikate über alle Kapitel hinweg entfernen (normalisierter Vergleich:
+    // "Die Lichtreaktion" == "Lichtreaktion", "CO₂-Konzentration" == "CO2 Konzentration").
+    moduleStructure = dedupeStructure({ kapitel });
     scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 30);
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
