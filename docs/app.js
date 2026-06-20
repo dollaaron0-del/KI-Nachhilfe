@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '173';
+const APP_VERSION = '174';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -317,6 +317,7 @@ let currentAufgabenResult = '';
 let currentExamText      = '';
 let learnedTopics        = [];
 let currentExplainerTopic = null;
+let currentUnit          = null;   // aktuelle Lerneinheit (1 Thema ODER zusammengesetzt, s. pathUnits)
 let rechnenDiff     = 'mittel';
 let rechnenLastFeedback = '';   // letztes Prüf-Feedback derselben Aufgabe (konsistente Re-Prüfung)
 let rechnenNextTask = null;     // Prefetch: { promise, diff, forSession } – nächste Aufgabe vorab geladen
@@ -4521,6 +4522,48 @@ function chapterSiblings(topic) {
   return k ? k.themen.filter(t => t !== topic) : [];
 }
 
+// ── Hebel 2: Körnung pro Niveau ─────────────────────────────────────────────
+// Auf hohen Stufen ist die Lerneinheit nicht mehr ein Mikro-Thema, sondern eine
+// zusammengesetzte Einheit (Cluster bzw. ganzes Kapitel) → wenige, große Aufgaben
+// statt 35 Krümel. Zusammen mit Hebel 1 (Beherrschung impliziert tiefer) kollabiert
+// das die Stückzahl: eine Kapitel-Einheit auf Prüfungsnah erledigt alle ihre Themen.
+const GRAIN_BY_DIFF = { einsteiger: 'topic', leicht: 'topic', mittel: 'topic', schwer: 'cluster', pruefungsnah: 'kapitel' };
+
+// Liefert die Lerneinheiten für ein Niveau. 'topic' → je Thema eine Einheit;
+// 'cluster' → 2–3 Themen eines Kapitels; 'kapitel' → ganzes Kapitel.
+function pathUnits(diff) {
+  const grain = GRAIN_BY_DIFF[diff] || 'topic';
+  if (grain === 'topic' || !moduleStructure?.kapitel?.length)
+    return pathTopics().map(t => ({ kind: 'topic', themen: [t], name: t }));
+  const units = [];
+  for (const k of moduleStructure.kapitel) {
+    if (!k.themen?.length) continue;
+    if (grain === 'kapitel') {
+      units.push({ kind: 'kapitel', themen: k.themen, name: k.titel, lernziel: k.lernziel });
+    } else { // cluster
+      for (let i = 0; i < k.themen.length; i += 3) {
+        const part = k.themen.slice(i, i + 3);
+        units.push({ kind: 'cluster', themen: part,
+          name: `${k.titel}: ${part.join(' · ')}`, lernziel: k.lernziel });
+      }
+    }
+  }
+  return units;
+}
+
+// Stabile ID einer Einheit – aus den (stabilen) Member-tids, damit Fortschritt/Cache
+// einen Re-Scan überleben. Ein-Thema-Einheit = die Themen-ID selbst (kompatibel).
+function unitId(unit) {
+  const ts = (unit?.themen || []).filter(Boolean);
+  if (ts.length <= 1) return topicId(ts[0] || unit?.name || '');
+  return 'u_' + ts.map(topicId).sort().join('_');
+}
+
+// Die aktuelle Einheit robust (Fallback: Ein-Thema-Einheit aus currentExplainerTopic).
+function curUnit() {
+  return currentUnit || { kind: 'topic', themen: [currentExplainerTopic], name: currentExplainerTopic };
+}
+
 // Pfad-Themen, die auf diesem Niveau ODER HÖHER gelernt wurden ("Beherrschung
 // impliziert niedrigere Stufen"). Wer ein Thema auf "Mittel" schafft, füllt damit
 // Einsteiger+Grundlagen+Mittel in einer Aktion – kein erzwungenes 5×. Die Stufen-
@@ -4762,6 +4805,28 @@ function loadLernpfad() {
     return item;
   };
 
+  // Hebel 2: ein Item pro zusammengesetzter Einheit (Cluster/Kapitel) statt pro Thema.
+  const makeUnitItem = unit => {
+    const isDone    = unit.themen.every(t => topicMaxLevel(t) >= need);
+    const someLower = !isDone && unit.themen.some(t => topicMaxLevel(t) >= 0);
+    const isDue     = isDone && unit.themen.some(t => topicReviewDue(t + '::' + activeDiff));
+    const isCurrent = !isDone && !someLower && !foundCurrent;
+    if (isCurrent) foundCurrent = true;
+    const item = document.createElement('div');
+    item.className = `lernpfad-item lernpfad-unit${isDone ? ' is-done' : ''}${someLower ? ' is-upgrade' : ''}${isDue ? ' is-due' : ''}${isCurrent ? ' is-current' : ''}`;
+    const countTag = ` <span class="lernpfad-unit-count">${unit.themen.length} Themen</span>`;
+    const dueTag   = isDue ? ' <span class="lernpfad-due-tag">🔄 Wiederholung fällig</span>' : '';
+    const upTag    = someLower ? ` <span class="lernpfad-upgrade-tag">⬆ Auf ${activeLvl.name} vertiefen</span>` : '';
+    const btnLabel = isDue ? 'Auffrischen →' : isDone ? 'Wiederholen' : someLower ? 'Vertiefen →' : 'Klausuraufgabe →';
+    const btnClass = isDone && !isDue ? 'lernpfad-btn lernpfad-btn-repeat' : 'lernpfad-btn';
+    item.innerHTML = `
+      <span class="lernpfad-status">${isDue ? '🔄' : isDone ? '✅' : someLower ? '✓' : isCurrent ? '▶' : '○'}</span>
+      <span class="lernpfad-name">${esc(unit.name)}${countTag}${dueTag}${upTag}</span>
+      <button class="${btnClass}">${btnLabel}</button>`;
+    item.querySelector('.lernpfad-btn').addEventListener('click', () => openUnit(unit));
+    return item;
+  };
+
   // Interleaving-Toggle: Themen aus verschiedenen Kapiteln abwechselnd üben
   const controlsBar = document.createElement('div');
   controlsBar.className = 'lernpfad-controls';
@@ -4784,7 +4849,17 @@ function loadLernpfad() {
   controlsBar.appendChild(rescanBtn);
   list.appendChild(controlsBar);
 
-  if (interleavedMode && moduleStructure?.kapitel?.length > 1) {
+  const grain = GRAIN_BY_DIFF[activeDiff] || 'topic';
+
+  if (grain !== 'topic' && moduleStructure?.kapitel?.length) {
+    // Hebel 2: wenige große Einheiten (Cluster/Kapitel) – je eine integrierte Klausuraufgabe.
+    const units = pathUnits(activeDiff);
+    const label = document.createElement('div');
+    label.className = 'kap-restructure-hint';
+    label.innerHTML = `<span>🎯 ${activeLvl.name}: zusammengesetzte Klausuraufgaben – ${units.length} Einheiten statt ${pathTopics().length} Einzelthemen. Eine erledigt alle ihre Themen.</span>`;
+    list.appendChild(label);
+    units.forEach(u => list.appendChild(makeUnitItem(u)));
+  } else if (interleavedMode && moduleStructure?.kapitel?.length > 1) {
     // Round-robin über Kapitel: Thema 1 aus Kap1, Thema 1 aus Kap2, Thema 2 aus Kap1 …
     const maxLen = Math.max(...moduleStructure.kapitel.map(k => k.themen.length));
     const label = document.createElement('div');
@@ -5164,6 +5239,12 @@ function saveTopicMeta() {
 }
 
 function openTopicView(topic) {
+  openUnit({ kind: 'topic', themen: [topic], name: topic });
+}
+
+function openUnit(unit) {
+  currentUnit = unit;
+  const topic = unit.name;
   currentExplainerTopic = topic;
   lernenTopicData = null;
   lernenLoesung   = null; // Musterlösung-Prefetch des vorherigen Themas verwerfen
@@ -5209,7 +5290,7 @@ function openTopicView(topic) {
   document.getElementById('lernen-done-btn').classList.add('hidden');
   lernenSwitchStep(1);
   // Vorwissen-Abfrage entfernt – direkt zur Erklärung, egal ob neu, fällig oder Wiederholung.
-  const isDue = topicReviewDue(topic + '::' + lernenCurrentDiff);
+  const isDue = unit.themen.some(t => topicReviewDue(t + '::' + lernenCurrentDiff));
   document.getElementById('lernen-erkl-loading').style.display = '';
   loadTopicContent(topic, isDue);
 }
@@ -5229,10 +5310,11 @@ function lernenSwitchStep(step) {
 }
 
 // ── Lernen content cache (localforage / IndexedDB) ───────────────────────
-function lernenCacheKey(topic) {
+function lernenCacheKey() {
   const diff = selectedDiffIdx !== null ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger') : 'auto';
-  // An die stabile ID gekoppelt → Erklärungs-/Aufgaben-Cache überlebt Umbenennen.
-  return `lc2_${sessionId}_${topicId(topic)}_${diff}`;
+  // An die stabile Einheits-ID gekoppelt → Cache überlebt Umbenennen/Re-Scan und
+  // trennt zusammengesetzte Einheiten sauber von Einzel-Themen.
+  return `lc2_${sessionId}_${unitId(curUnit())}_${diff}`;
 }
 
 async function loadExamDocContext(subjId) {
@@ -5363,7 +5445,7 @@ function renderTopicContent(topic, data) {
 
 async function loadTopicContent(topic, forceFresh = false) {
   // Serve from cache if available (außer bei fälliger Wiederholung → frische Aufgabe)
-  const cached = forceFresh ? null : await localforage.getItem(lernenCacheKey(topic)).catch(() => null);
+  const cached = forceFresh ? null : await localforage.getItem(lernenCacheKey()).catch(() => null);
   // Stale guard: user may have navigated to a different topic while awaiting cache/AI
   if (currentExplainerTopic !== topic) return;
   if (cached) {
@@ -5375,18 +5457,29 @@ async function loadTopicContent(topic, forceFresh = false) {
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
   const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
-  const sibs = useExam ? chapterSiblings(topic) : [];
-  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, chapterOf(topic)?.lernziel || '');
+  // Einheit bestimmt den Behandlungsgegenstand: ein Thema ODER ein zusammengesetzter
+  // Satz (Cluster/Kapitel). Composite → die Member sind der Integrations-Satz.
+  const unit = curUnit();
+  const isComposite = unit.kind !== 'topic';
+  const sibs = isComposite ? unit.themen : (useExam ? chapterSiblings(topic) : []);
+  const lernziel = unit.lernziel || chapterOf(unit.themen[0])?.lernziel || chapterOf(topic)?.lernziel || '';
+  const subjectClause = isComposite
+    ? `die folgenden zusammengehörenden Themen GEMEINSAM als EINE Lerneinheit: ${unit.themen.join(', ')}`
+    : `das Thema "${topic}"`;
+  const compositeNote = isComposite
+    ? `\n- Dies ist EINE zusammengesetzte Einheit: gib eine kompakte gemeinsame Einordnung (nicht jedes Thema einzeln durchdeklinieren) und in "aufgabe" GENAU EINE integrierte, mehrteilige Aufgabe, die die Themen verbindet.`
+    : '';
+  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
   try {
     const raw = await claudeLocal(
-      [{ role: 'user', content: `Erkläre das Thema "${topic}" auf dem vorgegebenen Niveau.` }],
+      [{ role: 'user', content: `Behandle ${subjectClause} auf dem vorgegebenen Niveau.` }],
       [{
         type: 'text',
         text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
         cache_control: { type: 'ephemeral' },
       }, {
         type: 'text',
-        text: `Erkläre das Thema "${topic}" AUSSCHLIESSLICH auf Basis der obigen Unterlagen. Suche die zum Thema passenden Stellen im gesamten Material.\n\n${diffInstr}\n\nWICHTIG:\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
+        text: `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der obigen Unterlagen. Suche die passenden Stellen im gesamten Material.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
       }],
       2500
     );
@@ -5397,7 +5490,7 @@ async function loadTopicContent(topic, forceFresh = false) {
     if (m) { try { data = parseJsonLoose(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
-    localforage.setItem(lernenCacheKey(topic), data).catch(() => {});
+    localforage.setItem(lernenCacheKey(), data).catch(() => {});
     stopProg();
     renderTopicContent(topic, data);
     prefetchLernenLoesung(); // Musterlösung im Hintergrund vorbereiten
@@ -5433,17 +5526,21 @@ async function regenLernenTask() {
   try {
     const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
-    const sibs = useExam ? chapterSiblings(topic) : [];
-    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, chapterOf(topic)?.lernziel || '');
+    const unit = curUnit();
+    const isComposite = unit.kind !== 'topic';
+    const sibs = isComposite ? unit.themen : (useExam ? chapterSiblings(topic) : []);
+    const lernziel = unit.lernziel || chapterOf(unit.themen[0])?.lernziel || chapterOf(topic)?.lernziel || '';
+    const gegenstand = isComposite ? `zur Einheit "${topic}" (Themen: ${unit.themen.join(', ')})` : `zum Thema "${topic}"`;
+    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
     const raw = await claudeLocal(
-      [{ role: 'user', content: `Generiere eine neue Übungsaufgabe zum Thema "${topic}".` }],
+      [{ role: 'user', content: `Generiere eine neue Übungsaufgabe ${gegenstand}.` }],
       [{
         type: 'text',
         text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
         cache_control: { type: 'ephemeral' },
       }, {
         type: 'text',
-        text: `Generiere eine NEUE, andere Übungsaufgabe zum Thema "${topic}" – ausschließlich auf Basis der obigen Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
+        text: `Generiere eine NEUE, andere Übungsaufgabe ${gegenstand} – ausschließlich auf Basis der obigen Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
       }],
       600
     );
@@ -5453,7 +5550,7 @@ async function regenLernenTask() {
     if (newAufgabe && newAufgabe.trim()) {
       lernenTopicData.aufgabe = newAufgabe;
       document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(newAufgabe));
-      localforage.setItem(lernenCacheKey(topic), lernenTopicData).catch(() => {});
+      localforage.setItem(lernenCacheKey(), lernenTopicData).catch(() => {});
       // Clear canvas and textarea for fresh start
       if (lernenCtx) {
         lernenCtx.globalCompositeOperation = 'source-over';
@@ -5924,39 +6021,44 @@ async function lernenQaSend() {
 }
 
 async function markTopicDone() {
-  const topic = currentExplainerTopic;
-  if (!topic || !sessionId) return;
+  const unit = curUnit();
+  const members = (unit.themen || []).filter(Boolean);
+  if (!members.length || !sessionId) return;
   closeLernenTopic();
-  const key = topic + '::' + lernenCurrentDiff;
-  // Erstlern-Erkennung id-basiert: ein bereits (auch unter altem Namen) gelerntes
-  // Thema gilt nicht erneut als "zum ersten Mal" → kein doppeltes XP/Eintrag.
-  const isFirstLearn = !learnedKeySet().has(learnedKey(topic, lernenCurrentDiff));
-  const wasReviewDue = !isFirstLearn && topicReviewDue(key);
-  if (isFirstLearn) {
-    learnedTopics.push(key);
-    localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
-    api(`/api/subjects/${sessionId}/learned-topics`, {
-      method: 'POST',
-      body: JSON.stringify({ topic: key }),
-    }).catch(() => {});
+  // Eine zusammengesetzte Einheit erledigt ALLE ihre Member-Themen auf diesem Niveau
+  // (Hebel 2). Zusammen mit Hebel 1 sind damit auch alle tieferen Stufen abgedeckt.
+  const set = learnedKeySet();
+  let anyFirst = false, anyReviewDue = false;
+  for (const t of members) {
+    const key = topicKey(t, lernenCurrentDiff);            // tid::diff
+    const first = !set.has(resolveKey(key));
+    if (first) {
+      anyFirst = true;
+      learnedTopics.push(key);
+      api(`/api/subjects/${sessionId}/learned-topics`, {
+        method: 'POST', body: JSON.stringify({ topic: key }),
+      }).catch(() => {});
+    } else if (topicReviewDue(key)) {
+      anyReviewDue = true;
+    }
+    // Stärke + Zeitpunkt je Member merken (bestimmt die Wiederholungs-Fälligkeit).
+    topicMeta[normFullKey(key)] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts) };
   }
-  // Stärke + Zeitpunkt merken: bestimmt wann die Wiederholung fällig wird.
-  // Normalisierter Key, damit die Wiederholung ein späteres Umbenennen übersteht.
-  topicMeta[normFullKey(key)] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts) };
+  if (anyFirst) localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
   saveTopicMeta();
   renderMilestone();
   loadLernpfad();
-  sessionTick('topic', topic);
+  sessionTick('topic', unit.name);
   // XP nur für echten Lernfortschritt: voll beim ersten Mal, halb für fällige
   // Wiederholung (Retrieval belohnen!), nichts für wiederholtes Abhaken.
   const fullXP = XP_BY_DIFF[lernenCurrentDiff] || 40;
-  if (isFirstLearn)       addXP(fullXP, `"${topic}" gelernt`);
-  else if (wasReviewDue)  addXP(Math.round(fullXP / 2), `"${topic}" aufgefrischt`);
+  if (anyFirst)            addXP(fullXP, `"${unit.name}" gelernt`);
+  else if (anyReviewDue)   addXP(Math.round(fullXP / 2), `"${unit.name}" aufgefrischt`);
   // Kapitel komplett? → Konfetti (auf/über Niveau, konsistent mit dem Lernpfad)
   if (moduleStructure?.kapitel) {
     const need = diffIdx(lernenCurrentDiff);
     const tDone = t => topicMaxLevel(t) >= need;
-    const kap = moduleStructure.kapitel.find(k => k.themen.includes(topic));
+    const kap = moduleStructure.kapitel.find(k => k.themen.includes(members[0]));
     if (kap && kap.themen.every(tDone)) {
       confettiBurst();
       setTimeout(() => toast(`📗 Kapitel "${kap.titel}" abgeschlossen!`, 'success', 4000), 300);

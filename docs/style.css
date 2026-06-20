@@ -2097,6 +2097,14 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
   background: rgba(52,199,89,.12); color: var(--green); vertical-align: middle;
 }
 
+/* Anzahl-Badge für zusammengesetzte Einheiten (Hebel 2) */
+.lernpfad-unit-count {
+  display: inline-block; margin-left: 6px; font-size: 11px; font-weight: 600;
+  padding: 1px 7px; border-radius: 8px;
+  background: rgba(88,86,214,.12); color: var(--purple); vertical-align: middle;
+}
+.lernpfad-unit .lernpfad-name { font-weight: 600; }
+
 /* Wiederholen button for done topics */
 .lernpfad-btn-repeat {
   background: transparent !important;
