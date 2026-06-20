@@ -4296,6 +4296,23 @@ function dedupeStructure(struct) {
   return { ...struct, kapitel };
 }
 
+// Normalisierter Schlüssel "<thema>::<niveau>" für Erledigt-Vergleiche. Nutzt
+// dieselbe Normalisierung wie die Dedup, damit Häkchen/Fortschritt erhalten bleiben,
+// wenn ein Thema umbenannt oder neu gescannt wird ("Die Lichtreaktion" ==
+// "Lichtreaktion"). Geschrieben wird weiter unter dem aktuellen Namen (markTopicDone) –
+// der Lese-Vergleich normalisiert nur, sodass Altbestand wieder zugeordnet wird.
+function learnedKey(topic, diff) {
+  return normTopic(topic) + '::' + diff;
+}
+
+// Set aller gelernten Themen als normalisierte "<thema>::<niveau>"-Schlüssel.
+function learnedKeySet() {
+  return new Set(learnedTopics.map(lt => {
+    const [name, diff] = lt.split('::');
+    return normTopic(name) + '::' + (diff || 'einsteiger');
+  }));
+}
+
 // Einzige Wahrheitsquelle für die Themen des Lernpfads: exakt die Liste, die auch
 // in loadLernpfad() gerendert wird. Wenn eine Kapitelstruktur existiert, zählen
 // ALLE ihre Themen (ungekappt) – sonst die flache scannedTopics-Liste. So bleibt
@@ -4308,9 +4325,9 @@ function pathTopics() {
 
 // Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
 function topicsDoneAtDiff(diff) {
-  const current = new Set(pathTopics());
+  const current = new Set(pathTopics().map(normTopic));
   return new Set(
-    learnedTopics.filter(t => t.endsWith('::' + diff)).map(t => t.split('::')[0]).filter(t => current.has(t))
+    learnedTopics.filter(t => t.endsWith('::' + diff)).map(t => normTopic(t.split('::')[0])).filter(t => current.has(t))
   ).size;
 }
 
@@ -4449,14 +4466,14 @@ function loadLernpfad() {
   list.innerHTML = '';
   const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const activeDiff = activeLvl.diff || 'einsteiger';
-  const learnedSet = new Set(learnedTopics);
+  const learnedSet = learnedKeySet();
   // "Getan" zählt PRO Niveau: ein Thema gilt nur als fertig, wenn es auf dem
   // AKTIVEN Schwierigkeitsgrad gelernt wurde – konsistent mit den Stufen-Kreisen
   // der Meilenstein-Skala. Themen, die nur auf einem niedrigeren Niveau gelernt
   // wurden, sind hier NICHT fertig, bekommen aber einen "⬆ Vertiefen"-Hinweis.
-  const learnedBaseNames = new Set(learnedTopics.map(lt => lt.includes('::') ? lt.split('::')[0] : lt));
-  const isTopicDone  = topic => learnedSet.has(topic + '::' + activeDiff);
-  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseNames.has(topic);
+  const learnedBaseNames = new Set(learnedTopics.map(lt => normTopic(lt.split('::')[0])));
+  const isTopicDone  = topic => learnedSet.has(learnedKey(topic, activeDiff));
+  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseNames.has(normTopic(topic));
   let foundCurrent = false;
   const makeItem = topic => {
     const isDone       = isTopicDone(topic);                 // auf aktivem Niveau
@@ -4624,8 +4641,8 @@ async function buildSessionPlan(budget) {
   const activeIdx  = selectedDiffIdx !== null ? selectedDiffIdx : (ms.levelNum - 1);
   const activeLvl  = MILESTONE_LEVELS[activeIdx];
   const activeDiff = activeLvl.diff || 'einsteiger';
-  const learnedSet = new Set(learnedTopics);
-  const isDone = t => learnedSet.has(t + '::' + activeDiff);
+  const learnedSet = learnedKeySet();
+  const isDone = t => learnedSet.has(learnedKey(t, activeDiff));
   const isDue  = t => isDone(t) && topicReviewDue(t + '::' + activeDiff);
   const due  = scannedTopics.filter(isDue);
   const open = scannedTopics.filter(t => !isDone(t));
@@ -4723,8 +4740,8 @@ function renderSessionBanner() {
     // Ausblick: nächstes offenes Thema als Köder für morgen
     const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const activeDiff = activeLvl.diff || 'einsteiger';
-    const lSet = new Set(learnedTopics);
-    const next = pathTopics().find(t => !lSet.has(t + '::' + activeDiff));
+    const lSet = learnedKeySet();
+    const next = pathTopics().find(t => !lSet.has(learnedKey(t, activeDiff)));
     el.innerHTML = `
       <div class="session-done-card">
         <div class="session-done-title">🎉 Session geschafft!</div>
@@ -5537,8 +5554,8 @@ async function markTopicDone() {
   else if (wasReviewDue)  addXP(Math.round(fullXP / 2), `"${topic}" aufgefrischt`);
   // Kapitel komplett? → Konfetti
   if (moduleStructure?.kapitel) {
-    const learnedSet = new Set(learnedTopics);
-    const tDone = t => learnedSet.has(t + '::' + lernenCurrentDiff);
+    const learnedSet = learnedKeySet();
+    const tDone = t => learnedSet.has(learnedKey(t, lernenCurrentDiff));
     const kap = moduleStructure.kapitel.find(k => k.themen.includes(topic));
     if (kap && kap.themen.every(tDone)) {
       confettiBurst();
