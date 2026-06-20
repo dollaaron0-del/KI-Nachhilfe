@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '175';
+const APP_VERSION = '176';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -2603,15 +2603,46 @@ document.getElementById('lernziel-slider')?.addEventListener('input', async e =>
   }
 });
 
+// Lernbereich-Stand pro Pfad-Thema (für die Analyse + das Freischalten):
+// höchstes Niveau, Versuche, letzte Bewertung, Wiederholung fällig → daraus
+// Buckets (wackelig / nur niedrig / nie angefasst / sicher / fällig).
+const DIFF_NAMES = ['Einsteiger', 'Grundlagen', 'Lernender', 'Fortgeschritten', 'Prüfungsnah'];
+function collectLernStats() {
+  const topics = pathTopics();
+  const per = topics.map(name => {
+    const id = topicId(name);
+    let attempts = 0, due = false, score = null;
+    for (const k of Object.keys(topicMeta)) {
+      const r = resolveKey(k); const i = r.lastIndexOf('::');
+      if (i < 0 || r.slice(0, i) !== id) continue;
+      const m = topicMeta[k] || {};
+      attempts = Math.max(attempts, m.attempts || 0);
+      if (typeof m.score === 'number') score = score === null ? m.score : Math.min(score, m.score);
+      if (topicReviewDue(k)) due = true;
+    }
+    return { name, maxLevel: topicMaxLevel(name), attempts, due, score };
+  });
+  const weak  = per.filter(t => t.maxLevel >= 0 && (t.attempts >= 2 || (t.score !== null && t.score <= 1)));
+  const low   = per.filter(t => t.maxLevel >= 0 && t.maxLevel <= 1 && !weak.includes(t));
+  const solid = per.filter(t => t.maxLevel >= 3);
+  const untouched = per.filter(t => t.maxLevel < 0);
+  const due   = per.filter(t => t.due);
+  const active = per.filter(t => t.maxLevel >= 0).length;
+  const lernReadiness = topics.length
+    ? Math.round(per.reduce((a, t) => a + Math.max(0, t.maxLevel) / 4, 0) / topics.length * 100) : 0;
+  return { per, total: topics.length, active, weak, low, solid, untouched, due, lernReadiness };
+}
+
 function refreshAnalysisState() {
   const q    = sessionMeta?.quizStats?.questions || [];
-  const need = Math.max(0, 3 - q.length);
+  const ls   = collectLernStats();
+  const ready = q.length >= 3 || ls.active >= 3;
   const btn  = document.getElementById('analysis-btn');
   const hint = document.getElementById('analysis-hint');
-  btn.disabled = need > 0;
-  hint.textContent = need > 0
-    ? `Noch ${need} Quiz-Frage${need > 1 ? 'n' : ''} für die Analyse.`
-    : `${q.length} Fragen beantwortet – Analyse verfügbar.`;
+  btn.disabled = !ready;
+  hint.textContent = ready
+    ? `${q.length} Quiz-Fragen · ${ls.active}/${ls.total} Lernpfad-Themen bearbeitet – Analyse verfügbar.`
+    : `Beantworte 3 Quiz-Fragen ODER bearbeite 3 Themen im Lernpfad für eine Analyse.`;
 }
 
 function renderSparkline() {
@@ -2633,20 +2664,38 @@ async function runAnalysis() {
   document.getElementById('analysis-loading').classList.remove('hidden');
   const analysisDone = startProgress('analysis-progress-bar', 'analysis-progress-pct', 20000);
 
-  const questions = sessionMeta.quizStats.questions;
-  const statsText = questions.map((q, i) =>
-    `${i+1}. [${q.topic}] ${q.score}/3 ${q.correct ? '✓' : '✗'}\n   F: ${q.question}\n   A: ${q.userAnswer}`
-  ).join('\n\n');
-  const raw        = Math.round(questions.reduce((a, q) => a + q.score, 0) / (questions.length * 3) * 100);
+  const questions = sessionMeta.quizStats.questions || [];
+  const ls = collectLernStats();
+  const statsText = questions.length
+    ? questions.map((q, i) =>
+        `${i+1}. [${q.topic}] ${q.score}/3 ${q.correct ? '✓' : '✗'}\n   F: ${q.question}\n   A: ${q.userAnswer}`
+      ).join('\n\n')
+    : '(keine Quiz-Daten – Einschätzung stützt sich auf den Lernbereich)';
+  // Klausurbereitschaft aus BEIDEN Quellen: Quiz-Score und Lernbereich-Höchstlevel.
+  const quizRaw = questions.length ? Math.round(questions.reduce((a, q) => a + q.score, 0) / (questions.length * 3) * 100) : null;
+  const lernRaw = ls.active ? ls.lernReadiness : null;
+  const raw = (quizRaw != null && lernRaw != null) ? Math.round((quizRaw + lernRaw) / 2)
+            : (quizRaw != null ? quizRaw : (lernRaw != null ? lernRaw : 0));
   const percent    = Math.max(0, raw - 12);
   const targetScore = sessionMeta.targetScore || 75;
+  const names = arr => arr.length ? arr.map(t => t.name).join(', ') : '–';
+  const lernText = ls.total
+    ? `LERNBEREICH-STAND (im Lernpfad gelöste Aufgaben, ${ls.active}/${ls.total} Themen bearbeitet):
+- Wackelig (mehrere Versuche / schwache Bewertung): ${names(ls.weak)}
+- Nur auf niedriger Stufe (max. Grundlagen): ${names(ls.low)}
+- Noch nicht bearbeitet: ${names(ls.untouched)}
+- Sicher (Fortgeschritten/Prüfungsnah erreicht): ${names(ls.solid)}
+- Wiederholung fällig: ${names(ls.due)}`
+    : '';
 
   const analysisPrmt = `Erstelle eine KRITISCHE, PESSIMISTISCHE Lernstandsanalyse für "${sessionMeta.name}".
 
 PFLICHT: Sei bewusst streng. Prüfungen verlaufen unter Druck schlechter als Übungen.
-Klausurbereitschaft: ${percent}% (pessimistisch korrigiert von ${raw}%).
+Klausurbereitschaft: ${percent}% (pessimistisch korrigiert von ${raw}%; Quiz ${quizRaw ?? '–'}% / Lernbereich ${lernRaw ?? '–'}%).
 Lernziel des Schülers: ${targetScore}%.
 Vermeide falsche Sicherheit. Sage klar was noch fehlt.
+
+Nutze SOWOHL die Quiz-Ergebnisse ALS AUCH den Lernbereich-Stand. Nenne in "Kritische Lücken" konkret die wackeligen, die nur niedrig bearbeiteten UND die noch nicht bearbeiteten Themen aus dem Lernbereich – nicht nur Quiz-Themen.
 
 Berücksichtige lernpsychologische Erkenntnisse in deinen Empfehlungen:
 - Spaced Repetition: Welche Themen müssen wiederholt werden und wann?
@@ -2679,7 +2728,7 @@ Format:
 
   try {
     const analysis = await claudeLocal(
-      [{ role: 'user', content: `Quiz-Ergebnisse:\n${statsText}\nRoh: ${raw}%` }],
+      [{ role: 'user', content: `Quiz-Ergebnisse:\n${statsText}\n\n${lernText}\n\nQuiz-Rohwert: ${quizRaw ?? '–'}% · Lernbereich: ${lernRaw ?? '–'}% · kombiniert: ${raw}%` }],
       sysBlocks(analysisPrmt), 2000,
     );
     const color = scoreColor(percent);
@@ -2691,7 +2740,7 @@ Format:
         <div class="gauge-fill" style="width:${percent}%;background:${color}"></div>
         <div class="gauge-target" style="left:${targetLeft}%">🎯</div>
       </div>
-      <div class="gauge-meta">${questions.length} Fragen · Rohwert: ${raw}% → korrigiert: ${percent}% · Ziel: ${targetScore}%</div>`;
+      <div class="gauge-meta">${questions.length} Quiz-Fragen · ${ls.active}/${ls.total} Lernpfad-Themen · Quiz ${quizRaw ?? '–'}% / Lern ${lernRaw ?? '–'}% → ${percent}% · Ziel: ${targetScore}%</div>`;
     document.getElementById('analysis-body').innerHTML = safeHtml(md(analysis));
     renderSparkline();
     renderProgressChart();
@@ -6071,7 +6120,8 @@ async function markTopicDone() {
       anyReviewDue = true;
     }
     // Stärke + Zeitpunkt je Member merken (bestimmt die Wiederholungs-Fälligkeit).
-    topicMeta[normFullKey(key)] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts) };
+    topicMeta[normFullKey(key)] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts),
+      score: (lernenLastEval && typeof lernenLastEval.score === 'number') ? lernenLastEval.score : null };
   }
   if (anyFirst) localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
   saveTopicMeta();
