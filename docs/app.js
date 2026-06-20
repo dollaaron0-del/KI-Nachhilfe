@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '165';
+const APP_VERSION = '166';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -14,8 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // URL-/Hash-Gefummel nötig, übersteht Cache-Leeren & SPA-Navigation.
   el.style.cursor = 'pointer';
   el.addEventListener('click', () => {
-    const onNow = localStorage.getItem('pendebug') === '1';
-    try { onNow ? localStorage.removeItem('pendebug') : localStorage.setItem('pendebug', '1'); } catch (_) {}
+    const off = localStorage.getItem('pendebug_off') === '1';
+    try { off ? localStorage.removeItem('pendebug_off') : localStorage.setItem('pendebug_off', '1'); } catch (_) {}
     location.reload();
   });
 });
@@ -6192,10 +6192,11 @@ if ('serviceWorker' in navigator) {
 // ob nach pointercancel noch moves kommen, und die Init-Maße. Wieder entfernen,
 // sobald die Ursache gefunden ist. Buttons: COPY = Log in Zwischenablage, OFF = aus.
 (function penDebug() {
-  const on = location.hash.toLowerCase().includes('pendebug')
-          || localStorage.getItem('pendebug') === '1';
-  if (!on) { window.penDebugLog = null; return; }
-  try { localStorage.setItem('pendebug', '1'); } catch (_) {}
+  // Diagnose-Build: Overlay ist standardmäßig AN (keine Aktivierung nötig).
+  // OFF-Button (oder Tipp aufs Versions-Label) setzt pendebug_off und blendet es aus.
+  let suppressed = false;
+  try { suppressed = localStorage.getItem('pendebug_off') === '1'; } catch (_) {}
+  if (suppressed) { window.penDebugLog = null; return; }
 
   const LOG = [];
   let pre, rafPending = false;
@@ -6241,8 +6242,7 @@ if ('serviceWorker' in navigator) {
     });
     const clrBtn = mk('CLR', () => { LOG.length = 0; render(); });
     const offBtn = mk('OFF', () => {
-      try { localStorage.removeItem('pendebug'); } catch (_) {}
-      location.hash = '';
+      try { localStorage.setItem('pendebug_off', '1'); } catch (_) {}
       box.remove();
       window.penDebugLog = null;
       location.reload();
