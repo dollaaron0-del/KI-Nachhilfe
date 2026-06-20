@@ -1372,6 +1372,29 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 .kb-bar-fill { height: 100%; background: linear-gradient(90deg,#8b5cf6,#10b981); border-radius: 6px; transition: width .4s; }
 .kb-cta  { width: 100%; }
 
+/* Einmalige Vorbereitungs-Hinweis-Karte im Lern-Tab */
+.lern-tip-card {
+  position: relative;
+  flex-shrink: 0;
+  margin: 0 16px 12px;
+  padding: 12px 36px 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--purple);
+  border-radius: 10px;
+}
+.lern-tip-card.hidden { display: none !important; }
+.lern-tip-head { font-weight: 700; font-size: 14px; color: var(--label); margin-bottom: 6px; }
+.lern-tip-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text2); line-height: 1.5; }
+.lern-tip-list li { margin-bottom: 5px; }
+.lern-tip-list li:last-child { margin-bottom: 0; }
+.lern-tip-close {
+  position: absolute; top: 6px; right: 8px;
+  background: none; border: none; cursor: pointer;
+  font-size: 20px; line-height: 1; color: var(--text2);
+  padding: 2px 6px;
+}
+
 /* Exam recommendation banner */
 .exam-rec-banner {
   background: rgba(88,86,214,0.1);

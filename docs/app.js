@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '174';
+const APP_VERSION = '175';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -4615,6 +4615,7 @@ function renderMilestone() {
     if (title) title.style.display = 'none';
     updateExamRecBanner();
     renderKlausurBridge(null);
+    renderLernTip();
     return;
   }
   const m = calculateMilestone();
@@ -4675,6 +4676,34 @@ function renderMilestone() {
   });
   updateExamRecBanner(m);
   renderKlausurBridge(m);
+  renderLernTip();
+}
+
+// Einmalige Hinweis-Karte: beste Vorbereitungs-Strategie (nicht bei Einsteiger
+// anfangen, kalibrieren, bis Prüfungsnah hocharbeiten, dann Probeklausur). Per
+// localStorage dauerhaft ausblendbar – nervt nach dem Wegklicken nicht mehr.
+function renderLernTip() {
+  const el = document.getElementById('lern-tip-card');
+  if (!el) return;
+  let off = false;
+  try { off = localStorage.getItem('lerntip_v1') === 'off'; } catch (_) {}
+  if (off || !scannedTopics.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  if (el.dataset.rendered) return;   // Inhalt nur einmal aufbauen
+  el.dataset.rendered = '1';
+  el.innerHTML = `
+    <button class="lern-tip-close" title="Ausblenden" aria-label="Ausblenden">×</button>
+    <div class="lern-tip-head">💡 So bereitest du dich am besten vor</div>
+    <ol class="lern-tip-list">
+      <li><b>Nicht bei Einsteiger anfangen.</b> Mit Vorwissen aus der Vorlesung startest du auf <b>Lernender</b> – ein auf höherer Stufe gemeistertes Thema zählt automatisch für die niedrigeren.</li>
+      <li><b>Kurz kalibrieren:</b> Öffne ein Thema auf Lernender/Fortgeschritten. Zu leicht → Stufe hoch; verloren → eine Stufe runter (geht pro Thema).</li>
+      <li><b>Hocharbeiten bis Prüfungsnah</b> – dort werden mehrere Themen zu einer Klausuraufgabe. Genau das prüft die Klausur.</li>
+      <li><b>Zum Schluss:</b> Probeklausur schreiben und die <b>🔄 fällig</b> markierten Themen auffrischen.</li>
+    </ol>`;
+  el.querySelector('.lern-tip-close').addEventListener('click', () => {
+    try { localStorage.setItem('lerntip_v1', 'off'); } catch (_) {}
+    el.classList.add('hidden');
+  });
 }
 
 // Klausur-Brücke: macht die Probeklausur dort sichtbar, wo gelernt wird, und rahmt
