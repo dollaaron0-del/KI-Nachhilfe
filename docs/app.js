@@ -1,5 +1,15 @@
 'use strict';
 
+// Einzige Quelle der Wahrheit für die laufende Version. Wird unten ins
+// #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
+// (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
+// Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
+const APP_VERSION = '164';
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('app-version');
+  if (el) el.textContent = 'v' + APP_VERSION;
+});
+
 // ── Global error safety net ───────────────────────────────────────────────
 window.addEventListener('error', e => {
   console.error('App error:', e.message, e.filename, e.lineno);
@@ -6233,7 +6243,7 @@ if ('serviceWorker' in navigator) {
       + 'overflow:hidden;pointer-events:none;';
     box.append(bar, pre);
     document.body.appendChild(box);
-    push(`READY dpr=${window.devicePixelRatio} v=app.js?v=163`);
+    push(`READY dpr=${window.devicePixelRatio} v=app.js?v=${APP_VERSION}`);
     push(`UA ${navigator.userAgent}`);
   }
   if (document.body) build(); else document.addEventListener('DOMContentLoaded', build);
