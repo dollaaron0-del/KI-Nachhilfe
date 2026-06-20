@@ -1359,7 +1359,10 @@ async function openSubject(subj) {
     ...((await localforage.getItem(`tuid_${subj.id}`).catch(() => null)) || {}),
     ...((moduleStructure && moduleStructure.ids) || {}),
   };
-  if (ensureTopicUids()) persistTopicUids(subj.id);
+  // Kollabierte IDs (HTTP-randomUUID-Bug) reparieren, fehlende vergeben, dann 1× zurückschreiben.
+  let tuidChanged = dedupeTopicUids();
+  if (ensureTopicUids()) tuidChanged = true;
+  if (tuidChanged) persistTopicUids(subj.id);
 
   const serverLearned = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => null);
   const localLearned  = (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
@@ -4331,10 +4334,40 @@ function dedupeStructure(struct) {
 // liegt in der fach-global geteilten Struktur, sodass alle Geräte dieselben IDs
 // sehen. Fehlt eine ID, degradiert alles sauber auf den normalisierten Namen (v155).
 function newTopicUid() {
-  const r = self.crypto?.randomUUID?.() || (Date.now().toString(16) + Math.random().toString(16).slice(2));
-  return 't_' + r.replace(/[^a-f0-9]/gi, '').slice(0, 10);
+  // ACHTUNG: crypto.randomUUID gibt es nur in Secure Contexts – auf HTTP (kein HTTPS
+  // hier) ist es undefined. Der alte Fallback Date.now().toString(16)+Math.random()
+  // war ~11 Hex-Zeichen Zeitstempel; .slice(0,10) schnitt den Zufallsteil weg, sodass
+  // alle in derselben Millisekunde erzeugten IDs identisch wurden (Fortschritt
+  // kollabierte auf 1 Thema). getRandomValues funktioniert auch über HTTP.
+  const c = self.crypto;
+  let hex;
+  if (c?.randomUUID) {
+    hex = c.randomUUID().replace(/[^a-f0-9]/gi, '');
+  } else if (c?.getRandomValues) {
+    const a = new Uint8Array(8); c.getRandomValues(a);
+    hex = Array.from(a, b => b.toString(16).padStart(2, '0')).join('');
+  } else {
+    // Letzter Notnagel: Zufall ZUERST, damit slice() ihn nicht abschneidet.
+    hex = (Math.random().toString(16).slice(2) + Date.now().toString(16)).replace(/[^a-f0-9]/gi, '');
+  }
+  return 't_' + hex.slice(0, 12);
 }
 const isTopicUid = s => /^t_[a-f0-9]+$/i.test(s);
+
+// Selbstheilung für "kollabierte" IDs (mehrere Themen auf derselben UID, s. o.):
+// jede UID darf nur EINEM normalisierten Namen gehören – Dubletten bekommen neue,
+// eindeutige IDs. true, wenn etwas repariert wurde. Da Fortschritt über die NAMEN
+// auflöst (resolveKey → topicId(name)), bleibt bestehender Fortschritt erhalten.
+function dedupeTopicUids() {
+  const owner = new Map();   // uid → erster normName, der sie behält
+  let changed = false;
+  for (const k of Object.keys(topicUids)) {
+    const u = topicUids[k];
+    if (owner.has(u)) { topicUids[k] = newTopicUid(); changed = true; }
+    else owner.set(u, k);
+  }
+  return changed;
+}
 
 // Stabile ID eines Themas, sonst dessen normalisierter Name (v155-Fallback).
 function topicId(name) {
