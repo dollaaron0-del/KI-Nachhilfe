@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '166';
+const APP_VERSION = '171';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -2535,8 +2535,15 @@ Kombiniere mehrere Konzepte pro Aufgabe, teste Grenzfälle und Ausnahmen, verlan
 Zeitdruck: kompakter und dichter als normal.`,
   };
 
+  // Klausur an den Lernpfad koppeln: genau die Themen abfragen, die der/die
+  // Studierende im Lern-Bereich durcharbeitet → die Lernaufgaben "zahlen" sichtbar
+  // auf die Klausur ein, keine fremden/lückenhaften Fragen.
+  const curriculum = moduleStructure?.kapitel?.length
+    ? `\n\nDECKE GENAU DIESE THEMEN AB (das ist der Lernpfad des/der Studierenden – stelle KEINE Fragen zu Themen außerhalb dieser Liste, aber decke die Breite ab):\n${moduleStructure.kapitel.map(k => `- ${k.titel}: ${k.themen.join(', ')}`).join('\n')}`
+    : '';
+
   const examPrompt = `Erstelle eine Probeklausur für "${sessionMeta.name}".
-${diffInstructions[selDiff] || diffInstructions.mittel}
+${diffInstructions[selDiff] || diffInstructions.mittel}${curriculum}
 
 # Probeklausur – ${sessionMeta.name}
 **Bearbeitungszeit:** XX Min | **Punkte:** XX
@@ -4494,6 +4501,18 @@ function pathTopics() {
   return scannedTopics;
 }
 
+// Das Kapitel, zu dem ein Thema gehört (für integrierte Aufgaben auf hohem Niveau).
+function chapterOf(topic) {
+  return moduleStructure?.kapitel?.find(k => k.themen.includes(topic)) || null;
+}
+
+// Geschwister-Themen desselben Kapitels – auf hohem Niveau werden sie in EINE
+// zusammengesetzte, klausurartige Aufgabe verwoben (statt 30 isolierter Krümel).
+function chapterSiblings(topic) {
+  const k = chapterOf(topic);
+  return k ? k.themen.filter(t => t !== topic) : [];
+}
+
 // Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
 function topicsDoneAtDiff(diff) {
   const current = new Set(pathTopics().map(topicId));
@@ -4550,6 +4569,7 @@ function renderMilestone() {
     banner.classList.add('hidden');
     if (title) title.style.display = 'none';
     updateExamRecBanner();
+    renderKlausurBridge(null);
     return;
   }
   const m = calculateMilestone();
@@ -4609,6 +4629,55 @@ function renderMilestone() {
     loadLernpfad();
   });
   updateExamRecBanner(m);
+  renderKlausurBridge(m);
+}
+
+// Klausur-Brücke: macht die Probeklausur dort sichtbar, wo gelernt wird, und rahmt
+// den Lernpfad als Weg dorthin. Die Botschaft skaliert mit dem Fortschritt, damit
+// klar ist: jede Lernaufgabe zahlt auf die Klausur ein (die genau diese Themen testet).
+function renderKlausurBridge(m) {
+  const el = document.getElementById('klausur-bridge');
+  if (!el) return;
+  if (!m || !scannedTopics.length) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const ready    = m.overallPct;
+  // Manuell gewählte Stufe hat Vorrang vor dem Auto-Level: wer den Pfad auf "Schwer"
+  // stellt, soll die Probeklausur auch auf Schwer bekommen – nicht auf der Auto-Stufe.
+  const recDiff  = (selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx].diff : m.diff) || 'mittel';
+  let head, sub, cta, auto;
+  if (ready >= 60) {
+    head = '🎯 Bereit für eine Probeklausur';
+    sub  = `Du hast ${ready}% deiner Themen gelernt. Teste dich jetzt unter Klausurbedingungen – das zeigt dir, wo du wirklich stehst.`;
+    cta  = 'Probeklausur starten →'; auto = true;
+  } else if (ready >= 25) {
+    head = '📝 Auf dem Weg zur Probeklausur';
+    sub  = `${ready}% gelernt. Eine Probeklausur testet genau die Themen aus deinem Lernpfad – mach jederzeit eine, um deine Lücken zu sehen.`;
+    cta  = 'Probeklausur ansehen →'; auto = false;
+  } else {
+    head = '📝 Dein Ziel: die Probeklausur';
+    sub  = `Jede Aufgabe hier bereitet dich auf die Probeklausur vor – sie zieht ihre Fragen aus genau diesen Themen.`;
+    cta  = 'Probeklausur ansehen →'; auto = false;
+  }
+  el.innerHTML = `
+    <div class="kb-head">${head}</div>
+    <div class="kb-sub">${sub}</div>
+    <div class="kb-bar"><div class="kb-bar-fill" style="width:${ready}%"></div></div>
+    <button class="btn-primary btn-sm kb-cta">${cta}</button>`;
+  el.querySelector('.kb-cta').addEventListener('click', () => startKlausurFromLernen(recDiff, auto));
+}
+
+// Wechselt zum Klausur-Tab, richtet die Schwierigkeit am Lern-Niveau aus und
+// startet (bei genug Fortschritt) direkt eine an den Lernpfad gekoppelte Klausur.
+function startKlausurFromLernen(diff, auto) {
+  switchMode('exam');
+  const target = ['leicht', 'mittel', 'schwer', 'pruefungsnah', 'experte'].includes(diff) ? diff : 'mittel';
+  const btn = document.querySelector(`.diff-btn[data-diff="${target}"]`);
+  if (btn && !btn.disabled) {
+    selDiff = target;
+    document.querySelectorAll('.diff-btn').forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  if (auto) generateExam();
 }
 
 function updateExamRecBanner(m) {
@@ -5188,10 +5257,18 @@ async function loadExamDocContext(subjId) {
   return '';
 }
 
-function getDiffInstr(effLevel, examCtx) {
+function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
   const examSnippet = examCtx && examCtx.trim()
     ? `\n\nKLAUSUR-REFERENZ: Orientiere dich an Aufgabentyp, Stil und Komplexität folgender Prüfungsunterlagen. Mimiere deren Formulierungen, Notation und Schwierigkeitsgrad:\n${examCtx.slice(0, 8000)}`
     : '';
+  // Auf hohem Niveau soll die Aufgabe NICHT bloß "härter" sein, sondern größer:
+  // mehrere Themen des Kapitels in EINER mehrteiligen Klausuraufgabe integrieren.
+  // Das spiegelt das Probeklausur-Format und behebt das "zu kleinteilig"-Gefühl.
+  const sibTxt = siblings.length
+    ? ` Verknüpfe es dabei mit verwandten Themen desselben Kapitels: ${siblings.slice(0, 4).join(', ')}.`
+    : '';
+  const zielTxt = lernziel ? ` Messlatte ist das Kapitel-Lernziel: "${lernziel}".` : '';
+  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen. Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab.`;
   switch (effLevel.diff) {
     case 'leicht':
       return `Niveau: GRUNDLAGEN (Stufe 2 von 5).
@@ -5204,11 +5281,11 @@ AUFGABE: Mittelschwere Aufgabe mit 2-3 Rechenschritten, realistisches Szenario.`
     case 'schwer':
       return `Niveau: FORTGESCHRITTEN (Stufe 4 von 5).
 ERKLÄRUNG: Gehe in die Tiefe. "Was ist das?" = vollständige fachliche Definition inkl. Randfälle und Einschränkungen. "Warum wichtig?" = Verbindung zu anderen Konzepten, theoretischer Hintergrund. "Beispiel" = komplexes Praxisbeispiel mit mehreren Einflussgrößen. Rechenbeispiel: mehrstufig, zeige alle Zwischenschritte und erkläre WARUM jeder Schritt nötig ist.
-AUFGABE: Komplexe Aufgabe mit mehreren Teilschritten, die mehrere Konzepte verknüpft.${examSnippet}`;
+AUFGABE: Eine zusammengesetzte, klausurnahe Aufgabe.${integrate}${examSnippet}`;
     case 'pruefungsnah':
       return `Niveau: EXPERTE (Stufe 5 von 5).
 ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: vollständig ausformuliert mit Formelangaben, Einheiten, Interpretation des Ergebnisses.
-AUFGABE: Klausuraufgabe mit vollständigem erwarteten Lösungsweg, Prüfungssprache.${examSnippet}`;
+AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil und Prüfungssprache.${integrate}${examSnippet}`;
     default:
       return `Niveau: EINSTEIGER (Stufe 1 von 5).
 ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn unbedingt nötig, dann maximal ein Schritt.
@@ -5297,7 +5374,8 @@ async function loadTopicContent(topic, forceFresh = false) {
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
   const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
-  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '');
+  const sibs = useExam ? chapterSiblings(topic) : [];
+  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, chapterOf(topic)?.lernziel || '');
   try {
     const raw = await claudeLocal(
       [{ role: 'user', content: `Erkläre das Thema "${topic}" auf dem vorgegebenen Niveau.` }],
@@ -5354,7 +5432,8 @@ async function regenLernenTask() {
   try {
     const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
-    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '');
+    const sibs = useExam ? chapterSiblings(topic) : [];
+    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, chapterOf(topic)?.lernziel || '');
     const raw = await claudeLocal(
       [{ role: 'user', content: `Generiere eine neue Übungsaufgabe zum Thema "${topic}".` }],
       [{
@@ -5456,6 +5535,17 @@ function lernenPos(e, canvas, r) {
   };
 }
 
+// TEMP-Diagnose v169: loggt WARUM ein Pen/Maus-Move in onLernenMove verworfen wird
+// (Events kommen laut Overlay sauber an, trotzdem fehlt Tinte → Ursache in der Logik).
+// Dedupe pro (pointerId+Grund), damit das Log nicht zuläuft. Wieder entfernen, wenn gefixt.
+const lernenDbgDrop = new Map();
+function lernDbg(id, msg) {
+  if (!window.penDebugLog) return;
+  if (lernenDbgDrop.get(id) === msg) return;
+  lernenDbgDrop.set(id, msg);
+  window.penDebugLog(`L§ ${msg} #${id}`);
+}
+
 function onLernenDown(e) {
   const canvas = e.target;
   const wrap   = document.getElementById('lernen-canvas-wrap');
@@ -5494,6 +5584,8 @@ function onLernenDown(e) {
   lernenLastX = p.x;
   lernenLastY = p.y;
   isDrawingLernen = true;
+  lernenDbgDrop.delete(e.pointerId);
+  lernDbg(e.pointerId, `DOWN-take tool=${lernenTool} ctx=${!!lernenCtx}`);
 }
 
 function onLernenMove(e) {
@@ -5521,13 +5613,20 @@ function onLernenMove(e) {
     lernenLastX = pp.x; lernenLastY = pp.y;
     isDrawingLernen = true;
   }
-  if (!isDrawingLernen || !lernenCtx) return;
-  if (e.pointerId !== lernenActivePtr) return; // palm rejection
+  if (!isDrawingLernen || !lernenCtx) {
+    lernDbg(e.pointerId, `DROP drawing=${isDrawingLernen} ctx=${!!lernenCtx} press=${pressing}`);
+    return;
+  }
+  if (e.pointerId !== lernenActivePtr) { // palm rejection
+    lernDbg(e.pointerId, `DROP ptr≠active(#${lernenActivePtr}) press=${pressing}`);
+    return;
+  }
   e.preventDefault();
   const canvas = e.target;
   const r      = canvas.getBoundingClientRect();
   // getCoalescedEvents captures all intermediate points during fast strokes
   const pts  = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
+  lernDbg(e.pointerId, `DRAW n=${pts.length} tool=${lernenTool}`);
   for (const pt of pts) {
     const { x, y } = lernenPos(pt, canvas, r);
     lernenCtx.beginPath();
@@ -5557,6 +5656,7 @@ function onLernenUp(e) {
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
+  lernenDbgDrop.delete(e.pointerId);
 }
 
 // ── Sicherer Ausdrucks-Evaluator für die deterministische Rechen-Prüfung (#4) ──
@@ -6262,24 +6362,42 @@ if ('serviceWorker' in navigator) {
   const st = new Map();
   const tagOf = (t) => (t && t.id === 'math-canvas') ? 'R'
                      : (t && t.id === 'lernen-canvas') ? 'L' : null;
-  const fmt = (e) => `${e.pointerType[0]}#${e.pointerId} p=${(e.pressure || 0).toFixed(2)} btn=${e.buttons}`;
+  const fmt = (e) => `${(e.pointerType || '?')[0]}#${e.pointerId} p=${(e.pressure || 0).toFixed(2)} btn=${e.buttons}`;
+  // Beschreibt das echte Event-Target (Tag#id.class) – um zu sehen, WAS die Pointer-
+  // Events abfängt, wenn es nicht der Canvas ist (Wrapper/Overlay über dem Canvas?).
+  const desc = (t) => {
+    if (!t || !t.tagName) return String(t);
+    const cls = (typeof t.className === 'string' && t.className) ? '.' + t.className.trim().split(/\s+/)[0] : '';
+    return t.tagName.toLowerCase() + (t.id ? '#' + t.id : '') + cls;
+  };
 
   function hook(type) {
     document.addEventListener(type, (e) => {
       const tag = tagOf(e.target);
-      if (!tag) return;
+      if (!tag) {
+        // NICHT mehr stumm verwerfen: down/up/cancel auf fremdem Target sichtbar machen,
+        // damit klar wird, welches Element die Striche abfängt. Moves drosseln (Spam).
+        if (type !== 'pointermove') {
+          push(`? ${type} on ${desc(e.target)} ${fmt(e)} @${Math.round(e.clientX)},${Math.round(e.clientY)}`);
+        }
+        return;
+      }
       const s = st.get(e.pointerId) || { moves: 0, canceled: false, warned: 0 };
       if (type === 'pointerdown') {
         s.moves = 0; s.canceled = false; s.warned = 0;
         st.set(e.pointerId, s);
         push(`${tag} ↓DOWN ${fmt(e)} @${Math.round(e.clientX)},${Math.round(e.clientY)}`);
       } else if (type === 'pointermove') {
+        // Pencil-Hover (kein Druck, nicht aufgesetzt) ist reines Rauschen → ausblenden,
+        // damit ein verschluckter Strich im Log sofort sichtbar wird.
+        const hover = (e.pressure || 0) === 0 && (e.buttons & 1) === 0;
+        if (hover) return;
         s.moves++;
         st.set(e.pointerId, s);
         if (s.canceled && s.warned < 4) {
           s.warned++;
           push(`${tag} ⚠ MOVE-AFTER-CANCEL ${fmt(e)} (move #${s.moves})`);
-        } else if (s.moves % 25 === 0) {
+        } else if (s.moves % 10 === 0) {
           push(`${tag} ·move ${fmt(e)} n=${s.moves}`);
         }
       } else if (type === 'pointercancel') {

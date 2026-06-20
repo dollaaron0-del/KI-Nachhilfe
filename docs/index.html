@@ -14,7 +14,7 @@
   <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=149" />
+  <link rel="stylesheet" href="style.css?v=150" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -642,6 +642,7 @@
     <div id="lernen-pfad-view" class="lernen-content">
       <div id="session-banner" class="session-banner hidden"></div>
       <div id="milestone-banner" class="milestone-banner hidden"></div>
+      <div id="klausur-bridge" class="klausur-bridge hidden"></div>
       <div class="lernpfad-section-title" id="lernpfad-title" style="display:none">Lernpfad</div>
       <div id="lernpfad-empty" class="cx-state">
         <div class="big-icon">🎓</div>
@@ -903,7 +904,7 @@
       <button class="btn-primary" id="settings-save-btn" onclick="settingsSave()">Speichern</button>
       <button class="btn-secondary" id="settings-close-btn" onclick="document.getElementById('settings-sheet').classList.add('hidden')">Abbrechen</button>
     </div>
-    <div style="text-align:center;font-size:11px;color:var(--text2);margin-top:14px;opacity:.7;">App-Version <span id="app-version">v166</span></div>
+    <div style="text-align:center;font-size:11px;color:var(--text2);margin-top:14px;opacity:.7;">App-Version <span id="app-version">v171</span></div>
   </div>
 </div>
 
@@ -967,7 +968,7 @@
 
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script defer src="app.js?v=166"></script>
+<script defer src="app.js?v=171"></script>
 
 </body>
 </html>
