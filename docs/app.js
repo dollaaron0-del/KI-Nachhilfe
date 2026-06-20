@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '172';
+const APP_VERSION = '173';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -4418,6 +4418,24 @@ function resolveKey(key) {
 
 function learnedKey(topic, diff) { return topicKey(topic, diff); }
 
+// Niveau-Rangfolge (Einsteiger=0 … Prüfungsnah=4). Grundlage für "Beherrschung
+// impliziert niedrigere Stufen": ein auf Stufe N gelerntes Thema gilt als auf
+// allen Stufen ≤ N gelernt – so muss kein Thema 5× wiederholt werden.
+const DIFF_IDX = { einsteiger: 0, leicht: 1, mittel: 2, schwer: 3, pruefungsnah: 4 };
+const diffIdx  = d => DIFF_IDX[d] ?? 0;
+
+// Höchstes je erreichtes Niveau eines Themas; -1 wenn noch nie gelernt.
+function topicMaxLevel(topic) {
+  const id = topicId(topic);
+  let max = -1;
+  for (const k of learnedTopics) {
+    const r = resolveKey(k);                 // tid::diff
+    const i = r.lastIndexOf('::');
+    if (r.slice(0, i) === id) max = Math.max(max, diffIdx(r.slice(i + 2)));
+  }
+  return max;
+}
+
 // Set aller gelernten Themen als aufgelöste ID-Schlüssel.
 function learnedKeySet() {
   return new Set(learnedTopics.map(resolveKey));
@@ -4503,19 +4521,13 @@ function chapterSiblings(topic) {
   return k ? k.themen.filter(t => t !== topic) : [];
 }
 
-// Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
+// Pfad-Themen, die auf diesem Niveau ODER HÖHER gelernt wurden ("Beherrschung
+// impliziert niedrigere Stufen"). Wer ein Thema auf "Mittel" schafft, füllt damit
+// Einsteiger+Grundlagen+Mittel in einer Aktion – kein erzwungenes 5×. Die Stufen-
+// Kreise werden dadurch monoton (jeder höhere ≤ niedrigerer).
 function topicsDoneAtDiff(diff) {
-  const current = new Set(pathTopics().map(topicId));
-  // ERST auflösen, DANN nach Niveau filtern – konsistent mit learnedKeySet()/den
-  // grünen Haken. Roh-Filtern mit endsWith('::'+diff) würde Alt-Einträge ohne
-  // ::niveau-Suffix verlieren, die resolveKey() als ::einsteiger behandelt → der
-  // Zähler liefe sonst gegen die abgehakten Themen auseinander (1/30 trotz aller Haken).
-  const ids = learnedTopics
-    .map(resolveKey)
-    .filter(r => r.endsWith('::' + diff))
-    .map(r => r.slice(0, r.lastIndexOf('::')))
-    .filter(id => current.has(id));
-  return new Set(ids).size;
+  const need = diffIdx(diff);
+  return pathTopics().filter(t => topicMaxLevel(t) >= need).length;
 }
 
 function calculateMilestone() {
@@ -4720,14 +4732,13 @@ function loadLernpfad() {
   list.innerHTML = '';
   const activeLvl  = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
   const activeDiff = activeLvl.diff || 'einsteiger';
-  const learnedSet = learnedKeySet();
-  // "Getan" zählt PRO Niveau: ein Thema gilt nur als fertig, wenn es auf dem
-  // AKTIVEN Schwierigkeitsgrad gelernt wurde – konsistent mit den Stufen-Kreisen
-  // der Meilenstein-Skala. Themen, die nur auf einem niedrigeren Niveau gelernt
-  // wurden, sind hier NICHT fertig, bekommen aber einen "⬆ Vertiefen"-Hinweis.
-  const learnedBaseIds = new Set(learnedTopics.map(lt => { const r = resolveKey(lt); return r.slice(0, r.lastIndexOf('::')); }));
-  const isTopicDone  = topic => learnedSet.has(learnedKey(topic, activeDiff));
-  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseIds.has(topicId(topic));
+  // "Getan" zählt auf ODER ÜBER dem aktiven Niveau: ein auf einer höheren Stufe
+  // gemeistertes Thema gilt hier als fertig (Beherrschung impliziert niedrigere
+  // Stufen) – nie wieder zum Wiederholen auffordern, was man schon übertroffen hat.
+  // Nur niedriger Gelerntes bekommt den "⬆ Vertiefen"-Hinweis.
+  const need = diffIdx(activeDiff);
+  const isTopicDone  = topic => topicMaxLevel(topic) >= need;
+  const wasDoneLower = topic => { const m = topicMaxLevel(topic); return m >= 0 && m < need; };
   let foundCurrent = false;
   const makeItem = topic => {
     const isDone       = isTopicDone(topic);                 // auf aktivem Niveau
@@ -4895,8 +4906,8 @@ async function buildSessionPlan(budget) {
   const activeIdx  = selectedDiffIdx !== null ? selectedDiffIdx : (ms.levelNum - 1);
   const activeLvl  = MILESTONE_LEVELS[activeIdx];
   const activeDiff = activeLvl.diff || 'einsteiger';
-  const learnedSet = learnedKeySet();
-  const isDone = t => learnedSet.has(learnedKey(t, activeDiff));
+  const need = diffIdx(activeDiff);
+  const isDone = t => topicMaxLevel(t) >= need;   // auf/über Niveau (Beherrschung impliziert tiefer)
   const isDue  = t => isDone(t) && topicReviewDue(t + '::' + activeDiff);
   const due  = scannedTopics.filter(isDue);
   const open = scannedTopics.filter(t => !isDone(t));
@@ -5941,10 +5952,10 @@ async function markTopicDone() {
   const fullXP = XP_BY_DIFF[lernenCurrentDiff] || 40;
   if (isFirstLearn)       addXP(fullXP, `"${topic}" gelernt`);
   else if (wasReviewDue)  addXP(Math.round(fullXP / 2), `"${topic}" aufgefrischt`);
-  // Kapitel komplett? → Konfetti
+  // Kapitel komplett? → Konfetti (auf/über Niveau, konsistent mit dem Lernpfad)
   if (moduleStructure?.kapitel) {
-    const learnedSet = learnedKeySet();
-    const tDone = t => learnedSet.has(learnedKey(t, lernenCurrentDiff));
+    const need = diffIdx(lernenCurrentDiff);
+    const tDone = t => topicMaxLevel(t) >= need;
     const kap = moduleStructure.kapitel.find(k => k.themen.includes(topic));
     if (kap && kap.themen.every(tDone)) {
       confettiBurst();
