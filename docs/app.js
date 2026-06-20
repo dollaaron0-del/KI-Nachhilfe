@@ -4,10 +4,20 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '164';
+const APP_VERSION = '165';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
-  if (el) el.textContent = 'v' + APP_VERSION;
+  if (!el) return;
+  el.textContent = 'v' + APP_VERSION;
+  // Robuster Schalter fürs temporäre Stift-Debug-Overlay: ein Tipp auf das
+  // Versions-Label togglet #pendebug (localStorage) und lädt neu. Kein
+  // URL-/Hash-Gefummel nötig, übersteht Cache-Leeren & SPA-Navigation.
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', () => {
+    const onNow = localStorage.getItem('pendebug') === '1';
+    try { onNow ? localStorage.removeItem('pendebug') : localStorage.setItem('pendebug', '1'); } catch (_) {}
+    location.reload();
+  });
 });
 
 // ── Global error safety net ───────────────────────────────────────────────
