@@ -4434,9 +4434,14 @@ function pathTopics() {
 // Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
 function topicsDoneAtDiff(diff) {
   const current = new Set(pathTopics().map(topicId));
+  // ERST auflösen, DANN nach Niveau filtern – konsistent mit learnedKeySet()/den
+  // grünen Haken. Roh-Filtern mit endsWith('::'+diff) würde Alt-Einträge ohne
+  // ::niveau-Suffix verlieren, die resolveKey() als ::einsteiger behandelt → der
+  // Zähler liefe sonst gegen die abgehakten Themen auseinander (1/30 trotz aller Haken).
   const ids = learnedTopics
-    .filter(t => t.endsWith('::' + diff))
-    .map(t => { const r = resolveKey(t); return r.slice(0, r.lastIndexOf('::')); })
+    .map(resolveKey)
+    .filter(r => r.endsWith('::' + diff))
+    .map(r => r.slice(0, r.lastIndexOf('::')))
     .filter(id => current.has(id));
   return new Set(ids).size;
 }
