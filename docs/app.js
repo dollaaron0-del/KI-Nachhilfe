@@ -54,12 +54,6 @@ function startProgress(barId, pctId, durationMs = 20000) {
   };
 }
 
-function setUploadProgress(barEl, pctEl, value) {
-  if (!barEl || !pctEl) return;
-  barEl.style.width = value + '%';
-  pctEl.textContent = value + '%';
-}
-
 // ── Toast notifications ────────────────────────────────────────────────────
 function toast(msg, type = 'info', duration = 3500) {
   const icons = { error: '⚠️', success: '✅', info: 'ℹ️', warn: '⚠️' };
@@ -478,20 +472,6 @@ async function claude(messages, systemBlocks, maxTokens = 1500) {
     const e = await r.json().catch(() => ({}));
     throw new Error(friendlyApiError(e.error, r.status));
   }
-  return (await r.json()).content[0].text;
-}
-
-// ── Haiku for simple generation tasks (12x cheaper than Sonnet) ──────────
-async function claudeHaiku(messages, systemBlocks, maxTokens = 600) {
-  const r = await fetch('/api/claude', { // raw-fetch-ok: eigene friendlyApiError-Behandlung + content[0].text
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      messages, system: systemBlocks, max_tokens: maxTokens,
-      model: 'claude-haiku-4-5-20251001', subject_id: sessionId, feature: currentFeature,
-    }),
-  });
-  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(friendlyApiError(e.error, r.status)); }
   return (await r.json()).content[0].text;
 }
 
