@@ -3335,7 +3335,7 @@ function setupCanvasEvents() {
       fingerScrollId  = e.pointerId;
       fingerStartY    = e.clientY;
       wrapScrollStart = wrap.scrollTop;
-      canvas.setPointerCapture(e.pointerId);
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
       return;
     }
     e.preventDefault();
@@ -3346,7 +3346,10 @@ function setupCanvasEvents() {
     // blieb canvasPenId gesetzt und JEDER Folgestrich mit neuer pointerId wurde verworfen
     // ("Strich wird nicht erkannt"). Stattdessen übernehmen wir den neuen Kontakt.
     if (currentStroke) { strokes.push(currentStroke); currentStroke = null; } // verwaisten Strich sichern
-    canvas.setPointerCapture(e.pointerId);
+    // Ungefangen würde eine geworfene Capture (alter Pointer bei iPad-Safari noch nicht
+    // freigegeben) den ganzen pointerdown abbrechen → Strich verschluckt. Capture ist nur
+    // Komfort, das Zeichnen läuft auch ohne; deshalb try/catch.
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     canvasPenId = e.pointerId;
     penActive = (e.pointerType === 'pen');
     if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
@@ -5459,7 +5462,11 @@ function onLernenDown(e) {
   clearTextSelection();                 // evtl. durch Handfläche entstandene Markierung wegnehmen
   lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
   lernenActivePtr = e.pointerId;
-  canvas.setPointerCapture(e.pointerId); // keep events even if pointer leaves canvas
+  // Capture darf den Strich NICHT abwürgen: hält iPad-Safari bei zwei dicht aufeinander
+  // folgenden Strichen die Capture des vorigen Pointers noch, wirft setPointerCapture für
+  // den neuen Pointer – ungefangen bräche der ganze pointerdown ab und der Strich ginge
+  // verloren ("manchmal schreibt er nicht"). Capture ist nur Komfort; Zeichnen läuft auch ohne.
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {} // keep events even if pointer leaves canvas
   const r = canvas.getBoundingClientRect();
   const p = lernenPos(e, canvas, r);
   lernenLastX = p.x;
