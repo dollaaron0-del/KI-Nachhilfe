@@ -321,6 +321,9 @@ let mathCtx         = null;
 let isDrawingCanvas = false;
 let isErasing       = false;
 let canvasLastX     = 0, canvasLastY = 0;
+let canvasLastMidX  = 0, canvasLastMidY = 0; // letzter Kurven-Mittelpunkt (Glättung)
+let canvasPtBuf     = [];             // gepufferte Punkte, einmal pro Frame gezeichnet (rAF)
+let canvasRaf       = 0;              // laufende requestAnimationFrame-ID (0 = keine)
 // Striche als Vektoren (Punkt-Listen) statt Bitmap-Snapshots. Damit kostet das
 // Strich-Ende KEIN getImageData mehr (auf dem iPad ~24 MB GPU-Readback, der beim
 // schnellen Schreiben zwischen jedem kurzen Strich stockte). Undo/Redo = neu zeichnen.
@@ -3348,14 +3351,18 @@ function drawStroke(ctx, s) {
       ctx.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Gleiche Kurven-Glättung wie beim Live-Zeichnen (quadratische Bézier durch die Mittelpunkte).
+    let lx = pts[0].x, ly = pts[0].y, lmx = pts[0].x, lmy = pts[0].y;
     for (let i = 1; i < pts.length; i++) {
       if (s.tool === 'pen')         ctx.lineWidth = Math.max(0.5, (pts[i].p || 0.5) * PEN_BASE[s.size] * 1.8);
       else if (s.tool === 'eraser') ctx.lineWidth = PEN_BASE[s.size] * 12;
       else                          ctx.lineWidth = PEN_BASE[s.size] * 10;
+      const mx = (lx + pts[i].x) / 2, my = (ly + pts[i].y) / 2;
       ctx.beginPath();
-      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
-      ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.moveTo(lmx, lmy);
+      ctx.quadraticCurveTo(lx, ly, mx, my);
       ctx.stroke();
+      lmx = mx; lmy = my; lx = pts[i].x; ly = pts[i].y;
     }
   }
   ctx.globalCompositeOperation = 'source-over';
@@ -3390,6 +3397,40 @@ function applyCtxStyle() {
     mathCtx.strokeStyle  = penColor;
     mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
   }
+}
+
+// Gepufferte Punkte einmal pro Frame zeichnen (rAF) – statt synchron pro pointermove.
+// Glättung: quadratische Bézier durch die Mittelpunkte aufeinanderfolgender Punkte,
+// Kontrollpunkt ist der jeweils echte Messpunkt → runde, "tintige" Linie statt Knicke.
+function flushCanvasBuf() {
+  canvasRaf = 0;
+  if (!mathCtx || !canvasPtBuf.length) return;
+  mathCtx.lineCap = 'round'; mathCtx.lineJoin = 'round';
+  if (activeTool === 'eraser') {
+    mathCtx.globalAlpha = 1; mathCtx.strokeStyle = '#000';
+    mathCtx.lineWidth = PEN_BASE[penSize] * 12;
+    mathCtx.globalCompositeOperation = 'destination-out';
+  } else if (activeTool === 'highlighter') {
+    mathCtx.globalCompositeOperation = 'source-over';
+    mathCtx.globalAlpha = 0.35; mathCtx.strokeStyle = '#FFD60A';
+    mathCtx.lineWidth = PEN_BASE[penSize] * 10;
+  } else {
+    mathCtx.globalCompositeOperation = 'source-over';
+    mathCtx.globalAlpha = 1; mathCtx.strokeStyle = penColor;
+  }
+  const buf = canvasPtBuf; canvasPtBuf = [];
+  for (const pt of buf) {
+    if (activeTool === 'pen') mathCtx.lineWidth = Math.max(0.5, pt.p * PEN_BASE[penSize] * 1.8);
+    const midX = (canvasLastX + pt.x) / 2, midY = (canvasLastY + pt.y) / 2;
+    mathCtx.beginPath();
+    mathCtx.moveTo(canvasLastMidX, canvasLastMidY);
+    mathCtx.quadraticCurveTo(canvasLastX, canvasLastY, midX, midY);
+    mathCtx.stroke();
+    canvasLastMidX = midX; canvasLastMidY = midY;
+    canvasLastX = pt.x; canvasLastY = pt.y;
+    if (currentStroke) currentStroke.pts.push({ x: pt.x, y: pt.y, p: pt.p });
+  }
+  if (activeTool === 'eraser') mathCtx.globalCompositeOperation = 'source-over';
 }
 
 function setupCanvasEvents() {
@@ -3437,6 +3478,9 @@ function setupCanvasEvents() {
     redoStrokes = [];
     const p = canvasPos(e, canvas);
     canvasLastX = p.x; canvasLastY = p.y;
+    canvasLastMidX = p.x; canvasLastMidY = p.y;     // Glättung: Startpunkt = erster Mittelpunkt
+    canvasPtBuf = [];
+    if (canvasRaf) { cancelAnimationFrame(canvasRaf); canvasRaf = 0; }
     // Neuen Strich als Vektor mitschreiben – kein getImageData mehr beim Aufsetzen.
     currentStroke = { tool: activeTool, color: penColor, size: penSize,
                       pts: [{ x: p.x, y: p.y, p: (e.pressure || 0.5) }] };
@@ -3481,40 +3525,18 @@ function setupCanvasEvents() {
       return;
     }
 
-    if (activeTool === 'eraser') {
-      // Tinte wirklich entfernen (Bitmap transparent machen), statt weiß zu übermalen –
-      // so bleibt das CSS-Raster dahinter erhalten.
-      mathCtx.globalAlpha  = 1;
-      mathCtx.lineWidth    = PEN_BASE[penSize] * 12;
-      mathCtx.globalCompositeOperation = 'destination-out';
-      mathCtx.strokeStyle  = '#000';
-    } else if (activeTool === 'highlighter') {
-      mathCtx.globalAlpha  = 0.35;
-      mathCtx.strokeStyle  = '#FFD60A';
-      mathCtx.lineWidth    = PEN_BASE[penSize] * 10;
-    } else {
-      mathCtx.globalAlpha  = 1;
-      mathCtx.strokeStyle  = penColor;
-    }
-
     // getCoalescedEvents liefert ALLE Zwischenpunkte eines schnellen Strichs –
     // sonst gehen beim schnellen (Text-)Schreiben Punkte verloren und der Strich
-    // bricht ab, sodass man ihn nachzieht ("doppelte" Striche).
+    // bricht ab, sodass man ihn nachzieht ("doppelte" Striche). Punkte nur puffern;
+    // gezeichnet wird gebündelt einmal pro Frame in flushCanvasBuf() (rAF).
+    // getBoundingClientRect EINMAL pro Event statt pro Punkt (kein Layout-Read im Hot-Loop).
+    const r = canvas.getBoundingClientRect();
     const pts = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
     for (const pt of pts) {
-      const p = canvasPos(pt, canvas);
-      if (activeTool === 'pen') {
-        const pressure = pt.pressure > 0 ? pt.pressure : 0.5;
-        mathCtx.lineWidth = Math.max(0.5, pressure * PEN_BASE[penSize] * 1.8);
-      }
-      mathCtx.beginPath();
-      mathCtx.moveTo(canvasLastX, canvasLastY);
-      mathCtx.lineTo(p.x, p.y);
-      mathCtx.stroke();
-      canvasLastX = p.x; canvasLastY = p.y;
-      if (currentStroke) currentStroke.pts.push({ x: p.x, y: p.y, p: (pt.pressure > 0 ? pt.pressure : 0.5) });
+      canvasPtBuf.push({ x: pt.clientX - r.left, y: pt.clientY - r.top,
+                         p: (pt.pressure > 0 ? pt.pressure : 0.5) });
     }
-    if (activeTool === 'eraser') mathCtx.globalCompositeOperation = 'source-over';
+    if (!canvasRaf) canvasRaf = requestAnimationFrame(flushCanvasBuf);
   }, { passive: false });
 
   const endDraw = (e) => {
@@ -3533,6 +3555,10 @@ function setupCanvasEvents() {
       if (activeTool === 'line') {
         const p = canvasPos(e, canvas);
         currentStroke.pts = [currentStroke.pts[0], { x: p.x, y: p.y }];
+      } else {
+        // Noch gepufferte Punkte sofort zeichnen, damit der Strich vollständig ist.
+        if (canvasRaf) { cancelAnimationFrame(canvasRaf); canvasRaf = 0; }
+        flushCanvasBuf();
       }
       strokes.push(currentStroke);
       currentStroke = null;
@@ -5263,6 +5289,9 @@ document.getElementById('session-sheet')?.addEventListener('click', e => {
 let lernenCtx       = null;
 let isDrawingLernen = false;
 let lernenLastX     = 0, lernenLastY = 0;
+let lernenLastMidX  = 0, lernenLastMidY = 0; // letzter Kurven-Mittelpunkt (Glättung)
+let lernenPtBuf     = [];           // gepufferte Punkte, einmal pro Frame gezeichnet (rAF)
+let lernenRaf       = 0;            // laufende requestAnimationFrame-ID (0 = keine)
 let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
 let lernenActivePtr = null; // palm rejection: track active pointer ID
@@ -5781,7 +5810,37 @@ function onLernenDown(e) {
   const p = lernenPos(e, canvas, r);
   lernenLastX = p.x;
   lernenLastY = p.y;
+  lernenLastMidX = p.x; lernenLastMidY = p.y;     // Glättung: Startpunkt = erster Mittelpunkt
+  lernenPtBuf = [];
+  if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
   isDrawingLernen = true;
+}
+
+// Gepufferte Punkte einmal pro Frame zeichnen (rAF) mit Kurven-Glättung – analog
+// zum Rechnen-Canvas: quadratische Bézier durch die Mittelpunkte statt Geraden.
+function flushLernenBuf() {
+  lernenRaf = 0;
+  if (!lernenCtx || !lernenPtBuf.length) return;
+  lernenCtx.lineCap = 'round'; lernenCtx.lineJoin = 'round';
+  if (lernenTool === 'eraser') {
+    lernenCtx.globalCompositeOperation = 'destination-out';
+    lernenCtx.lineWidth = 22;
+  } else {
+    lernenCtx.globalCompositeOperation = 'source-over';
+    lernenCtx.strokeStyle = lernenPenColor;
+    lernenCtx.lineWidth = 2.5;
+    lernenHasInk = true;
+  }
+  const buf = lernenPtBuf; lernenPtBuf = [];
+  for (const pt of buf) {
+    const midX = (lernenLastX + pt.x) / 2, midY = (lernenLastY + pt.y) / 2;
+    lernenCtx.beginPath();
+    lernenCtx.moveTo(lernenLastMidX, lernenLastMidY);
+    lernenCtx.quadraticCurveTo(lernenLastX, lernenLastY, midX, midY);
+    lernenCtx.stroke();
+    lernenLastMidX = midX; lernenLastMidY = midY;
+    lernenLastX = pt.x; lernenLastY = pt.y;
+  }
 }
 
 function onLernenMove(e) {
@@ -5807,32 +5866,23 @@ function onLernenMove(e) {
     const rr = cv.getBoundingClientRect();
     const pp = lernenPos(e, cv, rr);
     lernenLastX = pp.x; lernenLastY = pp.y;
+    lernenLastMidX = pp.x; lernenLastMidY = pp.y;   // Glättung an der Wiederaufnahmestelle
+    lernenPtBuf = [];
     isDrawingLernen = true;
   }
   if (!isDrawingLernen || !lernenCtx) return;
   if (e.pointerId !== lernenActivePtr) return; // palm rejection
   e.preventDefault();
   const canvas = e.target;
-  const r      = canvas.getBoundingClientRect();
-  // getCoalescedEvents captures all intermediate points during fast strokes
+  const r      = canvas.getBoundingClientRect();   // einmal pro Event, nicht pro Punkt
+  // getCoalescedEvents captures all intermediate points during fast strokes – nur puffern,
+  // gezeichnet wird gebündelt einmal pro Frame in flushLernenBuf() (rAF).
   const pts  = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
   for (const pt of pts) {
     const { x, y } = lernenPos(pt, canvas, r);
-    lernenCtx.beginPath();
-    lernenCtx.moveTo(lernenLastX, lernenLastY);
-    lernenCtx.lineTo(x, y);
-    if (lernenTool === 'eraser') {
-      lernenCtx.globalCompositeOperation = 'destination-out';
-      lernenCtx.lineWidth = 22;
-    } else {
-      lernenCtx.globalCompositeOperation = 'source-over';
-      lernenCtx.strokeStyle = lernenPenColor;
-      lernenCtx.lineWidth   = 2.5;
-      lernenHasInk = true;
-    }
-    lernenCtx.stroke();
-    lernenLastX = x; lernenLastY = y;
+    lernenPtBuf.push({ x, y });
   }
+  if (!lernenRaf) lernenRaf = requestAnimationFrame(flushLernenBuf);
 }
 
 function onLernenUp(e) {
@@ -5842,6 +5892,9 @@ function onLernenUp(e) {
   // up/cancel eines vorherigen Kontakts (z.B. via window-Sicherheitsnetz) darf den bereits
   // gestarteten nächsten Strich nicht abwürgen.
   if (e.pointerId === lernenActivePtr) {
+    // Noch gepufferte Punkte sofort zeichnen, damit der Strich vollständig ist.
+    if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
+    flushLernenBuf();
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
