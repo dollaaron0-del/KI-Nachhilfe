@@ -3436,8 +3436,14 @@ function setupCanvasEvents() {
   }, { passive: false });
 
   const endDraw = (e) => {
-    if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
     if (e.pointerId === fingerScrollId) fingerScrollId = null; // Finger-Scroll beendet
+    // Ein verspätetes pointerup/pointercancel eines VORHERIGEN Stift-Kontakts (auf window /
+    // lostpointercapture gefangen) darf den bereits gestarteten NÄCHSTEN Strich nicht
+    // abwürgen. Beim schnellen Schreiben / zwei Strichen dicht hintereinander trifft das
+    // up von Strich N u.U. erst NACH dem pointerdown von Strich N+1 ein. Nur das Event des
+    // aktuell zeichnenden Pointers beendet den Strich; ältere Events werden ignoriert.
+    if (isDrawingCanvas && canvasPenId !== null && e.pointerId !== canvasPenId) return;
+    if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
     if (e.pointerId === canvasPenId) canvasPenId = null;       // Stift losgelassen
     if (!isDrawingCanvas) return;
     isDrawingCanvas = false;
@@ -5404,6 +5410,12 @@ function initLernenCanvas() {
   canvas.addEventListener('pointermove',   onLernenMove,   { passive: false });
   canvas.addEventListener('pointerup',     onLernenUp);
   canvas.addEventListener('pointercancel', onLernenUp);
+  // Sicherheitsnetz wie beim Rechnen-Canvas: Verschluckt iPad-Safari das pointerup (Pointer-
+  // Capture-Verlust), blieben sonst lernenPenActive/isDrawingLernen hängen → Palm-Rejection
+  // sperrt den Finger-Scroll. Gleiche Fn-Referenz ⇒ addEventListener entdoppelt, kein
+  // Mehrfach-Listener über Themenwechsel hinweg. onLernenUp endet nur beim passenden Pointer.
+  window.addEventListener('pointerup',     onLernenUp);
+  window.addEventListener('pointercancel', onLernenUp);
 }
 
 // Convert a pointer event to canvas context coordinates.
@@ -5439,7 +5451,10 @@ function onLernenDown(e) {
 
   // Stift / Maus → zeichnen
   e.preventDefault();
-  if (lernenActivePtr !== null) return; // bereits ein Stift aktiv
+  // Ein neuer Stift-/Maus-Kontakt startet IMMER einen neuen Strich – nie auf einen alten
+  // lernenActivePtr abblocken. Kam dessen pointerup nicht an (Pointer-Capture-Verlust in
+  // iPad-Safari), blieb lernenActivePtr gesetzt und JEDER Folgestrich wurde verschluckt
+  // ("Schreiben funktioniert nicht mehr"). Stattdessen den neuen Kontakt übernehmen.
   lernenPenActive = true;
   clearTextSelection();                 // evtl. durch Handfläche entstandene Markierung wegnehmen
   lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
@@ -5490,7 +5505,10 @@ function onLernenMove(e) {
 function onLernenUp(e) {
   if (e.pointerId === lernenFingerId) lernenFingerId = null; // Finger-Scroll beendet
   if (e.pointerType === 'pen' || e.pointerType === 'mouse') lernenPenActive = false;
-  if (e.type === 'pointercancel' || e.pointerId === lernenActivePtr) {
+  // Nur das Event des aktuell zeichnenden Pointers beendet den Strich – ein verspätetes
+  // up/cancel eines vorherigen Kontakts (z.B. via window-Sicherheitsnetz) darf den bereits
+  // gestarteten nächsten Strich nicht abwürgen.
+  if (e.pointerId === lernenActivePtr) {
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
