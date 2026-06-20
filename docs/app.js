@@ -295,7 +295,8 @@ let blitzIdx       = 0;
 let blitzResults   = [];
 let blitzNext      = null;      // Prefetch: { promise, forIdx } – nächste Blitz-Frage vorab geladen
 let scannedTopics  = [];
-let moduleStructure = null; // { kapitel: [{titel, lernziel, themen:[...]}] }
+let moduleStructure = null; // { kapitel: [{titel, lernziel, themen:[...]}], ids:{normName:tid} }
+let topicUids      = {};    // { normName: "t_xxxxxxxx" } – stabile IDs, an denen Fortschritt hängt
 let selTopic       = null;
 let selAufgabenType = 'uebung';
 let aufgabenAnsVis  = false;
@@ -1350,6 +1351,15 @@ async function openSubject(subj) {
   // Beinah-Duplikate (gleiches Thema, anderer Name) auch in bereits gespeicherten
   // Strukturen entfernen – sonst doppeln sie im Lernpfad bis zum nächsten Re-Scan.
   moduleStructure = dedupeStructure(serverStruct || (await localforage.getItem(`ms_${subj.id}`).catch(() => null)));
+
+  // Stabile Themen-IDs laden (geteilte Struktur hat Vorrang vor lokalem Cache),
+  // fehlende für aktuelle Pfad-Themen vergeben und einmalig zurückschreiben. Muss
+  // VOR der Learned/Meta-Auflösung stehen – die hängt jetzt an diesen IDs.
+  topicUids = {
+    ...((await localforage.getItem(`tuid_${subj.id}`).catch(() => null)) || {}),
+    ...((moduleStructure && moduleStructure.ids) || {}),
+  };
+  if (ensureTopicUids()) persistTopicUids(subj.id);
 
   const serverLearned = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => null);
   const localLearned  = (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
@@ -2944,8 +2954,12 @@ async function scanTopics() {
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
+    const prevTopics = scannedTopics.slice();
     scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 20);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
+    // IDs gegen die vorherigen Themen abgleichen (Rename ⇒ ID bleibt ⇒ Fortschritt bleibt).
+    reconcileTopicUids(prevTopics, scannedTopics);
+    persistTopicUids(sessionId);
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     api(`/api/subjects/${sessionId}/topics`, {
       method: 'POST',
@@ -4311,31 +4325,100 @@ function dedupeStructure(struct) {
   return { ...struct, kapitel };
 }
 
-// Normalisierter Schlüssel "<thema>::<niveau>" für Erledigt-Vergleiche. Nutzt
-// dieselbe Normalisierung wie die Dedup, damit Häkchen/Fortschritt erhalten bleiben,
-// wenn ein Thema umbenannt oder neu gescannt wird ("Die Lichtreaktion" ==
-// "Lichtreaktion"). Geschrieben wird weiter unter dem aktuellen Namen (markTopicDone) –
-// der Lese-Vergleich normalisiert nur, sodass Altbestand wieder zugeordnet wird.
-function learnedKey(topic, diff) {
-  return normTopic(topic) + '::' + diff;
+// ── Stabile Themen-IDs ─────────────────────────────────────────────────────
+// Fortschritt (gelernt, Wiederholung, Cache) hängt an einer einmal vergebenen ID
+// statt am Themen-Namen → überlebt Umbenennen/Re-Scan. topicUids (normName → ID)
+// liegt in der fach-global geteilten Struktur, sodass alle Geräte dieselben IDs
+// sehen. Fehlt eine ID, degradiert alles sauber auf den normalisierten Namen (v155).
+function newTopicUid() {
+  const r = self.crypto?.randomUUID?.() || (Date.now().toString(16) + Math.random().toString(16).slice(2));
+  return 't_' + r.replace(/[^a-f0-9]/gi, '').slice(0, 10);
+}
+const isTopicUid = s => /^t_[a-f0-9]+$/i.test(s);
+
+// Stabile ID eines Themas, sonst dessen normalisierter Name (v155-Fallback).
+function topicId(name) {
+  const k = normTopic(name);
+  return topicUids[k] || k;
 }
 
-// Set aller gelernten Themen als normalisierte "<thema>::<niveau>"-Schlüssel.
-function learnedKeySet() {
-  return new Set(learnedTopics.map(lt => {
-    const [name, diff] = lt.split('::');
-    return normTopic(name) + '::' + (diff || 'einsteiger');
-  }));
+// Fortschritts-Schlüssel "<id|normName>::<niveau>".
+function topicKey(name, diff) {
+  return topicId(name) + '::' + diff;
 }
 
-// Normalisiert einen ganzen "Name::Niveau"-Schlüssel auf "normName::Niveau".
-// Für topicMeta (Wiederholungs-Termine), damit auch die Vergessenskurve ein
-// Umbenennen/Re-Scan übersteht – konsistent mit dem Done-Status (learnedKey).
-function normFullKey(key) {
+// Löst den Kopf eines ganzen "X::Niveau"-Schlüssels auf eine ID auf – akzeptiert
+// Alt-Einträge ("Name::diff") wie ID-Einträge ("t_abc::diff").
+function resolveKey(key) {
   const i = String(key).lastIndexOf('::');
-  return i < 0
-    ? normTopic(key) + '::einsteiger'
-    : normTopic(key.slice(0, i)) + '::' + key.slice(i + 2);
+  const head = i < 0 ? key : key.slice(0, i);
+  const diff = i < 0 ? 'einsteiger' : key.slice(i + 2);
+  return (isTopicUid(head) ? head : topicId(head)) + '::' + diff;
+}
+
+function learnedKey(topic, diff) { return topicKey(topic, diff); }
+
+// Set aller gelernten Themen als aufgelöste ID-Schlüssel.
+function learnedKeySet() {
+  return new Set(learnedTopics.map(resolveKey));
+}
+
+// topicMeta-Schlüssel (Wiederholungs-Termine) ebenfalls über die ID auflösen.
+function normFullKey(key) { return resolveKey(key); }
+
+// Vergibt fehlenden Pfad-Themen eine ID; true, wenn etwas neu war.
+function ensureTopicUids() {
+  let changed = false;
+  for (const name of pathTopics()) {
+    const k = normTopic(name);
+    if (k && !topicUids[k]) { topicUids[k] = newTopicUid(); changed = true; }
+  }
+  return changed;
+}
+
+// Token-Jaccard zweier normalisierter Namen (Rename-Erkennung beim Re-Scan).
+function jaccardTokens(a, b) {
+  const A = new Set(a.split(' ').filter(Boolean));
+  const B = new Set(b.split(' ').filter(Boolean));
+  if (!A.size || !B.size) return 0;
+  let inter = 0; for (const t of A) if (B.has(t)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+// Re-Scan-Abgleich: für jeden neuen Namen die ID des passenden alten Themas
+// nachtragen (exakt/normalisiert → Ähnlichkeit ≥ 0.6 → sonst neue ID). Alte
+// Map-Einträge bleiben erhalten, damit bestehender Fortschritt referenzierbar bleibt.
+function reconcileTopicUids(prevNames, newNames) {
+  const prevNorm = prevNames.map(normTopic);
+  const newNorm  = newNames.map(normTopic);
+  const used = new Set();
+  newNorm.forEach(k => { if (topicUids[k]) used.add(topicUids[k]); });
+  const avail = prevNorm.filter(k => topicUids[k] && !newNorm.includes(k));
+  newNorm.forEach(k => {
+    if (!k || topicUids[k]) return;                       // exakt/normalisiert schon zugeordnet
+    let best = null, score = 0;
+    for (const o of avail) {
+      if (used.has(topicUids[o])) continue;
+      const s = jaccardTokens(k, o);
+      if (s > score) { score = s; best = o; }
+    }
+    if (best && score >= 0.6) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
+    else topicUids[k] = newTopicUid();
+  });
+}
+
+// IDs in die geteilte Struktur (Server + lokal) schreiben, plus lokaler Fallback.
+function persistTopicUids(subjId) {
+  if (!subjId) return;
+  if (moduleStructure) {
+    moduleStructure.ids = topicUids;
+    localforage.setItem(`ms_${subjId}`, moduleStructure).catch(() => {});
+    api(`/api/subjects/${subjId}/structure`, {
+      method: 'POST',
+      body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
+    }).catch(() => {});
+  }
+  localforage.setItem(`tuid_${subjId}`, topicUids).catch(() => {});
 }
 
 // Einzige Wahrheitsquelle für die Themen des Lernpfads: exakt die Liste, die auch
@@ -4350,10 +4433,12 @@ function pathTopics() {
 
 // Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
 function topicsDoneAtDiff(diff) {
-  const current = new Set(pathTopics().map(normTopic));
-  return new Set(
-    learnedTopics.filter(t => t.endsWith('::' + diff)).map(t => normTopic(t.split('::')[0])).filter(t => current.has(t))
-  ).size;
+  const current = new Set(pathTopics().map(topicId));
+  const ids = learnedTopics
+    .filter(t => t.endsWith('::' + diff))
+    .map(t => { const r = resolveKey(t); return r.slice(0, r.lastIndexOf('::')); })
+    .filter(id => current.has(id));
+  return new Set(ids).size;
 }
 
 function calculateMilestone() {
@@ -4464,9 +4549,11 @@ function initLernen() {
   if (sessionId) {
     api(`/api/subjects/${sessionId}/learned-topics`)
       .then(t => {
-        const raw = Array.isArray(t) && t.length ? t
-          : learnedTopics; // keep in-memory if server empty
-        learnedTopics = raw.map(e => e.includes('::') ? e : e + '::einsteiger');
+        const norm = e => e.includes('::') ? e : e + '::einsteiger';
+        const server = Array.isArray(t) ? t.map(norm) : [];
+        // Mit dem In-Memory-Stand VEREINEN statt überschreiben – sonst gehen in
+        // dieser Session/offline gelernte Themen verloren (konsistent mit openSubject).
+        learnedTopics = [...new Set([...server, ...learnedTopics.map(norm)])];
         localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
         renderMilestone(); loadLernpfad();
       })
@@ -4496,9 +4583,9 @@ function loadLernpfad() {
   // AKTIVEN Schwierigkeitsgrad gelernt wurde – konsistent mit den Stufen-Kreisen
   // der Meilenstein-Skala. Themen, die nur auf einem niedrigeren Niveau gelernt
   // wurden, sind hier NICHT fertig, bekommen aber einen "⬆ Vertiefen"-Hinweis.
-  const learnedBaseNames = new Set(learnedTopics.map(lt => normTopic(lt.split('::')[0])));
+  const learnedBaseIds = new Set(learnedTopics.map(lt => { const r = resolveKey(lt); return r.slice(0, r.lastIndexOf('::')); }));
   const isTopicDone  = topic => learnedSet.has(learnedKey(topic, activeDiff));
-  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseNames.has(normTopic(topic));
+  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseIds.has(topicId(topic));
   let foundCurrent = false;
   const makeItem = topic => {
     const isDone       = isTopicDone(topic);                 // auf aktivem Niveau
@@ -4991,7 +5078,8 @@ function lernenSwitchStep(step) {
 // ── Lernen content cache (localforage / IndexedDB) ───────────────────────
 function lernenCacheKey(topic) {
   const diff = selectedDiffIdx !== null ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger') : 'auto';
-  return `lc2_${sessionId}_${topic}_${diff}`;
+  // An die stabile ID gekoppelt → Erklärungs-/Aufgaben-Cache überlebt Umbenennen.
+  return `lc2_${sessionId}_${topicId(topic)}_${diff}`;
 }
 
 async function loadExamDocContext(subjId) {
@@ -5069,7 +5157,7 @@ function renderTopicContent(topic, data) {
   // Elaborative Interrogation: Reflexionsfrage nach der Erklärung.
   // Nur bei frisch gelernten Themen; bei Wiederholung (bereits gelernt) überspringen.
   const elabEl = document.getElementById('lernen-elaborate');
-  const isFresh = !learnedTopics.includes(topic + '::' + lernenCurrentDiff);
+  const isFresh = !learnedKeySet().has(learnedKey(topic, lernenCurrentDiff));
   if (elabEl && isFresh) {
     const templates = [
       `Erkläre "${topic}" in deinen eigenen Worten – als würdest du es jemandem ohne Vorkenntnisse erklären.`,
@@ -5556,7 +5644,9 @@ async function markTopicDone() {
   if (!topic || !sessionId) return;
   closeLernenTopic();
   const key = topic + '::' + lernenCurrentDiff;
-  const isFirstLearn = !learnedTopics.includes(key);
+  // Erstlern-Erkennung id-basiert: ein bereits (auch unter altem Namen) gelerntes
+  // Thema gilt nicht erneut als "zum ersten Mal" → kein doppeltes XP/Eintrag.
+  const isFirstLearn = !learnedKeySet().has(learnedKey(topic, lernenCurrentDiff));
   const wasReviewDue = !isFirstLearn && topicReviewDue(key);
   if (isFirstLearn) {
     learnedTopics.push(key);
@@ -5594,6 +5684,7 @@ async function scanModuleStructure(btn) {
   if (!sessionTxt && !sessionId) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   const orig = btn.textContent;
   btn.disabled = true;
+  const prevNames = pathTopics();   // für den ID-Abgleich (Rename-Erkennung) festhalten
   try {
     // Phase 1: Fetch short snippet from EVERY document → identify Hauptthemen across ALL docs
     btn.textContent = 'Überblick lädt…';
@@ -5626,9 +5717,14 @@ async function scanModuleStructure(btn) {
     // Beinah-Duplikate über alle Kapitel hinweg entfernen (normalisierter Vergleich:
     // "Die Lichtreaktion" == "Lichtreaktion", "CO₂-Konzentration" == "CO2 Konzentration").
     moduleStructure = dedupeStructure({ kapitel });
-    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 30);
+    const newNames = moduleStructure.kapitel.flatMap(k => k.themen);
+    // IDs gegen die alten Themen abgleichen: Rename ⇒ ID bleibt ⇒ Fortschritt bleibt.
+    reconcileTopicUids(prevNames, newNames);
+    moduleStructure.ids = topicUids;
+    scannedTopics = newNames.slice(0, 30);
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
+    localforage.setItem(`tuid_${sessionId}`, topicUids).catch(() => {});
     api(`/api/subjects/${sessionId}/structure`, {
       method: 'POST',
       body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
