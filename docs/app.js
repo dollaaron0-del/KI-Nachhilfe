@@ -4,20 +4,11 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '171';
+const APP_VERSION = '172';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
   el.textContent = 'v' + APP_VERSION;
-  // Robuster Schalter fürs temporäre Stift-Debug-Overlay: ein Tipp auf das
-  // Versions-Label togglet #pendebug (localStorage) und lädt neu. Kein
-  // URL-/Hash-Gefummel nötig, übersteht Cache-Leeren & SPA-Navigation.
-  el.style.cursor = 'pointer';
-  el.addEventListener('click', () => {
-    const off = localStorage.getItem('pendebug_off') === '1';
-    try { off ? localStorage.removeItem('pendebug_off') : localStorage.setItem('pendebug_off', '1'); } catch (_) {}
-    location.reload();
-  });
 });
 
 // ── Global error safety net ───────────────────────────────────────────────
@@ -3251,7 +3242,6 @@ function initCanvas() {
   canvas.height = Math.round(CANVAS_HEIGHT * dpr);
   mathCtx = canvas.getContext('2d');
   mathCtx.scale(dpr, dpr);
-  if (window.penDebugLog) window.penDebugLog(`R-INIT w=${w} dpr=${dpr} buf=${canvas.width} cssW=${Math.round(canvas.getBoundingClientRect().width)}`);
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   if (savedCanvasData) {
@@ -5501,7 +5491,6 @@ function initLernenCanvas() {
   canvas.height = Math.round(h * dpr);
   lernenCtx = canvas.getContext('2d');
   lernenCtx.scale(dpr, dpr);
-  if (window.penDebugLog) window.penDebugLog(`L-INIT w=${w} dpr=${dpr} buf=${canvas.width} wrapW=${wrap.clientWidth} cssW=${Math.round(canvas.getBoundingClientRect().width)}`);
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   lernenCtx.lineCap  = 'round';
   lernenCtx.lineJoin = 'round';
@@ -5533,17 +5522,6 @@ function lernenPos(e, canvas, r) {
     x: (e.clientX - r.left) * sx,
     y: (e.clientY - r.top)  * sy,
   };
-}
-
-// TEMP-Diagnose v169: loggt WARUM ein Pen/Maus-Move in onLernenMove verworfen wird
-// (Events kommen laut Overlay sauber an, trotzdem fehlt Tinte → Ursache in der Logik).
-// Dedupe pro (pointerId+Grund), damit das Log nicht zuläuft. Wieder entfernen, wenn gefixt.
-const lernenDbgDrop = new Map();
-function lernDbg(id, msg) {
-  if (!window.penDebugLog) return;
-  if (lernenDbgDrop.get(id) === msg) return;
-  lernenDbgDrop.set(id, msg);
-  window.penDebugLog(`L§ ${msg} #${id}`);
 }
 
 function onLernenDown(e) {
@@ -5584,8 +5562,6 @@ function onLernenDown(e) {
   lernenLastX = p.x;
   lernenLastY = p.y;
   isDrawingLernen = true;
-  lernenDbgDrop.delete(e.pointerId);
-  lernDbg(e.pointerId, `DOWN-take tool=${lernenTool} ctx=${!!lernenCtx}`);
 }
 
 function onLernenMove(e) {
@@ -5613,20 +5589,13 @@ function onLernenMove(e) {
     lernenLastX = pp.x; lernenLastY = pp.y;
     isDrawingLernen = true;
   }
-  if (!isDrawingLernen || !lernenCtx) {
-    lernDbg(e.pointerId, `DROP drawing=${isDrawingLernen} ctx=${!!lernenCtx} press=${pressing}`);
-    return;
-  }
-  if (e.pointerId !== lernenActivePtr) { // palm rejection
-    lernDbg(e.pointerId, `DROP ptr≠active(#${lernenActivePtr}) press=${pressing}`);
-    return;
-  }
+  if (!isDrawingLernen || !lernenCtx) return;
+  if (e.pointerId !== lernenActivePtr) return; // palm rejection
   e.preventDefault();
   const canvas = e.target;
   const r      = canvas.getBoundingClientRect();
   // getCoalescedEvents captures all intermediate points during fast strokes
   const pts  = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
-  lernDbg(e.pointerId, `DRAW n=${pts.length} tool=${lernenTool}`);
   for (const pt of pts) {
     const { x, y } = lernenPos(pt, canvas, r);
     lernenCtx.beginPath();
@@ -5656,7 +5625,6 @@ function onLernenUp(e) {
     lernenActivePtr = null;
     isDrawingLernen = false;
   }
-  lernenDbgDrop.delete(e.pointerId);
 }
 
 // ── Sicherer Ausdrucks-Evaluator für die deterministische Rechen-Prüfung (#4) ──
@@ -6284,132 +6252,3 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
 
-// ── TEMPORÄRES Stift-Debug-Overlay ──────────────────────────────────────────
-// Diagnose "Stift schreibt nicht richtig". Aktivieren: URL mit  #pendebug  öffnen
-// (bleibt dann via localStorage aktiv). Loggt die ROHEN Pointer-Events beider
-// Zeichenflächen unabhängig von der Zeichenlogik (document, capture-phase) — so
-// sehen wir, was iPad-Safari real feuert: Reihenfolge, pointerType, pressure,
-// ob nach pointercancel noch moves kommen, und die Init-Maße. Wieder entfernen,
-// sobald die Ursache gefunden ist. Buttons: COPY = Log in Zwischenablage, OFF = aus.
-(function penDebug() {
-  // Diagnose-Build: Overlay ist standardmäßig AN (keine Aktivierung nötig).
-  // OFF-Button (oder Tipp aufs Versions-Label) setzt pendebug_off und blendet es aus.
-  let suppressed = false;
-  try { suppressed = localStorage.getItem('pendebug_off') === '1'; } catch (_) {}
-  if (suppressed) { window.penDebugLog = null; return; }
-
-  const LOG = [];
-  let pre, rafPending = false;
-  const ts = () => (performance.now() / 1000).toFixed(2);
-
-  function render() {
-    rafPending = false;
-    if (pre) pre.textContent = LOG.slice(-40).join('\n');
-  }
-  function push(line) {
-    LOG.push(`${ts()} ${line}`);
-    if (LOG.length > 400) LOG.shift();
-    if (!rafPending) { rafPending = true; requestAnimationFrame(render); }
-  }
-  window.penDebugLog = push;
-  window.penDebugDump = () => LOG.join('\n');
-
-  function build() {
-    if (document.getElementById('pen-debug-box')) return;
-    const box = document.createElement('div');
-    box.id = 'pen-debug-box';
-    box.style.cssText = 'position:fixed;left:0;bottom:0;width:100%;max-height:42vh;'
-      + 'z-index:99999;background:rgba(0,0,0,.82);color:#0f0;font:11px/1.35 monospace;'
-      + 'pointer-events:none;overflow:hidden;border-top:1px solid #0f0;';
-    const bar = document.createElement('div');
-    bar.style.cssText = 'pointer-events:auto;display:flex;gap:8px;padding:3px 6px;'
-      + 'background:#020;color:#9f9;align-items:center;';
-    const title = document.createElement('span');
-    title.textContent = 'PEN-DEBUG';
-    title.style.flex = '1';
-    const mk = (label, fn) => {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.style.cssText = 'pointer-events:auto;font:11px monospace;padding:2px 8px;';
-      b.addEventListener('click', fn);
-      return b;
-    };
-    const copyBtn = mk('COPY', () => {
-      const txt = LOG.join('\n');
-      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(
-        () => { copyBtn.textContent = 'COPIED'; setTimeout(() => copyBtn.textContent = 'COPY', 1200); },
-        () => { copyBtn.textContent = 'FAIL'; });
-    });
-    const clrBtn = mk('CLR', () => { LOG.length = 0; render(); });
-    const offBtn = mk('OFF', () => {
-      try { localStorage.setItem('pendebug_off', '1'); } catch (_) {}
-      box.remove();
-      window.penDebugLog = null;
-      location.reload();
-    });
-    bar.append(title, clrBtn, copyBtn, offBtn);
-    pre = document.createElement('pre');
-    pre.style.cssText = 'margin:0;padding:4px 6px;white-space:pre-wrap;word-break:break-all;'
-      + 'overflow:hidden;pointer-events:none;';
-    box.append(bar, pre);
-    document.body.appendChild(box);
-    push(`READY dpr=${window.devicePixelRatio} v=app.js?v=${APP_VERSION}`);
-    push(`UA ${navigator.userAgent}`);
-  }
-  if (document.body) build(); else document.addEventListener('DOMContentLoaded', build);
-
-  // Pro pointerId Zustand verfolgen: kam nach CANCEL noch ein MOVE? (Kernhypothese)
-  const st = new Map();
-  const tagOf = (t) => (t && t.id === 'math-canvas') ? 'R'
-                     : (t && t.id === 'lernen-canvas') ? 'L' : null;
-  const fmt = (e) => `${(e.pointerType || '?')[0]}#${e.pointerId} p=${(e.pressure || 0).toFixed(2)} btn=${e.buttons}`;
-  // Beschreibt das echte Event-Target (Tag#id.class) – um zu sehen, WAS die Pointer-
-  // Events abfängt, wenn es nicht der Canvas ist (Wrapper/Overlay über dem Canvas?).
-  const desc = (t) => {
-    if (!t || !t.tagName) return String(t);
-    const cls = (typeof t.className === 'string' && t.className) ? '.' + t.className.trim().split(/\s+/)[0] : '';
-    return t.tagName.toLowerCase() + (t.id ? '#' + t.id : '') + cls;
-  };
-
-  function hook(type) {
-    document.addEventListener(type, (e) => {
-      const tag = tagOf(e.target);
-      if (!tag) {
-        // NICHT mehr stumm verwerfen: down/up/cancel auf fremdem Target sichtbar machen,
-        // damit klar wird, welches Element die Striche abfängt. Moves drosseln (Spam).
-        if (type !== 'pointermove') {
-          push(`? ${type} on ${desc(e.target)} ${fmt(e)} @${Math.round(e.clientX)},${Math.round(e.clientY)}`);
-        }
-        return;
-      }
-      const s = st.get(e.pointerId) || { moves: 0, canceled: false, warned: 0 };
-      if (type === 'pointerdown') {
-        s.moves = 0; s.canceled = false; s.warned = 0;
-        st.set(e.pointerId, s);
-        push(`${tag} ↓DOWN ${fmt(e)} @${Math.round(e.clientX)},${Math.round(e.clientY)}`);
-      } else if (type === 'pointermove') {
-        // Pencil-Hover (kein Druck, nicht aufgesetzt) ist reines Rauschen → ausblenden,
-        // damit ein verschluckter Strich im Log sofort sichtbar wird.
-        const hover = (e.pressure || 0) === 0 && (e.buttons & 1) === 0;
-        if (hover) return;
-        s.moves++;
-        st.set(e.pointerId, s);
-        if (s.canceled && s.warned < 4) {
-          s.warned++;
-          push(`${tag} ⚠ MOVE-AFTER-CANCEL ${fmt(e)} (move #${s.moves})`);
-        } else if (s.moves % 10 === 0) {
-          push(`${tag} ·move ${fmt(e)} n=${s.moves}`);
-        }
-      } else if (type === 'pointercancel') {
-        s.canceled = true; st.set(e.pointerId, s);
-        push(`${tag} ✗ CANCEL ${fmt(e)} moves=${s.moves}`);
-      } else if (type === 'pointerup') {
-        push(`${tag} ↑UP ${fmt(e)} moves=${s.moves}`);
-        st.delete(e.pointerId);
-      } else if (type === 'lostpointercapture') {
-        push(`${tag} ⊘ LOSTCAP #${e.pointerId}`);
-      }
-    }, true); // capture-phase: vor der Zeichenlogik, unabhängig von preventDefault/returns
-  }
-  ['pointerdown', 'pointermove', 'pointercancel', 'pointerup', 'lostpointercapture'].forEach(hook);
-})();
