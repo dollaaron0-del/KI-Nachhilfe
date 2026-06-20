@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '176';
+const APP_VERSION = '177';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -4708,7 +4708,8 @@ function renderMilestone() {
     ${overallHtml}
     <div class="ms-steps">${stepsHtml}</div>
     <div class="ms-bar-wrap"><div class="ms-bar-fill" style="width:${m.pct}%"></div></div>
-    <div class="ms-info">${infoTxt}</div>`;
+    <div class="ms-info">${infoTxt}</div>
+    <div id="ms-klausur-foot" class="ms-klausur-foot"></div>`;
 
   banner.querySelectorAll('.ms-step').forEach(el => {
     el.addEventListener('click', () => {
@@ -4758,11 +4759,13 @@ function renderLernTip() {
 // Klausur-Brücke: macht die Probeklausur dort sichtbar, wo gelernt wird, und rahmt
 // den Lernpfad als Weg dorthin. Die Botschaft skaliert mit dem Fortschritt, damit
 // klar ist: jede Lernaufgabe zahlt auf die Klausur ein (die genau diese Themen testet).
+// Probeklausur-Anschluss: sitzt als Footer IM Milestone-Block (kein eigenes
+// Banner mehr) – der Fortschritt steht schon darüber, hier nur noch die Brücke
+// zur Probeklausur. Botschaft skaliert mit dem Fortschritt.
 function renderKlausurBridge(m) {
-  const el = document.getElementById('klausur-bridge');
+  const el = document.getElementById('ms-klausur-foot');
   if (!el) return;
-  if (!m || !scannedTopics.length) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
+  if (!m || !scannedTopics.length) { el.innerHTML = ''; return; }
   const ready    = m.overallPct;
   // Manuell gewählte Stufe hat Vorrang vor dem Auto-Level: wer den Pfad auf "Schwer"
   // stellt, soll die Probeklausur auch auf Schwer bekommen – nicht auf der Auto-Stufe.
@@ -4770,21 +4773,20 @@ function renderKlausurBridge(m) {
   let head, sub, cta, auto;
   if (ready >= 60) {
     head = '🎯 Bereit für eine Probeklausur';
-    sub  = `Du hast ${ready}% deiner Themen gelernt. Teste dich jetzt unter Klausurbedingungen – das zeigt dir, wo du wirklich stehst.`;
+    sub  = `Teste dich jetzt unter Klausurbedingungen – das zeigt dir, wo du wirklich stehst.`;
     cta  = 'Probeklausur starten →'; auto = true;
   } else if (ready >= 25) {
     head = '📝 Auf dem Weg zur Probeklausur';
-    sub  = `${ready}% gelernt. Eine Probeklausur testet genau die Themen aus deinem Lernpfad – mach jederzeit eine, um deine Lücken zu sehen.`;
+    sub  = `Eine Probeklausur testet genau diese Themen – mach jederzeit eine, um deine Lücken zu sehen.`;
     cta  = 'Probeklausur ansehen →'; auto = false;
   } else {
     head = '📝 Dein Ziel: die Probeklausur';
-    sub  = `Jede Aufgabe hier bereitet dich auf die Probeklausur vor – sie zieht ihre Fragen aus genau diesen Themen.`;
+    sub  = `Jede Aufgabe hier zahlt auf die Probeklausur ein – sie zieht ihre Fragen aus genau diesen Themen.`;
     cta  = 'Probeklausur ansehen →'; auto = false;
   }
   el.innerHTML = `
     <div class="kb-head">${head}</div>
     <div class="kb-sub">${sub}</div>
-    <div class="kb-bar"><div class="kb-bar-fill" style="width:${ready}%"></div></div>
     <button class="btn-primary btn-sm kb-cta">${cta}</button>`;
   el.querySelector('.kb-cta').addEventListener('click', () => startKlausurFromLernen(recDiff, auto));
 }

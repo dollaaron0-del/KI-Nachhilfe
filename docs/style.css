@@ -1356,20 +1356,15 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 /* Milestone Banner (stepper style — see bottom of file for full rules) */
 .milestone-banner.hidden { display: none !important; }
 
-/* Klausur-Brücke: verbindet Lernpfad ↔ Probeklausur */
-.klausur-bridge {
-  flex-shrink: 0;
-  margin: 0 16px 12px;
-  padding: 12px 14px;
-  background: linear-gradient(135deg, rgba(88,86,214,0.12), rgba(16,185,129,0.10));
-  border: 1.5px solid var(--purple);
-  border-radius: 12px;
+/* Probeklausur-Anschluss: Footer im Milestone-Block (kein eigenes Banner). */
+.ms-klausur-foot:empty { display: none; }
+.ms-klausur-foot {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(127,127,127,.18);
 }
-.klausur-bridge.hidden { display: none !important; }
 .kb-head { font-weight: 700; font-size: 15px; color: var(--label); margin-bottom: 3px; }
 .kb-sub  { font-size: 13px; color: var(--text2); line-height: 1.45; margin-bottom: 10px; }
-.kb-bar  { height: 6px; border-radius: 6px; background: rgba(127,127,127,.18); overflow: hidden; margin-bottom: 10px; }
-.kb-bar-fill { height: 100%; background: linear-gradient(90deg,#8b5cf6,#10b981); border-radius: 6px; transition: width .4s; }
 .kb-cta  { width: 100%; }
 
 /* Einmalige Vorbereitungs-Hinweis-Karte im Lern-Tab */
