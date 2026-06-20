@@ -3224,6 +3224,7 @@ function initCanvas() {
   canvas.height = Math.round(CANVAS_HEIGHT * dpr);
   mathCtx = canvas.getContext('2d');
   mathCtx.scale(dpr, dpr);
+  if (window.penDebugLog) window.penDebugLog(`R-INIT w=${w} dpr=${dpr} buf=${canvas.width} cssW=${Math.round(canvas.getBoundingClientRect().width)}`);
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   if (savedCanvasData) {
@@ -5401,6 +5402,7 @@ function initLernenCanvas() {
   canvas.height = Math.round(h * dpr);
   lernenCtx = canvas.getContext('2d');
   lernenCtx.scale(dpr, dpr);
+  if (window.penDebugLog) window.penDebugLog(`L-INIT w=${w} dpr=${dpr} buf=${canvas.width} wrapW=${wrap.clientWidth} cssW=${Math.round(canvas.getBoundingClientRect().width)}`);
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   lernenCtx.lineCap  = 'round';
   lernenCtx.lineJoin = 'round';
@@ -5482,6 +5484,22 @@ function onLernenMove(e) {
       wrap.scrollTop = lernenScroll0 + (lernenFingerY0 - e.clientY);
     }
     return;
+  }
+  // Selbstheilung gegen iPad-Palm-Rejection: Liegt die Handfläche auf, schickt iПadOS-Safari
+  // mitten im Strich ein pointercancel für den STIFT → isDrawingLernen wird false, die danach
+  // weiter eintreffenden pointermove-Events wurden verworfen und es kam KEIN Strich mehr, bis
+  // man neu aufsetzte. Kommt aber ein Stift-/Maus-Move, während der Stift nachweislich aufliegt
+  // (pressure>0 bzw. Maustaste gedrückt), nehmen wir den Strich an dieser Stelle einfach wieder
+  // auf – ohne Hochheben. lernenLastX/Y neu setzen, damit keine Linie aus dem Nichts gezogen wird.
+  const pressing = e.pressure > 0 || (e.buttons & 1) === 1;
+  if (lernenCtx && pressing && (!isDrawingLernen || e.pointerId !== lernenActivePtr)) {
+    lernenActivePtr = e.pointerId;
+    lernenPenActive = true;
+    const cv = e.target;
+    const rr = cv.getBoundingClientRect();
+    const pp = lernenPos(e, cv, rr);
+    lernenLastX = pp.x; lernenLastY = pp.y;
+    isDrawingLernen = true;
   }
   if (!isDrawingLernen || !lernenCtx) return;
   if (e.pointerId !== lernenActivePtr) return; // palm rejection
@@ -6145,3 +6163,115 @@ async function initDashboard() {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }
+
+// ── TEMPORÄRES Stift-Debug-Overlay ──────────────────────────────────────────
+// Diagnose "Stift schreibt nicht richtig". Aktivieren: URL mit  #pendebug  öffnen
+// (bleibt dann via localStorage aktiv). Loggt die ROHEN Pointer-Events beider
+// Zeichenflächen unabhängig von der Zeichenlogik (document, capture-phase) — so
+// sehen wir, was iPad-Safari real feuert: Reihenfolge, pointerType, pressure,
+// ob nach pointercancel noch moves kommen, und die Init-Maße. Wieder entfernen,
+// sobald die Ursache gefunden ist. Buttons: COPY = Log in Zwischenablage, OFF = aus.
+(function penDebug() {
+  const on = location.hash.toLowerCase().includes('pendebug')
+          || localStorage.getItem('pendebug') === '1';
+  if (!on) { window.penDebugLog = null; return; }
+  try { localStorage.setItem('pendebug', '1'); } catch (_) {}
+
+  const LOG = [];
+  let pre, rafPending = false;
+  const ts = () => (performance.now() / 1000).toFixed(2);
+
+  function render() {
+    rafPending = false;
+    if (pre) pre.textContent = LOG.slice(-40).join('\n');
+  }
+  function push(line) {
+    LOG.push(`${ts()} ${line}`);
+    if (LOG.length > 400) LOG.shift();
+    if (!rafPending) { rafPending = true; requestAnimationFrame(render); }
+  }
+  window.penDebugLog = push;
+  window.penDebugDump = () => LOG.join('\n');
+
+  function build() {
+    if (document.getElementById('pen-debug-box')) return;
+    const box = document.createElement('div');
+    box.id = 'pen-debug-box';
+    box.style.cssText = 'position:fixed;left:0;bottom:0;width:100%;max-height:42vh;'
+      + 'z-index:99999;background:rgba(0,0,0,.82);color:#0f0;font:11px/1.35 monospace;'
+      + 'pointer-events:none;overflow:hidden;border-top:1px solid #0f0;';
+    const bar = document.createElement('div');
+    bar.style.cssText = 'pointer-events:auto;display:flex;gap:8px;padding:3px 6px;'
+      + 'background:#020;color:#9f9;align-items:center;';
+    const title = document.createElement('span');
+    title.textContent = 'PEN-DEBUG';
+    title.style.flex = '1';
+    const mk = (label, fn) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'pointer-events:auto;font:11px monospace;padding:2px 8px;';
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const copyBtn = mk('COPY', () => {
+      const txt = LOG.join('\n');
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(
+        () => { copyBtn.textContent = 'COPIED'; setTimeout(() => copyBtn.textContent = 'COPY', 1200); },
+        () => { copyBtn.textContent = 'FAIL'; });
+    });
+    const clrBtn = mk('CLR', () => { LOG.length = 0; render(); });
+    const offBtn = mk('OFF', () => {
+      try { localStorage.removeItem('pendebug'); } catch (_) {}
+      location.hash = '';
+      box.remove();
+      window.penDebugLog = null;
+      location.reload();
+    });
+    bar.append(title, clrBtn, copyBtn, offBtn);
+    pre = document.createElement('pre');
+    pre.style.cssText = 'margin:0;padding:4px 6px;white-space:pre-wrap;word-break:break-all;'
+      + 'overflow:hidden;pointer-events:none;';
+    box.append(bar, pre);
+    document.body.appendChild(box);
+    push(`READY dpr=${window.devicePixelRatio} v=app.js?v=163`);
+    push(`UA ${navigator.userAgent}`);
+  }
+  if (document.body) build(); else document.addEventListener('DOMContentLoaded', build);
+
+  // Pro pointerId Zustand verfolgen: kam nach CANCEL noch ein MOVE? (Kernhypothese)
+  const st = new Map();
+  const tagOf = (t) => (t && t.id === 'math-canvas') ? 'R'
+                     : (t && t.id === 'lernen-canvas') ? 'L' : null;
+  const fmt = (e) => `${e.pointerType[0]}#${e.pointerId} p=${(e.pressure || 0).toFixed(2)} btn=${e.buttons}`;
+
+  function hook(type) {
+    document.addEventListener(type, (e) => {
+      const tag = tagOf(e.target);
+      if (!tag) return;
+      const s = st.get(e.pointerId) || { moves: 0, canceled: false, warned: 0 };
+      if (type === 'pointerdown') {
+        s.moves = 0; s.canceled = false; s.warned = 0;
+        st.set(e.pointerId, s);
+        push(`${tag} ↓DOWN ${fmt(e)} @${Math.round(e.clientX)},${Math.round(e.clientY)}`);
+      } else if (type === 'pointermove') {
+        s.moves++;
+        st.set(e.pointerId, s);
+        if (s.canceled && s.warned < 4) {
+          s.warned++;
+          push(`${tag} ⚠ MOVE-AFTER-CANCEL ${fmt(e)} (move #${s.moves})`);
+        } else if (s.moves % 25 === 0) {
+          push(`${tag} ·move ${fmt(e)} n=${s.moves}`);
+        }
+      } else if (type === 'pointercancel') {
+        s.canceled = true; st.set(e.pointerId, s);
+        push(`${tag} ✗ CANCEL ${fmt(e)} moves=${s.moves}`);
+      } else if (type === 'pointerup') {
+        push(`${tag} ↑UP ${fmt(e)} moves=${s.moves}`);
+        st.delete(e.pointerId);
+      } else if (type === 'lostpointercapture') {
+        push(`${tag} ⊘ LOSTCAP #${e.pointerId}`);
+      }
+    }, true); // capture-phase: vor der Zeichenlogik, unabhängig von preventDefault/returns
+  }
+  ['pointerdown', 'pointermove', 'pointercancel', 'pointerup', 'lostpointercapture'].forEach(hook);
+})();
