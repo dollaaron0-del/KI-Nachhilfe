@@ -295,7 +295,8 @@ let blitzIdx       = 0;
 let blitzResults   = [];
 let blitzNext      = null;      // Prefetch: { promise, forIdx } – nächste Blitz-Frage vorab geladen
 let scannedTopics  = [];
-let moduleStructure = null; // { kapitel: [{titel, lernziel, themen:[...]}] }
+let moduleStructure = null; // { kapitel: [{titel, lernziel, themen:[...]}], ids:{normName:tid} }
+let topicUids      = {};    // { normName: "t_xxxxxxxx" } – stabile IDs, an denen Fortschritt hängt
 let selTopic       = null;
 let selAufgabenType = 'uebung';
 let aufgabenAnsVis  = false;
@@ -1350,6 +1351,15 @@ async function openSubject(subj) {
   // Beinah-Duplikate (gleiches Thema, anderer Name) auch in bereits gespeicherten
   // Strukturen entfernen – sonst doppeln sie im Lernpfad bis zum nächsten Re-Scan.
   moduleStructure = dedupeStructure(serverStruct || (await localforage.getItem(`ms_${subj.id}`).catch(() => null)));
+
+  // Stabile Themen-IDs laden (geteilte Struktur hat Vorrang vor lokalem Cache),
+  // fehlende für aktuelle Pfad-Themen vergeben und einmalig zurückschreiben. Muss
+  // VOR der Learned/Meta-Auflösung stehen – die hängt jetzt an diesen IDs.
+  topicUids = {
+    ...((await localforage.getItem(`tuid_${subj.id}`).catch(() => null)) || {}),
+    ...((moduleStructure && moduleStructure.ids) || {}),
+  };
+  if (ensureTopicUids()) persistTopicUids(subj.id);
 
   const serverLearned = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => null);
   const localLearned  = (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
@@ -2944,8 +2954,12 @@ async function scanTopics() {
     );
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
-    scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 20);
+    const prevTopics = scannedTopics.slice();
+    scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 40);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
+    // IDs gegen die vorherigen Themen abgleichen (Rename ⇒ ID bleibt ⇒ Fortschritt bleibt).
+    reconcileTopicUids(prevTopics, scannedTopics);
+    persistTopicUids(sessionId);
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     api(`/api/subjects/${sessionId}/topics`, {
       method: 'POST',
@@ -4311,31 +4325,100 @@ function dedupeStructure(struct) {
   return { ...struct, kapitel };
 }
 
-// Normalisierter Schlüssel "<thema>::<niveau>" für Erledigt-Vergleiche. Nutzt
-// dieselbe Normalisierung wie die Dedup, damit Häkchen/Fortschritt erhalten bleiben,
-// wenn ein Thema umbenannt oder neu gescannt wird ("Die Lichtreaktion" ==
-// "Lichtreaktion"). Geschrieben wird weiter unter dem aktuellen Namen (markTopicDone) –
-// der Lese-Vergleich normalisiert nur, sodass Altbestand wieder zugeordnet wird.
-function learnedKey(topic, diff) {
-  return normTopic(topic) + '::' + diff;
+// ── Stabile Themen-IDs ─────────────────────────────────────────────────────
+// Fortschritt (gelernt, Wiederholung, Cache) hängt an einer einmal vergebenen ID
+// statt am Themen-Namen → überlebt Umbenennen/Re-Scan. topicUids (normName → ID)
+// liegt in der fach-global geteilten Struktur, sodass alle Geräte dieselben IDs
+// sehen. Fehlt eine ID, degradiert alles sauber auf den normalisierten Namen (v155).
+function newTopicUid() {
+  const r = self.crypto?.randomUUID?.() || (Date.now().toString(16) + Math.random().toString(16).slice(2));
+  return 't_' + r.replace(/[^a-f0-9]/gi, '').slice(0, 10);
+}
+const isTopicUid = s => /^t_[a-f0-9]+$/i.test(s);
+
+// Stabile ID eines Themas, sonst dessen normalisierter Name (v155-Fallback).
+function topicId(name) {
+  const k = normTopic(name);
+  return topicUids[k] || k;
 }
 
-// Set aller gelernten Themen als normalisierte "<thema>::<niveau>"-Schlüssel.
-function learnedKeySet() {
-  return new Set(learnedTopics.map(lt => {
-    const [name, diff] = lt.split('::');
-    return normTopic(name) + '::' + (diff || 'einsteiger');
-  }));
+// Fortschritts-Schlüssel "<id|normName>::<niveau>".
+function topicKey(name, diff) {
+  return topicId(name) + '::' + diff;
 }
 
-// Normalisiert einen ganzen "Name::Niveau"-Schlüssel auf "normName::Niveau".
-// Für topicMeta (Wiederholungs-Termine), damit auch die Vergessenskurve ein
-// Umbenennen/Re-Scan übersteht – konsistent mit dem Done-Status (learnedKey).
-function normFullKey(key) {
+// Löst den Kopf eines ganzen "X::Niveau"-Schlüssels auf eine ID auf – akzeptiert
+// Alt-Einträge ("Name::diff") wie ID-Einträge ("t_abc::diff").
+function resolveKey(key) {
   const i = String(key).lastIndexOf('::');
-  return i < 0
-    ? normTopic(key) + '::einsteiger'
-    : normTopic(key.slice(0, i)) + '::' + key.slice(i + 2);
+  const head = i < 0 ? key : key.slice(0, i);
+  const diff = i < 0 ? 'einsteiger' : key.slice(i + 2);
+  return (isTopicUid(head) ? head : topicId(head)) + '::' + diff;
+}
+
+function learnedKey(topic, diff) { return topicKey(topic, diff); }
+
+// Set aller gelernten Themen als aufgelöste ID-Schlüssel.
+function learnedKeySet() {
+  return new Set(learnedTopics.map(resolveKey));
+}
+
+// topicMeta-Schlüssel (Wiederholungs-Termine) ebenfalls über die ID auflösen.
+function normFullKey(key) { return resolveKey(key); }
+
+// Vergibt fehlenden Pfad-Themen eine ID; true, wenn etwas neu war.
+function ensureTopicUids() {
+  let changed = false;
+  for (const name of pathTopics()) {
+    const k = normTopic(name);
+    if (k && !topicUids[k]) { topicUids[k] = newTopicUid(); changed = true; }
+  }
+  return changed;
+}
+
+// Token-Jaccard zweier normalisierter Namen (Rename-Erkennung beim Re-Scan).
+function jaccardTokens(a, b) {
+  const A = new Set(a.split(' ').filter(Boolean));
+  const B = new Set(b.split(' ').filter(Boolean));
+  if (!A.size || !B.size) return 0;
+  let inter = 0; for (const t of A) if (B.has(t)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+// Re-Scan-Abgleich: für jeden neuen Namen die ID des passenden alten Themas
+// nachtragen (exakt/normalisiert → Ähnlichkeit ≥ 0.6 → sonst neue ID). Alte
+// Map-Einträge bleiben erhalten, damit bestehender Fortschritt referenzierbar bleibt.
+function reconcileTopicUids(prevNames, newNames) {
+  const prevNorm = prevNames.map(normTopic);
+  const newNorm  = newNames.map(normTopic);
+  const used = new Set();
+  newNorm.forEach(k => { if (topicUids[k]) used.add(topicUids[k]); });
+  const avail = prevNorm.filter(k => topicUids[k] && !newNorm.includes(k));
+  newNorm.forEach(k => {
+    if (!k || topicUids[k]) return;                       // exakt/normalisiert schon zugeordnet
+    let best = null, score = 0;
+    for (const o of avail) {
+      if (used.has(topicUids[o])) continue;
+      const s = jaccardTokens(k, o);
+      if (s > score) { score = s; best = o; }
+    }
+    if (best && score >= 0.6) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
+    else topicUids[k] = newTopicUid();
+  });
+}
+
+// IDs in die geteilte Struktur (Server + lokal) schreiben, plus lokaler Fallback.
+function persistTopicUids(subjId) {
+  if (!subjId) return;
+  if (moduleStructure) {
+    moduleStructure.ids = topicUids;
+    localforage.setItem(`ms_${subjId}`, moduleStructure).catch(() => {});
+    api(`/api/subjects/${subjId}/structure`, {
+      method: 'POST',
+      body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
+    }).catch(() => {});
+  }
+  localforage.setItem(`tuid_${subjId}`, topicUids).catch(() => {});
 }
 
 // Einzige Wahrheitsquelle für die Themen des Lernpfads: exakt die Liste, die auch
@@ -4350,10 +4433,12 @@ function pathTopics() {
 
 // Distinct Pfad-Themen, die auf einem bestimmten Schwierigkeitsgrad gelernt wurden.
 function topicsDoneAtDiff(diff) {
-  const current = new Set(pathTopics().map(normTopic));
-  return new Set(
-    learnedTopics.filter(t => t.endsWith('::' + diff)).map(t => normTopic(t.split('::')[0])).filter(t => current.has(t))
-  ).size;
+  const current = new Set(pathTopics().map(topicId));
+  const ids = learnedTopics
+    .filter(t => t.endsWith('::' + diff))
+    .map(t => { const r = resolveKey(t); return r.slice(0, r.lastIndexOf('::')); })
+    .filter(id => current.has(id));
+  return new Set(ids).size;
 }
 
 function calculateMilestone() {
@@ -4379,7 +4464,13 @@ function calculateMilestone() {
   const diffDone   = topicsDoneAtDiff(activeDiff);
   const pct = total > 0 ? Math.round(Math.min(1, diffDone / total) * 100) : 0;
 
-  return { ...level, pct, doneCount: diffDone, totalTopics: total,
+  // Gesamtfortschritt: distinkte Pfad-Themen, die auf IRGENDEINEM Niveau schon
+  // gelernt wurden. Macht den Niveauwechsel sichtbar nicht-destruktiv (#5).
+  const learnedIds = new Set(learnedTopics.map(t => { const r = resolveKey(t); return r.slice(0, r.lastIndexOf('::')); }));
+  const overallDone = pathTopics().filter(n => learnedIds.has(topicId(n))).length;
+  const overallPct  = total > 0 ? Math.round(overallDone / total * 100) : 0;
+
+  return { ...level, pct, doneCount: diffDone, totalTopics: total, overallDone, overallPct,
            levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length, fracs };
 }
 
@@ -4422,7 +4513,16 @@ function renderMilestone() {
     ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · ${m.doneCount}/${m.totalTopics} Themen auf diesem Level · <span class="ms-reset-btn">Zurücksetzen</span>`
     : `${m.pct}% · ${m.doneCount}/${m.totalTopics} Themen auf <strong>${activeDiffName}</strong>-Level${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
 
+  // Gesamtfortschritt oben (alle Niveaus zusammen) – bleibt beim Stufenwechsel
+  // stehen, damit die per-Niveau-% nicht wie ein Reset wirkt (#5).
+  const overallHtml = `
+    <div class="ms-info" style="margin:0 0 4px"><strong>🎯 Gesamt:</strong> ${m.overallDone}/${m.totalTopics} Themen gelernt · ${m.overallPct}%</div>
+    <div style="height:8px;border-radius:6px;background:rgba(127,127,127,.18);overflow:hidden;margin-bottom:12px">
+      <div style="height:100%;width:${m.overallPct}%;background:linear-gradient(90deg,#34d399,#10b981);border-radius:6px;transition:width .4s"></div>
+    </div>`;
+
   banner.innerHTML = `
+    ${overallHtml}
     <div class="ms-steps">${stepsHtml}</div>
     <div class="ms-bar-wrap"><div class="ms-bar-fill" style="width:${m.pct}%"></div></div>
     <div class="ms-info">${infoTxt}</div>`;
@@ -4464,9 +4564,11 @@ function initLernen() {
   if (sessionId) {
     api(`/api/subjects/${sessionId}/learned-topics`)
       .then(t => {
-        const raw = Array.isArray(t) && t.length ? t
-          : learnedTopics; // keep in-memory if server empty
-        learnedTopics = raw.map(e => e.includes('::') ? e : e + '::einsteiger');
+        const norm = e => e.includes('::') ? e : e + '::einsteiger';
+        const server = Array.isArray(t) ? t.map(norm) : [];
+        // Mit dem In-Memory-Stand VEREINEN statt überschreiben – sonst gehen in
+        // dieser Session/offline gelernte Themen verloren (konsistent mit openSubject).
+        learnedTopics = [...new Set([...server, ...learnedTopics.map(norm)])];
         localforage.setItem(`lt_${sessionId}`, learnedTopics).catch(() => {});
         renderMilestone(); loadLernpfad();
       })
@@ -4496,9 +4598,9 @@ function loadLernpfad() {
   // AKTIVEN Schwierigkeitsgrad gelernt wurde – konsistent mit den Stufen-Kreisen
   // der Meilenstein-Skala. Themen, die nur auf einem niedrigeren Niveau gelernt
   // wurden, sind hier NICHT fertig, bekommen aber einen "⬆ Vertiefen"-Hinweis.
-  const learnedBaseNames = new Set(learnedTopics.map(lt => normTopic(lt.split('::')[0])));
+  const learnedBaseIds = new Set(learnedTopics.map(lt => { const r = resolveKey(lt); return r.slice(0, r.lastIndexOf('::')); }));
   const isTopicDone  = topic => learnedSet.has(learnedKey(topic, activeDiff));
-  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseNames.has(normTopic(topic));
+  const wasDoneLower = topic => !isTopicDone(topic) && learnedBaseIds.has(topicId(topic));
   let foundCurrent = false;
   const makeItem = topic => {
     const isDone       = isTopicDone(topic);                 // auf aktivem Niveau
@@ -4991,7 +5093,8 @@ function lernenSwitchStep(step) {
 // ── Lernen content cache (localforage / IndexedDB) ───────────────────────
 function lernenCacheKey(topic) {
   const diff = selectedDiffIdx !== null ? (MILESTONE_LEVELS[selectedDiffIdx].diff || 'einsteiger') : 'auto';
-  return `lc2_${sessionId}_${topic}_${diff}`;
+  // An die stabile ID gekoppelt → Erklärungs-/Aufgaben-Cache überlebt Umbenennen.
+  return `lc2_${sessionId}_${topicId(topic)}_${diff}`;
 }
 
 async function loadExamDocContext(subjId) {
@@ -5069,7 +5172,7 @@ function renderTopicContent(topic, data) {
   // Elaborative Interrogation: Reflexionsfrage nach der Erklärung.
   // Nur bei frisch gelernten Themen; bei Wiederholung (bereits gelernt) überspringen.
   const elabEl = document.getElementById('lernen-elaborate');
-  const isFresh = !learnedTopics.includes(topic + '::' + lernenCurrentDiff);
+  const isFresh = !learnedKeySet().has(learnedKey(topic, lernenCurrentDiff));
   if (elabEl && isFresh) {
     const templates = [
       `Erkläre "${topic}" in deinen eigenen Worten – als würdest du es jemandem ohne Vorkenntnisse erklären.`,
@@ -5094,7 +5197,10 @@ function renderTopicContent(topic, data) {
     document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(data.aufgabe));
     document.getElementById('lernen-tab-aufgabe').disabled = false;
     document.getElementById('lernen-regen-btn').classList.remove('hidden');
-  } else {
+  } else if (!isFresh) {
+    // Thema ohne Übungsaufgabe: bei Wiederholung sofort abhakbar. Beim ERSTEN Mal
+    // erst nach der Reflexionsfrage (finishElaboration) – "fertig" soll überall
+    // mindestens aktives Erinnern bedeuten, nicht bloßes Lesen (#3).
     document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
   const valuesEl = document.getElementById('lernen-task-values');
@@ -5352,6 +5458,58 @@ function onLernenUp(e) {
   }
 }
 
+// ── Sicherer Ausdrucks-Evaluator für die deterministische Rechen-Prüfung (#4) ──
+// Kein eval(): Tokenizer → Shunting-Yard → RPN. Erlaubt Zahlen (auch deutsches
+// Komma/Tausenderpunkt), + - * / ^ %, Klammern und Wurzel. NaN bei Unbekanntem.
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  if (v == null) return NaN;
+  const m = String(v).match(/-?\d[\d.\s]*(?:,\d+)?|-?\d+(?:\.\d+)?/);
+  if (!m) return NaN;
+  let t = m[0].replace(/\s/g, '');
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  else if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, '');
+  return parseFloat(t);
+}
+function evalExpr(expr) {
+  if (expr == null) return NaN;
+  let s = String(expr).toLowerCase()
+    .replace(/wurzel|sqrt|√/g, ' sqrt ').replace(/hoch/g, '^')
+    .replace(/·|×/g, '*').replace(/÷|:/g, '/');
+  s = s.replace(/(\d)\.(?=\d{3}\b)/g, '$1').replace(/(\d),(\d)/g, '$1.$2');
+  s = s.replace(/[^0-9.+\-*/^()%\sa-z]/g, ' ').replace(/(^|\()\s*-/g, '$10-');
+  const tokens = s.match(/\d+(?:\.\d+)?|sqrt|[+\-*/^()%]/g);
+  if (!tokens) return NaN;
+  const prec = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2, '^': 3 }, isOp = t => t in prec;
+  const out = [], ops = [];
+  for (const t of tokens) {
+    if (/^\d/.test(t)) out.push(parseFloat(t));
+    else if (t === 'sqrt') ops.push(t);
+    else if (isOp(t)) {
+      while (ops.length) { const top = ops[ops.length - 1];
+        if (top === 'sqrt' || (isOp(top) && (prec[top] > prec[t] || (prec[top] === prec[t] && t !== '^')))) out.push(ops.pop());
+        else break; }
+      ops.push(t);
+    } else if (t === '(') ops.push(t);
+    else if (t === ')') { while (ops.length && ops[ops.length - 1] !== '(') out.push(ops.pop()); ops.pop();
+      if (ops[ops.length - 1] === 'sqrt') out.push(ops.pop()); }
+  }
+  while (ops.length) out.push(ops.pop());
+  const st = [];
+  for (const t of out) {
+    if (typeof t === 'number') st.push(t);
+    else if (t === 'sqrt') { const a = st.pop(); if (a === undefined) return NaN; st.push(Math.sqrt(a)); }
+    else { const b = st.pop(), a = st.pop(); if (a === undefined || b === undefined) return NaN;
+      st.push(t === '+' ? a + b : t === '-' ? a - b : t === '*' ? a * b : t === '/' ? a / b : t === '%' ? a % b : t === '^' ? Math.pow(a, b) : NaN); }
+  }
+  return st.length === 1 ? st[0] : NaN;
+}
+// Zahlenvergleich mit relativer + absoluter Toleranz.
+function numEqual(a, b, rel = 0.01) {
+  if (!isFinite(a) || !isFinite(b)) return false;
+  return Math.abs(a - b) <= Math.max(1e-9, rel * Math.abs(b), 0.005);
+}
+
 async function checkLernenSolution() {
   if (!lernenTopicData) return;
   const checkBtn  = document.getElementById('lernen-check-btn');
@@ -5394,6 +5552,17 @@ async function checkLernenSolution() {
       ? `\n\nDIE KORREKTE MUSTERLÖSUNG IST BEREITS BEKANNT (nutze sie als verbindlichen Maßstab für die Bewertung; schreibe sie NICHT erneut, lass das Feld "loesung" leer):\n"""\n${preLoesung}\n"""`
       : '';
 
+    // Rechenaufgabe? → zusätzliche numerische Felder anfordern, die der Code danach
+    // DETERMINISTISCH prüft (das LLM benotet nicht mehr seine eigene Arithmetik, #4).
+    const isCalcTask = Array.isArray(lernenTopicData.werte) && lernenTopicData.werte.length > 0;
+    const numFields = isCalcTask ? `,
+  "endergebnis_rechnung": "reiner Rechenausdruck für DAS korrekte Endergebnis, nur Zahlen/Operatoren (z.B. \\"500*1.08\\"); leer wenn nicht sinnvoll",
+  "endergebnis": <korrektes Endergebnis als reine Zahl, Punkt als Dezimaltrenner>,
+  "schueler_endergebnis": <Endzahl, die der Student angibt, als reine Zahl – null wenn keine genannt>` : '';
+    const numInstr = isCalcTask
+      ? `\nNUMERISCH: Fülle "endergebnis"/"endergebnis_rechnung" mit DEINEM korrekten Resultat und "schueler_endergebnis" mit der Endzahl des Studenten (null wenn keine). Punkt als Dezimaltrenner. Die endgültige Richtig/Falsch-Wertung der Zahl übernimmt das System.`
+      : '';
+
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
 ${strictNote}
 {
@@ -5401,12 +5570,12 @@ ${strictNote}
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
   ${loesungField},
-  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."
+  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."${numFields}
 }
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
 KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
-Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.
+Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}
 
 ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
 
@@ -5457,6 +5626,29 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     // Bereits vorab generierte Musterlösung einsetzen (das Modell hat das Feld leer
     // gelassen, damit die Bewertung schneller war).
     if (preLoesung) ev.loesung = preLoesung;
+
+    // Deterministische Rechen-Prüfung (#4): der CODE vergleicht die Zahlen, nicht das
+    // LLM. Referenz = nachgerechneter Ausdruck (härtet die LLM-Zahl), sonst dessen
+    // "endergebnis". Nachweislich falsches Endergebnis ⇒ nie volle Punktzahl –
+    // überstimmt eine LLM-Fehleinschätzung und bleibt über Re-Prüfungen stabil.
+    let numNote = '';
+    if (isCalcTask) {
+      const refByExpr = evalExpr(ev.endergebnis_rechnung);
+      const ref  = isFinite(refByExpr) ? refByExpr : parseNum(ev.endergebnis);
+      const stud = parseNum(ev.schueler_endergebnis);
+      if (isFinite(ref) && isFinite(stud)) {
+        const tol = (lernenCurrentDiff === 'pruefungsnah' || lernenCurrentDiff === 'schwer') ? 0.005 : 0.02;
+        const fmt = n => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
+        if (numEqual(stud, ref, tol)) {
+          numNote = `🔢 Endergebnis geprüft: ${fmt(stud)} ✓`;
+        } else {
+          numNote = `🔢 Endergebnis weicht ab – erwartet ${fmt(ref)}, deine Antwort ${fmt(stud)}.`;
+          if (ev.score >= 2) ev.score = 1;
+          ev.understood = false;
+        }
+      }
+    }
+    if (numNote) ev.feedback = ev.feedback ? `${ev.feedback} — ${numNote}` : numNote;
 
     lernenAttempts++;
     lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung };
@@ -5556,7 +5748,9 @@ async function markTopicDone() {
   if (!topic || !sessionId) return;
   closeLernenTopic();
   const key = topic + '::' + lernenCurrentDiff;
-  const isFirstLearn = !learnedTopics.includes(key);
+  // Erstlern-Erkennung id-basiert: ein bereits (auch unter altem Namen) gelerntes
+  // Thema gilt nicht erneut als "zum ersten Mal" → kein doppeltes XP/Eintrag.
+  const isFirstLearn = !learnedKeySet().has(learnedKey(topic, lernenCurrentDiff));
   const wasReviewDue = !isFirstLearn && topicReviewDue(key);
   if (isFirstLearn) {
     learnedTopics.push(key);
@@ -5594,6 +5788,7 @@ async function scanModuleStructure(btn) {
   if (!sessionTxt && !sessionId) { toast('Bitte zuerst Dokumente hochladen.', 'warn'); return; }
   const orig = btn.textContent;
   btn.disabled = true;
+  const prevNames = pathTopics();   // für den ID-Abgleich (Rename-Erkennung) festhalten
   try {
     // Phase 1: Fetch short snippet from EVERY document → identify Hauptthemen across ALL docs
     btn.textContent = 'Überblick lädt…';
@@ -5626,9 +5821,16 @@ async function scanModuleStructure(btn) {
     // Beinah-Duplikate über alle Kapitel hinweg entfernen (normalisierter Vergleich:
     // "Die Lichtreaktion" == "Lichtreaktion", "CO₂-Konzentration" == "CO2 Konzentration").
     moduleStructure = dedupeStructure({ kapitel });
-    scannedTopics = moduleStructure.kapitel.flatMap(k => k.themen).slice(0, 30);
+    const newNames = moduleStructure.kapitel.flatMap(k => k.themen);
+    // IDs gegen die alten Themen abgleichen: Rename ⇒ ID bleibt ⇒ Fortschritt bleibt.
+    reconcileTopicUids(prevNames, newNames);
+    moduleStructure.ids = topicUids;
+    // Flache Liste = ALLE Strukturthemen (kein 30er-Cut): der Lernpfad zählt sie
+    // ohnehin vollständig, Session-Planer/Aufgaben sollen deckungsgleich sein (#7b).
+    scannedTopics = newNames;
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
+    localforage.setItem(`tuid_${sessionId}`, topicUids).catch(() => {});
     api(`/api/subjects/${sessionId}/structure`, {
       method: 'POST',
       body: JSON.stringify({ structure: moduleStructure, topics: scannedTopics }),
@@ -5732,6 +5934,9 @@ if (window.visualViewport) {
 function finishElaboration() {
   document.getElementById('lernen-elaborate')?.classList.add('hidden');
   document.getElementById('lernen-step1-footer')?.classList.remove('hidden');
+  // Themen ohne Übungsaufgabe: "fertig" erst jetzt – nach der Reflexion – freigeben (#3).
+  if (!(lernenTopicData?.aufgabe && lernenTopicData.aufgabe.trim()))
+    document.getElementById('lernen-done-btn')?.classList.remove('hidden');
 }
 document.getElementById('elaborate-skip')?.addEventListener('click', finishElaboration);
 document.getElementById('elaborate-go')?.addEventListener('click', finishElaboration);
