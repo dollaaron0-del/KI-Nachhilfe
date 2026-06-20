@@ -256,6 +256,7 @@ document.getElementById('auth-demo-btn')?.addEventListener('click', async () => 
 document.getElementById('btn-logout')?.addEventListener('click', () => {
   authToken = ''; authUsername = '';
   localStorage.removeItem('auth_token'); localStorage.removeItem('auth_username');
+  localforage.removeItem('subjects_cache').catch(() => {}); // kein Fremd-Fächer-Flash beim nächsten Login
   showScreen('auth-screen');
 });
 
@@ -350,6 +351,7 @@ function handleAuthExpired() {
   localStorage.removeItem('auth_token');
   localStorage.removeItem('auth_username');
   localStorage.removeItem('auth_is_admin');
+  localforage.removeItem('subjects_cache').catch(() => {}); // kein Fremd-Fächer-Flash beim nächsten Login
   stopApprovalPolling();
   showScreen('auth-screen');
   toast('Deine Sitzung ist abgelaufen – bitte melde dich neu an.', 'warn', 5000);
@@ -908,14 +910,30 @@ async function adminDeleteUser(id, username) {
 
 // ══ SUBJECTS SCREEN ════════════════════════════════════════════════════════
 
-async function loadSubjects() {
-  const list  = await DB.subjects();
+function renderSubjects(list) {
   const grid  = document.getElementById('subj-grid');
   const empty = document.getElementById('subj-empty');
   grid.innerHTML = '';
   if (!list.length) { empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
   list.forEach(s => grid.appendChild(makeCard(s)));
+}
+
+async function loadSubjects() {
+  // 1) Sofort aus lokalem Cache zeichnen – kein leerer Screen während des
+  //    Server-Roundtrips (stale-while-revalidate).
+  let shownCache = false;
+  try {
+    const cached = await localforage.getItem('subjects_cache');
+    if (cached) { renderSubjects(cached); shownCache = true; }
+  } catch {}
+  // 2) Frische Liste vom Server holen und still aktualisieren. Bei Server-Fehler
+  //    bleibt die gecachte Ansicht stehen, statt sie fälschlich zu leeren.
+  let list;
+  try { list = await api('/api/subjects'); }
+  catch { if (!shownCache) renderSubjects([]); return; }
+  renderSubjects(list);
+  localforage.setItem('subjects_cache', list).catch(() => {});
 }
 
 function makeCard(s) {
@@ -2844,6 +2862,19 @@ function addTyping(container) {
   return el;
 }
 
+// Wechselnde Status-Zeile statt statischem "wird geprüft": zeigt nacheinander,
+// woran die KI gerade arbeitet. Bleibt am letzten Schritt stehen. Liefert stop().
+function cycleStatus(el, steps, intervalMs = 1500) {
+  if (!el || !steps || !steps.length) return () => {};
+  let i = 0;
+  el.textContent = steps[0];
+  const timer = setInterval(() => {
+    i = Math.min(i + 1, steps.length - 1);
+    el.textContent = steps[i];
+  }, intervalMs);
+  return () => clearInterval(timer);
+}
+
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -3793,6 +3824,27 @@ async function checkHandwriting() {
 
   const writtenText = document.getElementById('rechnen-task-input')?.value.trim() || '';
   const taskText    = writtenText || currentAufgabe;
+
+  // Wartezustand beleben: wechselnde Status-Zeile statt statischem "wird geprüft",
+  // und die vorgeladene Musterlösung schon zum Lesen anzeigen, sobald sie fertig ist.
+  const stopStatus = cycleStatus(document.getElementById('rechnen-check-status'),
+    ['Lösung erfassen…', 'Rechenweg nachvollziehen…', 'Schritte nachrechnen…', 'Ergebnis bewerten…', 'Feedback formulieren…']);
+  const prePreview = document.getElementById('rechnen-check-preloesung');
+  if (prePreview) prePreview.innerHTML = '';
+  if (prePreview && rechnenLoesung && rechnenLoesung.aufgabe === taskText) {
+    rechnenLoesung.promise.then(txt => {
+      txt = (txt || '').trim();
+      // Nur zeigen, solange noch geprüft wird (Lade-Screen sichtbar).
+      if (txt && !document.getElementById('rechnen-sheet-loading').classList.contains('hidden')) {
+        prePreview.innerHTML =
+          '<details class="lernen-result-details" open style="margin-top:14px;text-align:left">' +
+            '<summary>📌 Musterlösung – schon mal zum Lesen</summary>' +
+            `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(txt))}</div>` +
+          '</details>';
+      }
+    }).catch(() => {});
+  }
+
   const docNote     = activeRechnenDoc ? `\n(Aktives Dokument: ${activeRechnenDoc})` : '';
   // Eingetippter Text im Schreibbereich zählt mit zur Lösung
   const writtenNote = writtenText
@@ -3865,13 +3917,13 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
     let loesung = '';
     try { loesung = await loesungP || ''; } catch { loesung = ''; }
     const full = loesung ? `${feedback}\n\n## Musterlösung\n${loesung}` : feedback;
-    checkDone();
+    checkDone(); stopStatus();
     rechnenLastFeedback = full;
     document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(full));
     document.getElementById('rechnen-sheet-loading').classList.add('hidden');
     document.getElementById('rechnen-sheet-result').classList.remove('hidden');
   } catch (e) {
-    checkDone();
+    checkDone(); stopStatus();
     overlay.classList.add('hidden');
     requestAnimationFrame(() => requestAnimationFrame(() => initCanvas()));
     toast('Fehler beim Prüfen: ' + e.message, 'error');
@@ -5851,28 +5903,53 @@ async function checkLernenSolution() {
   if (!lernenTopicData) return;
   const checkBtn  = document.getElementById('lernen-check-btn');
   const resultBar = document.getElementById('lernen-result-bar');
+
+  // Antwort zuerst validieren – sonst bauen wir Wartezustand/Musterlösung umsonst auf.
+  const answerText = document.getElementById('lernen-text-answer')?.value.trim() || '';
+  const hasInk     = lernenHasInk && !!lernenCtx;
+  if (!answerText && !hasInk) {
+    toast('Bitte zuerst eine Antwort zeichnen oder eingeben.', 'warn', 3000);
+    return;
+  }
+
   checkBtn.disabled = true;
   checkBtn.innerHTML = '<span class="lernen-check-spin">⏳</span> Prüfen…';
+
+  // Vorab generierte Musterlösung nutzen, falls schon fertig: spart der Bewertung
+  // das erneute Ausformulieren (kürzere Antwort = schneller) UND wird dem Nutzer
+  // direkt im Wartezustand zum Lesen angezeigt.
+  let preLoesung = '';
+  if (lernenLoesung && lernenLoesung.aufgabe === lernenTopicData.aufgabe) {
+    try { preLoesung = await lernenLoesung.promise || ''; } catch { preLoesung = ''; }
+  }
+
+  // Wartezustand: wechselnde Status-Zeile (woran die KI gerade arbeitet) statt
+  // statischem "wird geprüft" – plus die vorgeladene Musterlösung schon zum Lesen.
+  let stopStatus = () => {};
   if (resultBar) {
+    const isCalc = Array.isArray(lernenTopicData.werte) && lernenTopicData.werte.length > 0;
+    const steps = isCalc
+      ? ['Aufgabe und Werte lesen…', 'Deinen Rechenweg durchgehen…', 'Zwischenschritte nachrechnen…', 'Endergebnis vergleichen…', 'Feedback formulieren…']
+      : ['Aufgabe lesen…', 'Deine Antwort durchgehen…', 'Mit der Musterlösung abgleichen…', 'Stärken und Lücken sammeln…', 'Feedback formulieren…'];
     resultBar.className = 'lernen-result-bar lernen-result-bar--loading';
     resultBar.innerHTML =
       '<span class="lernen-checking-row">' +
         '<span class="lernen-check-dots"><span></span><span></span><span></span></span>' +
-        'KI prüft deine Antwort…' +
-      '</span>';
+        '<span id="lernen-check-status"></span>' +
+      '</span>' +
+      (preLoesung
+        ? '<details class="lernen-result-details" open style="margin-top:12px">' +
+            '<summary>📌 Musterlösung – schon mal zum Lesen</summary>' +
+            `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(preLoesung))}</div>` +
+          '</details>'
+        : '');
+    stopStatus = cycleStatus(document.getElementById('lernen-check-status'), steps);
   }
+
   try {
     let ev;
     // Bewertungsmaßstab/Strenge sind an das Niveau gekoppelt (Konstanten auf Modul-Ebene).
     const strictNote = LERN_STRICTNESS[lernenCurrentDiff] || LERN_STRICTNESS.einsteiger;
-
-    // Vorab generierte Musterlösung nutzen, falls schon fertig: spart der Bewertung
-    // das erneute Ausformulieren (kürzere Antwort = schneller). Nur verwenden wenn
-    // sie zur aktuellen Aufgabe gehört und bereits vorliegt – sonst normal bewerten.
-    let preLoesung = '';
-    if (lernenLoesung && lernenLoesung.aufgabe === lernenTopicData.aufgabe) {
-      try { preLoesung = await lernenLoesung.promise || ''; } catch { preLoesung = ''; }
-    }
 
     // Re-Prüfung: vorherige Auswertung mitgeben, damit die KI konsistent bleibt
     // und nicht bei jeder Runde neue/widersprüchliche Fehler "entdeckt".
@@ -5918,15 +5995,7 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
 
     // Beide Eingabebereiche gemeinsam prüfen: Der Umschalter ✏️/⌨️ steuert nur,
     // was gerade sichtbar ist – die Antwort kann aus Zeichnung UND/ODER Text bestehen.
-    const answerText = document.getElementById('lernen-text-answer')?.value.trim() || '';
-    const hasInk     = lernenHasInk && !!lernenCtx;
-    if (!answerText && !hasInk) {
-      toast('Bitte zuerst eine Antwort zeichnen oder eingeben.', 'warn', 3000);
-      checkBtn.disabled = false; checkBtn.innerHTML = '✅ Prüfen';
-      if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
-      return;
-    }
-
+    // (answerText/hasInk wurden oben bereits ermittelt und validiert.)
     if (hasInk) {
       // Zeichnung vorhanden → Vision; getippten Text (falls vorhanden) zusätzlich mitschicken.
       const canvas = document.getElementById('lernen-canvas');
@@ -6040,6 +6109,8 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
   } catch (e) {
     toast('Fehler beim Prüfen: ' + e.message, 'error');
     if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
+  } finally {
+    stopStatus();
   }
   checkBtn.disabled = false; checkBtn.innerHTML = '✅ Prüfen';
 }
