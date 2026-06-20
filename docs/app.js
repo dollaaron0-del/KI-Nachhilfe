@@ -4464,7 +4464,13 @@ function calculateMilestone() {
   const diffDone   = topicsDoneAtDiff(activeDiff);
   const pct = total > 0 ? Math.round(Math.min(1, diffDone / total) * 100) : 0;
 
-  return { ...level, pct, doneCount: diffDone, totalTopics: total,
+  // Gesamtfortschritt: distinkte Pfad-Themen, die auf IRGENDEINEM Niveau schon
+  // gelernt wurden. Macht den Niveauwechsel sichtbar nicht-destruktiv (#5).
+  const learnedIds = new Set(learnedTopics.map(t => { const r = resolveKey(t); return r.slice(0, r.lastIndexOf('::')); }));
+  const overallDone = pathTopics().filter(n => learnedIds.has(topicId(n))).length;
+  const overallPct  = total > 0 ? Math.round(overallDone / total * 100) : 0;
+
+  return { ...level, pct, doneCount: diffDone, totalTopics: total, overallDone, overallPct,
            levelNum: levelIdx + 1, totalLevels: MILESTONE_LEVELS.length, fracs };
 }
 
@@ -4507,7 +4513,16 @@ function renderMilestone() {
     ? `Modus: <strong>${MILESTONE_LEVELS[selIdx].name}</strong> · ${m.doneCount}/${m.totalTopics} Themen auf diesem Level · <span class="ms-reset-btn">Zurücksetzen</span>`
     : `${m.pct}% · ${m.doneCount}/${m.totalTopics} Themen auf <strong>${activeDiffName}</strong>-Level${m.rec ? ` · Empfehlung: <strong>${m.rec}</strong>` : ''}`;
 
+  // Gesamtfortschritt oben (alle Niveaus zusammen) – bleibt beim Stufenwechsel
+  // stehen, damit die per-Niveau-% nicht wie ein Reset wirkt (#5).
+  const overallHtml = `
+    <div class="ms-info" style="margin:0 0 4px"><strong>🎯 Gesamt:</strong> ${m.overallDone}/${m.totalTopics} Themen gelernt · ${m.overallPct}%</div>
+    <div style="height:8px;border-radius:6px;background:rgba(127,127,127,.18);overflow:hidden;margin-bottom:12px">
+      <div style="height:100%;width:${m.overallPct}%;background:linear-gradient(90deg,#34d399,#10b981);border-radius:6px;transition:width .4s"></div>
+    </div>`;
+
   banner.innerHTML = `
+    ${overallHtml}
     <div class="ms-steps">${stepsHtml}</div>
     <div class="ms-bar-wrap"><div class="ms-bar-fill" style="width:${m.pct}%"></div></div>
     <div class="ms-info">${infoTxt}</div>`;
