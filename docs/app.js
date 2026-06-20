@@ -2955,7 +2955,7 @@ async function scanTopics() {
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) throw new Error('Keine Themen erkannt');
     const prevTopics = scannedTopics.slice();
-    scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 20);
+    scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 40);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     // IDs gegen die vorherigen Themen abgleichen (Rename ⇒ ID bleibt ⇒ Fortschritt bleibt).
     reconcileTopicUids(prevTopics, scannedTopics);
@@ -5182,7 +5182,10 @@ function renderTopicContent(topic, data) {
     document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(data.aufgabe));
     document.getElementById('lernen-tab-aufgabe').disabled = false;
     document.getElementById('lernen-regen-btn').classList.remove('hidden');
-  } else {
+  } else if (!isFresh) {
+    // Thema ohne Übungsaufgabe: bei Wiederholung sofort abhakbar. Beim ERSTEN Mal
+    // erst nach der Reflexionsfrage (finishElaboration) – "fertig" soll überall
+    // mindestens aktives Erinnern bedeuten, nicht bloßes Lesen (#3).
     document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
   const valuesEl = document.getElementById('lernen-task-values');
@@ -5440,6 +5443,58 @@ function onLernenUp(e) {
   }
 }
 
+// ── Sicherer Ausdrucks-Evaluator für die deterministische Rechen-Prüfung (#4) ──
+// Kein eval(): Tokenizer → Shunting-Yard → RPN. Erlaubt Zahlen (auch deutsches
+// Komma/Tausenderpunkt), + - * / ^ %, Klammern und Wurzel. NaN bei Unbekanntem.
+function parseNum(v) {
+  if (typeof v === 'number') return v;
+  if (v == null) return NaN;
+  const m = String(v).match(/-?\d[\d.\s]*(?:,\d+)?|-?\d+(?:\.\d+)?/);
+  if (!m) return NaN;
+  let t = m[0].replace(/\s/g, '');
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  else if ((t.match(/\./g) || []).length > 1) t = t.replace(/\./g, '');
+  return parseFloat(t);
+}
+function evalExpr(expr) {
+  if (expr == null) return NaN;
+  let s = String(expr).toLowerCase()
+    .replace(/wurzel|sqrt|√/g, ' sqrt ').replace(/hoch/g, '^')
+    .replace(/·|×/g, '*').replace(/÷|:/g, '/');
+  s = s.replace(/(\d)\.(?=\d{3}\b)/g, '$1').replace(/(\d),(\d)/g, '$1.$2');
+  s = s.replace(/[^0-9.+\-*/^()%\sa-z]/g, ' ').replace(/(^|\()\s*-/g, '$10-');
+  const tokens = s.match(/\d+(?:\.\d+)?|sqrt|[+\-*/^()%]/g);
+  if (!tokens) return NaN;
+  const prec = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2, '^': 3 }, isOp = t => t in prec;
+  const out = [], ops = [];
+  for (const t of tokens) {
+    if (/^\d/.test(t)) out.push(parseFloat(t));
+    else if (t === 'sqrt') ops.push(t);
+    else if (isOp(t)) {
+      while (ops.length) { const top = ops[ops.length - 1];
+        if (top === 'sqrt' || (isOp(top) && (prec[top] > prec[t] || (prec[top] === prec[t] && t !== '^')))) out.push(ops.pop());
+        else break; }
+      ops.push(t);
+    } else if (t === '(') ops.push(t);
+    else if (t === ')') { while (ops.length && ops[ops.length - 1] !== '(') out.push(ops.pop()); ops.pop();
+      if (ops[ops.length - 1] === 'sqrt') out.push(ops.pop()); }
+  }
+  while (ops.length) out.push(ops.pop());
+  const st = [];
+  for (const t of out) {
+    if (typeof t === 'number') st.push(t);
+    else if (t === 'sqrt') { const a = st.pop(); if (a === undefined) return NaN; st.push(Math.sqrt(a)); }
+    else { const b = st.pop(), a = st.pop(); if (a === undefined || b === undefined) return NaN;
+      st.push(t === '+' ? a + b : t === '-' ? a - b : t === '*' ? a * b : t === '/' ? a / b : t === '%' ? a % b : t === '^' ? Math.pow(a, b) : NaN); }
+  }
+  return st.length === 1 ? st[0] : NaN;
+}
+// Zahlenvergleich mit relativer + absoluter Toleranz.
+function numEqual(a, b, rel = 0.01) {
+  if (!isFinite(a) || !isFinite(b)) return false;
+  return Math.abs(a - b) <= Math.max(1e-9, rel * Math.abs(b), 0.005);
+}
+
 async function checkLernenSolution() {
   if (!lernenTopicData) return;
   const checkBtn  = document.getElementById('lernen-check-btn');
@@ -5482,6 +5537,17 @@ async function checkLernenSolution() {
       ? `\n\nDIE KORREKTE MUSTERLÖSUNG IST BEREITS BEKANNT (nutze sie als verbindlichen Maßstab für die Bewertung; schreibe sie NICHT erneut, lass das Feld "loesung" leer):\n"""\n${preLoesung}\n"""`
       : '';
 
+    // Rechenaufgabe? → zusätzliche numerische Felder anfordern, die der Code danach
+    // DETERMINISTISCH prüft (das LLM benotet nicht mehr seine eigene Arithmetik, #4).
+    const isCalcTask = Array.isArray(lernenTopicData.werte) && lernenTopicData.werte.length > 0;
+    const numFields = isCalcTask ? `,
+  "endergebnis_rechnung": "reiner Rechenausdruck für DAS korrekte Endergebnis, nur Zahlen/Operatoren (z.B. \\"500*1.08\\"); leer wenn nicht sinnvoll",
+  "endergebnis": <korrektes Endergebnis als reine Zahl, Punkt als Dezimaltrenner>,
+  "schueler_endergebnis": <Endzahl, die der Student angibt, als reine Zahl – null wenn keine genannt>` : '';
+    const numInstr = isCalcTask
+      ? `\nNUMERISCH: Fülle "endergebnis"/"endergebnis_rechnung" mit DEINEM korrekten Resultat und "schueler_endergebnis" mit der Endzahl des Studenten (null wenn keine). Punkt als Dezimaltrenner. Die endgültige Richtig/Falsch-Wertung der Zahl übernimmt das System.`
+      : '';
+
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
 ${strictNote}
 {
@@ -5489,12 +5555,12 @@ ${strictNote}
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
   ${loesungField},
-  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."
+  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."${numFields}
 }
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
 KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
-Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.
+Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}
 
 ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
 
@@ -5545,6 +5611,29 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     // Bereits vorab generierte Musterlösung einsetzen (das Modell hat das Feld leer
     // gelassen, damit die Bewertung schneller war).
     if (preLoesung) ev.loesung = preLoesung;
+
+    // Deterministische Rechen-Prüfung (#4): der CODE vergleicht die Zahlen, nicht das
+    // LLM. Referenz = nachgerechneter Ausdruck (härtet die LLM-Zahl), sonst dessen
+    // "endergebnis". Nachweislich falsches Endergebnis ⇒ nie volle Punktzahl –
+    // überstimmt eine LLM-Fehleinschätzung und bleibt über Re-Prüfungen stabil.
+    let numNote = '';
+    if (isCalcTask) {
+      const refByExpr = evalExpr(ev.endergebnis_rechnung);
+      const ref  = isFinite(refByExpr) ? refByExpr : parseNum(ev.endergebnis);
+      const stud = parseNum(ev.schueler_endergebnis);
+      if (isFinite(ref) && isFinite(stud)) {
+        const tol = (lernenCurrentDiff === 'pruefungsnah' || lernenCurrentDiff === 'schwer') ? 0.005 : 0.02;
+        const fmt = n => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
+        if (numEqual(stud, ref, tol)) {
+          numNote = `🔢 Endergebnis geprüft: ${fmt(stud)} ✓`;
+        } else {
+          numNote = `🔢 Endergebnis weicht ab – erwartet ${fmt(ref)}, deine Antwort ${fmt(stud)}.`;
+          if (ev.score >= 2) ev.score = 1;
+          ev.understood = false;
+        }
+      }
+    }
+    if (numNote) ev.feedback = ev.feedback ? `${ev.feedback} — ${numNote}` : numNote;
 
     lernenAttempts++;
     lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung };
@@ -5721,7 +5810,9 @@ async function scanModuleStructure(btn) {
     // IDs gegen die alten Themen abgleichen: Rename ⇒ ID bleibt ⇒ Fortschritt bleibt.
     reconcileTopicUids(prevNames, newNames);
     moduleStructure.ids = topicUids;
-    scannedTopics = newNames.slice(0, 30);
+    // Flache Liste = ALLE Strukturthemen (kein 30er-Cut): der Lernpfad zählt sie
+    // ohnehin vollständig, Session-Planer/Aufgaben sollen deckungsgleich sein (#7b).
+    scannedTopics = newNames;
     localforage.setItem(`ms_${sessionId}`, moduleStructure).catch(() => {});
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     localforage.setItem(`tuid_${sessionId}`, topicUids).catch(() => {});
@@ -5828,6 +5919,9 @@ if (window.visualViewport) {
 function finishElaboration() {
   document.getElementById('lernen-elaborate')?.classList.add('hidden');
   document.getElementById('lernen-step1-footer')?.classList.remove('hidden');
+  // Themen ohne Übungsaufgabe: "fertig" erst jetzt – nach der Reflexion – freigeben (#3).
+  if (!(lernenTopicData?.aufgabe && lernenTopicData.aufgabe.trim()))
+    document.getElementById('lernen-done-btn')?.classList.remove('hidden');
 }
 document.getElementById('elaborate-skip')?.addEventListener('click', finishElaboration);
 document.getElementById('elaborate-go')?.addEventListener('click', finishElaboration);
