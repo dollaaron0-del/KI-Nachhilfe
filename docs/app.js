@@ -1352,12 +1352,27 @@ async function openSubject(subj) {
   moduleStructure = dedupeStructure(serverStruct || (await localforage.getItem(`ms_${subj.id}`).catch(() => null)));
 
   const serverLearned = await api(`/api/subjects/${subj.id}/learned-topics`).catch(() => null);
-  const rawLearned = (serverLearned && serverLearned.length)
-    ? serverLearned
-    : (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
-  // Normalize old-format entries (plain topic name) → topic::einsteiger
-  learnedTopics = rawLearned.map(t => (t.includes('::') ? t : t + '::einsteiger'));
-  topicMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
+  const localLearned  = (await localforage.getItem(`lt_${subj.id}`).catch(() => null)) || [];
+  // Server UND lokal VEREINEN statt "Server gewinnt": ein offline (oder bei
+  // fehlgeschlagenem POST) gelerntes Thema ging sonst beim Neuladen verloren.
+  // Alt-Format (nur Name) → name::einsteiger normalisieren.
+  const normLT = t => (t.includes('::') ? t : t + '::einsteiger');
+  learnedTopics = [...new Set([...(serverLearned || []).map(normLT), ...localLearned.map(normLT)])];
+  localforage.setItem(`lt_${subj.id}`, learnedTopics).catch(() => {});
+  // Server heilen: lokal vorhandene, server-seitig fehlende Einträge nachreichen
+  // (nur wenn der Server erreichbar war – sonst spart man sich die Fehlversuche).
+  if (serverLearned) {
+    const serverSet = new Set(serverLearned.map(normLT));
+    learnedTopics.filter(t => !serverSet.has(t)).forEach(t =>
+      api(`/api/subjects/${subj.id}/learned-topics`, {
+        method: 'POST', body: JSON.stringify({ topic: t }),
+      }).catch(() => {}));
+  }
+  // topicMeta-Keys (Wiederholungs-Termine) beim Laden auf normalisierte Namen
+  // heben, damit sie – wie der Done-Status – ein Umbenennen/Re-Scan überstehen.
+  const rawMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
+  topicMeta = {};
+  for (const [k, v] of Object.entries(rawMeta)) topicMeta[normFullKey(k)] = v;
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   rechnenNextTask = null; rechnenLoesung = null; blitzNext = null; // Prefetches des vorigen Fachs verwerfen
@@ -4313,6 +4328,16 @@ function learnedKeySet() {
   }));
 }
 
+// Normalisiert einen ganzen "Name::Niveau"-Schlüssel auf "normName::Niveau".
+// Für topicMeta (Wiederholungs-Termine), damit auch die Vergessenskurve ein
+// Umbenennen/Re-Scan übersteht – konsistent mit dem Done-Status (learnedKey).
+function normFullKey(key) {
+  const i = String(key).lastIndexOf('::');
+  return i < 0
+    ? normTopic(key) + '::einsteiger'
+    : normTopic(key.slice(0, i)) + '::' + key.slice(i + 2);
+}
+
 // Einzige Wahrheitsquelle für die Themen des Lernpfads: exakt die Liste, die auch
 // in loadLernpfad() gerendert wird. Wenn eine Kapitelstruktur existiert, zählen
 // ALLE ihre Themen (ungekappt) – sonst die flache scannedTopics-Liste. So bleibt
@@ -4888,7 +4913,7 @@ let nextQ = null;             // Prefetch: { promise, forDone, forSession } – 
 let interleavedMode = false;  // Lernpfad-Reihenfolge über Kapitel mischen
 
 function topicReviewDue(key) {
-  const m = topicMeta[key];
+  const m = topicMeta[normFullKey(key)];
   if (!m || !m.ts) return false; // ohne Metadaten (Altbestand) nie als fällig markieren
   const interval = (m.attempts || 1) >= 2 ? REVIEW_AFTER_WEAK_MS : REVIEW_AFTER_STRONG_MS;
   return Date.now() - m.ts >= interval;
@@ -5542,7 +5567,8 @@ async function markTopicDone() {
     }).catch(() => {});
   }
   // Stärke + Zeitpunkt merken: bestimmt wann die Wiederholung fällig wird.
-  topicMeta[key] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts) };
+  // Normalisierter Key, damit die Wiederholung ein späteres Umbenennen übersteht.
+  topicMeta[normFullKey(key)] = { ts: Date.now(), attempts: Math.max(1, lernenAttempts) };
   saveTopicMeta();
   renderMilestone();
   loadLernpfad();
