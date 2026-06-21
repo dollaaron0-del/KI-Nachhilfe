@@ -6838,6 +6838,22 @@ async function initDashboard() {
 
 // ── Service Worker ─────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').catch(() => {});
+  // Auto-Reload, sobald ein neuer SW die Kontrolle übernimmt (der SW ruft
+  // skipWaiting + clients.claim → controllerchange). So kommen Updates an, ohne
+  // dass die PWA manuell neu gestartet werden muss. Guard verhindert Reload-Schleifen.
+  let swRefreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (swRefreshing) return;
+    swRefreshing = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('./sw.js').then(reg => {
+    // Beim Start und bei Rückkehr in den Vordergrund aktiv nach einem neuen SW
+    // suchen – wichtig für iPad-PWAs, die sonst lange auf dem alten SW hängen.
+    reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  }).catch(() => {});
 }
 
