@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '181';
+const APP_VERSION = '182';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -333,6 +333,7 @@ let currentStroke   = null;           // gerade in Arbeit
 let baseImage       = null;           // geladenes PNG (Vorsession) als Hintergrund-Ebene
 let penActive       = false;          // Stift liegt gerade auf → Touch komplett ignorieren (Palm-Rejection)
 let canvasPenId     = null;           // PointerId des aktuell zeichnenden Stifts (nur dieser malt)
+let canvasDownTime  = 0;              // timeStamp des laufenden Strich-Beginns – verwirft veraltete up/cancel-Events (Apple Pencil recycelt pointerId)
 let fingerScrollId  = null;           // PointerId des Fingers, der gerade scrollt
 let fingerStartY    = 0;
 let wrapScrollStart = 0;
@@ -3471,6 +3472,7 @@ function setupCanvasEvents() {
     // Komfort, das Zeichnen läuft auch ohne; deshalb try/catch.
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     canvasPenId = e.pointerId;
+    canvasDownTime = e.timeStamp;   // ab jetzt zählt nur, was NACH diesem Aufsetzen erzeugt wurde
     penActive = (e.pointerType === 'pen');
     if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
     if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
@@ -3565,8 +3567,12 @@ function setupCanvasEvents() {
     // Ein verspätetes pointerup/pointercancel eines VORHERIGEN Stift-Kontakts (auf window /
     // lostpointercapture gefangen) darf den bereits gestarteten NÄCHSTEN Strich nicht
     // abwürgen. Beim schnellen Schreiben / zwei Strichen dicht hintereinander trifft das
-    // up von Strich N u.U. erst NACH dem pointerdown von Strich N+1 ein. Nur das Event des
-    // aktuell zeichnenden Pointers beendet den Strich; ältere Events werden ignoriert.
+    // up von Strich N u.U. erst NACH dem pointerdown von Strich N+1 ein.
+    // WICHTIG: Apple Pencil recycelt die pointerId – der reine ID-Vergleich erkennt das
+    // veraltete Event dann NICHT (gleiche ID) und beendete den frischen Strich sofort
+    // ("Aufsetzen wird nicht erkannt"). Der Zeitstempel ist eindeutig: ein up/cancel, das
+    // VOR dem aktuellen Aufsetzen erzeugt wurde, gehört zum alten Strich → ignorieren.
+    if (isDrawingCanvas && e.timeStamp < canvasDownTime) return;
     if (isDrawingCanvas && canvasPenId !== null && e.pointerId !== canvasPenId) return;
     if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
     if (e.pointerId === canvasPenId) canvasPenId = null;       // Stift losgelassen
@@ -5316,6 +5322,7 @@ let lernenRaf       = 0;            // laufende requestAnimationFrame-ID (0 = ke
 let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
 let lernenActivePtr = null; // palm rejection: track active pointer ID
+let lernenDownTime  = 0;    // timeStamp des Strich-Beginns – verwirft veraltete up/cancel (Apple Pencil recycelt pointerId)
 let lernenPenActive = false;        // Stift liegt auf → Touch ignorieren (Palm-Rejection)
 let lernenFingerId  = null;         // PointerId des scrollenden Fingers
 let lernenFingerY0  = 0;            // Start-Y des Finger-Scrolls
@@ -5822,6 +5829,7 @@ function onLernenDown(e) {
   clearTextSelection();                 // evtl. durch Handfläche entstandene Markierung wegnehmen
   lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
   lernenActivePtr = e.pointerId;
+  lernenDownTime  = e.timeStamp;   // ab jetzt zählt nur, was NACH diesem Aufsetzen erzeugt wurde
   // Capture darf den Strich NICHT abwürgen: hält iPad-Safari bei zwei dicht aufeinander
   // folgenden Strichen die Capture des vorigen Pointers noch, wirft setPointerCapture für
   // den neuen Pointer – ungefangen bräche der ganze pointerdown ab und der Strich ginge
@@ -5911,7 +5919,10 @@ function onLernenUp(e) {
   if (e.pointerType === 'pen' || e.pointerType === 'mouse') lernenPenActive = false;
   // Nur das Event des aktuell zeichnenden Pointers beendet den Strich – ein verspätetes
   // up/cancel eines vorherigen Kontakts (z.B. via window-Sicherheitsnetz) darf den bereits
-  // gestarteten nächsten Strich nicht abwürgen.
+  // gestarteten nächsten Strich nicht abwürgen. Apple Pencil recycelt die pointerId, daher
+  // greift der ID-Vergleich allein nicht: ein vor dem aktuellen Aufsetzen erzeugtes Event
+  // gehört zum alten Strich und wird per Zeitstempel verworfen.
+  if (isDrawingLernen && e.timeStamp < lernenDownTime) return;
   if (e.pointerId === lernenActivePtr) {
     // Noch gepufferte Punkte sofort zeichnen, damit der Strich vollständig ist.
     if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
