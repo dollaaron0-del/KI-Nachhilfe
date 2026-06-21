@@ -1605,6 +1605,7 @@ function showUploadSheet() {
     sessionMeta ? `Dokumente für "${sessionMeta.name}"` : 'Dokumente hochladen';
   document.getElementById('upload-sheet').classList.remove('hidden');
   renderDocList();
+  renderKbStatus();
 }
 
 function hideUploadSheet() {
@@ -1696,6 +1697,65 @@ async function renderDocList() {
     list.appendChild(row);
   });
 }
+
+// ── Wissensbasis-Status (Admin) ─────────────────────────────────────────────
+const KB_STATE = {
+  ready:    ['✅ bereit',     'var(--green)'],
+  indexing: ['⏳ indexiert…', 'var(--purple)'],
+  pending:  ['⏸ ausstehend',  '#888'],
+  error:    ['⚠️ Fehler',      '#e5484d'],
+  none:     ['– keine',        '#888'],
+};
+let kbPollTimer = null;
+
+async function renderKbStatus() {
+  const box = document.getElementById('kb-status');
+  if (!box) return;
+  // Nur für Admins und server-gestützte Fächer (die KB liegt serverseitig).
+  if (!authIsAdmin || !sessionId) { box.classList.add('hidden'); return; }
+  let kb;
+  try { kb = await api(`/api/subjects/${sessionId}/kb`); }
+  catch { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const [label, color] = KB_STATE[kb.status] || KB_STATE.none;
+  document.getElementById('kb-status-badge').innerHTML =
+    `<span style="background:${color};color:#fff;border-radius:6px;padding:2px 8px;font-size:11px;">${label}</span>`;
+  document.getElementById('kb-status-info').textContent = kb.status === 'none'
+    ? 'Noch nicht aufgebaut – „Neu indexieren" erstellt die Wissensbasis aus den Dokumenten.'
+    : `${kb.chunks || 0} Häppchen · ${kb.embedded || 0} eingebettet${kb.updated_at ? ' · ' + new Date(kb.updated_at).toLocaleString('de-DE') : ''}`;
+  const btn = document.getElementById('kb-reindex-btn');
+  btn.disabled = kb.status === 'indexing';
+  btn.textContent = kb.status === 'indexing' ? '⏳ läuft…' : '🔄 Neu indexieren';
+  // Läuft gerade → automatisch weiter pollen, bis fertig.
+  if (kb.status === 'indexing' && !kbPollTimer) startKbPolling();
+}
+
+function startKbPolling() {
+  clearInterval(kbPollTimer);
+  kbPollTimer = setInterval(async () => {
+    let kb; try { kb = await api(`/api/subjects/${sessionId}/kb`); } catch { return; }
+    if (kb.status !== 'indexing') {
+      clearInterval(kbPollTimer); kbPollTimer = null;
+      renderKbStatus();
+      if (kb.status === 'ready') toast('Wissensbasis aktualisiert ✅', 'success');
+      else if (kb.status === 'error') toast('Indexierung fehlgeschlagen', 'error');
+    }
+  }, 4000);
+}
+
+document.getElementById('kb-reindex-btn')?.addEventListener('click', async () => {
+  if (!sessionId) return;
+  const btn = document.getElementById('kb-reindex-btn');
+  btn.disabled = true; btn.textContent = '⏳ läuft…';
+  try {
+    const r = await api(`/api/subjects/${sessionId}/kb/reindex`, { method: 'POST' });
+    toast(`Indexierung gestartet (${r.documents} Dok.)`, 'info');
+    startKbPolling();
+  } catch (e) {
+    toast('Fehler: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '🔄 Neu indexieren';
+  }
+});
 
 document.getElementById('upload-input')?.addEventListener('change', e => {
   const files = Array.from(e.target.files);

@@ -264,11 +264,11 @@ function stripCacheTtl(params) {
 const isTtlError = e => e && e.status === 400 && /ttl|cache|beta/i.test(e.message || '');
 const ttlOpts = () => (extendedTtlDisabled ? {} : { headers: CACHE_TTL_HEADERS });
 
-async function callClaude(params, maxRetries = 5) {
+async function callClaude(params, maxRetries = 5, extraOpts = {}) {
   if (extendedTtlDisabled) stripCacheTtl(params);
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await anthropic.messages.create(params, ttlOpts());
+      return await anthropic.messages.create(params, { ...ttlOpts(), ...extraOpts });
     } catch (e) {
       // 1h-Cache nicht freigeschaltet? Einmalig TTL strippen und ohne Header neu
       // versuchen, statt die ganze Anfrage scheitern zu lassen.
@@ -661,15 +661,19 @@ const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
 
 // Lokales Embedding via Ollama (nomic, CPU-schnell). null bei Fehler.
 async function embedText(text) {
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 15000);   // hängendes Ollama nicht ewig abwarten
   try {
     const r = await fetch('http://localhost:11434/api/embeddings', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: (text || '').slice(0, 8000) }),
+      signal: ctrl.signal,
     });
     if (!r.ok) return null;
     const d = await r.json();
     return Array.isArray(d.embedding) && d.embedding.length ? d.embedding : null;
   } catch { return null; }
+  finally { clearTimeout(to); }
 }
 
 // Toleranter JSON-Extraktor (erstes '{' bis letztes '}').
@@ -710,7 +714,7 @@ async function structureDocument(content, filename) {
       model: 'claude-sonnet-4-6', max_tokens: 4096,
       system: KB_EXTRACT_SYS,
       messages: [{ role: 'user', content: `Dateiname: ${filename}\n\nAUSZUG:\n${w}` }],
-    });
+    }, 2, { timeout: 90000 });   // harter 90s-Timeout: hängt ein Doku, wird es übersprungen statt alles zu blockieren
     // Kosten global + unter Feature 'kb_index' erfassen (userId=null → zählt nicht
     // gegen das interaktive 1€-Tageslimit des Nutzers, ist aber im Gesamtbudget sichtbar).
     recordUsage(new Date().toISOString().slice(0, 10), 'claude-sonnet-4-6', r.usage || {}, null, 'kb_index').catch(() => {});
@@ -748,17 +752,22 @@ async function rebuildSubjectKb(subjectId) {
 }
 
 // Ein Dokument indexieren: strukturieren → embedden → speichern. Re-Index-sicher.
-async function indexDocument(subjectId, documentId) {
+// opts.skipFinalize: im Batch (Reindex ganzer Fächer) den Status NICHT pro Doku auf
+// 'ready' setzen – das macht der Aufrufer einmal am Ende.
+async function indexDocument(subjectId, documentId, opts = {}) {
   try {
     // Budget-Schutz: bei erschöpftem Tagesbudget nicht teuer indexieren – später per Reindex.
     const { cost } = await checkDailyLimit();
-    if (cost >= await getDailyLimit()) { await setKbStatus(subjectId, 'pending'); return; }
+    if (cost >= await getDailyLimit()) { if (!opts.skipFinalize) await setKbStatus(subjectId, 'pending'); return; }
 
-    await setKbStatus(subjectId, 'indexing');
+    if (!opts.skipFinalize) await setKbStatus(subjectId, 'indexing');
     const { rows } = await pool.query(
       'SELECT filename, content FROM documents WHERE id=$1 AND subject_id=$2', [documentId, subjectId]
     );
-    if (!rows.length || !rows[0].content || rows[0].content.length < 20) { await rebuildSubjectKb(subjectId); return; }
+    if (!rows.length || !rows[0].content || rows[0].content.length < 20) {
+      if (!opts.skipFinalize) await rebuildSubjectKb(subjectId);
+      return;
+    }
 
     const chunks = await structureDocument(rows[0].content, rows[0].filename);
     await pool.query('DELETE FROM doc_chunks WHERE document_id=$1', [documentId]);  // alte Version weg
@@ -772,10 +781,10 @@ async function indexDocument(subjectId, documentId) {
          Math.round((c.content || '').length / 4), emb ? JSON.stringify(emb) : null]
       );
     }
-    await rebuildSubjectKb(subjectId);
+    if (!opts.skipFinalize) await rebuildSubjectKb(subjectId);
   } catch (e) {
     console.error('indexDocument failed:', e.message);
-    await setKbStatus(subjectId, 'error');
+    if (!opts.skipFinalize) await setKbStatus(subjectId, 'error');
   }
 }
 
@@ -942,11 +951,13 @@ app.post('/api/subjects/:id/kb/reindex', async (req, res) => {
     const docs = (await pool.query('SELECT id FROM documents WHERE subject_id=$1', [sid])).rows;
     res.json({ started: true, documents: docs.length });   // sofort antworten
     (async () => {
-      await pool.query('DELETE FROM doc_chunks WHERE subject_id=$1', [sid]).catch(() => {});
-      await setKbStatus(sid, 'indexing');
-      for (const d of docs) await indexDocument(sid, d.id);
-      await rebuildSubjectKb(sid);
-    })().catch(e => console.error('KB reindex failed:', e.message));
+      try {
+        await pool.query('DELETE FROM doc_chunks WHERE subject_id=$1', [sid]).catch(() => {});
+        await setKbStatus(sid, 'indexing');
+        for (const d of docs) await indexDocument(sid, d.id, { skipFinalize: true });
+        await rebuildSubjectKb(sid);   // Status einmal am Ende auf 'ready'
+      } catch (e) { console.error('KB reindex failed:', e.message); await setKbStatus(sid, 'error'); }
+    })();
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
