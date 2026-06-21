@@ -539,7 +539,7 @@ app.post('/api/subjects', authMiddleware, async (req, res) => {
 // All /api/subjects/:id/* routes below require ownership of the subject.
 app.use('/api/subjects/:id', authMiddleware, assertOwnsSubject);
 
-app.patch('/api/subjects/:id', authMiddleware, async (req, res) => {
+app.patch('/api/subjects/:id', async (req, res) => {
   const { custom_prompt } = req.body;
   try {
     const { rows } = await pool.query(
@@ -550,7 +550,7 @@ app.patch('/api/subjects/:id', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM subjects WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
     await Promise.all([
@@ -567,7 +567,7 @@ app.delete('/api/subjects/:id', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // MESSAGES (chat history)
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/messages', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT role,content FROM messages WHERE subject_id=$1 ORDER BY created_at ASC',
@@ -577,7 +577,7 @@ app.get('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/messages', async (req, res) => {
   const { role, content } = req.body;
   if (!role || !content) return res.status(400).json({ error: 'role und content erforderlich' });
   try {
@@ -589,7 +589,7 @@ app.post('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/messages', async (req, res) => {
   try {
     await pool.query('DELETE FROM messages WHERE subject_id=$1', [req.params.id]);
     res.json({ ok: true });
@@ -599,7 +599,7 @@ app.delete('/api/subjects/:id/messages', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // DOCUMENTS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/documents', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/documents', async (req, res) => {
   try {
     let rows;
     try {
@@ -620,7 +620,7 @@ app.get('/api/subjects/:id/documents', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.patch('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res) => {
+app.patch('/api/subjects/:id/documents/:docId', async (req, res) => {
   const { doc_type } = req.body;
   try {
     await pool.query(
@@ -632,7 +632,7 @@ app.patch('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res)
 });
 
 // Return short snippets of ALL documents for breadth-first topic scanning
-app.get('/api/subjects/:id/documents/snippets', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/documents/snippets', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT filename, LEFT(content, 600) AS snippet FROM documents WHERE subject_id=$1 ORDER BY uploaded_at ASC',
@@ -643,7 +643,7 @@ app.get('/api/subjects/:id/documents/snippets', authMiddleware, async (req, res)
 });
 
 // Return content of documents filtered by doc_type (for exam-style context)
-app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/documents/typed', async (req, res) => {
   const types = (req.query.types || '').split(',').map(t => t.trim()).filter(Boolean);
   if (!types.length) return res.json([]);
   try {
@@ -659,7 +659,7 @@ app.get('/api/subjects/:id/documents/typed', authMiddleware, async (req, res) =>
 // Return the full text of ALL documents. Server-side fallback to rebuild the
 // local prompt context (sessionTxt) on a fresh browser/device — or the shared
 // demo account — where localforage is empty even though the server has docs.
-app.get('/api/subjects/:id/documents/content', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/documents/content', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT filename, content FROM documents WHERE subject_id=$1 ORDER BY uploaded_at ASC',
@@ -670,7 +670,7 @@ app.get('/api/subjects/:id/documents/content', authMiddleware, async (req, res) 
 });
 
 // Accept pre-extracted text (from client-side PDF.js)
-app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/documents/text', async (req, res) => {
   const { filename, content, skipCards } = req.body;
   if (!filename || !content) return res.status(400).json({ error: 'filename und content erforderlich' });
   try {
@@ -687,7 +687,7 @@ app.post('/api/subjects/:id/documents/text', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/documents', authMiddleware, upload.single('file'), async (req, res) => {
+app.post('/api/subjects/:id/documents', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Keine Datei' });
   try {
     let content = '';
@@ -724,7 +724,7 @@ app.post('/api/subjects/:id/documents', authMiddleware, upload.single('file'), a
   }
 });
 
-app.delete('/api/subjects/:id/documents/:docId', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/documents/:docId', async (req, res) => {
   try {
     await pool.query('DELETE FROM documents WHERE id=$1 AND subject_id=$2', [req.params.docId, req.params.id]);
     res.json({ ok: true });
@@ -1051,7 +1051,7 @@ app.post('/api/local/vision', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // FLASHCARDS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/cards', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/cards', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT * FROM flashcards WHERE subject_id=$1 ORDER BY created_at ASC',
@@ -1061,7 +1061,7 @@ app.get('/api/subjects/:id/cards', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/cards', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/cards', async (req, res) => {
   const { cards } = req.body; // array of {front,back,ef,interval,repetitions,due}
   if (!Array.isArray(cards)) return res.status(400).json({ error: 'cards array erforderlich' });
   try {
@@ -1079,7 +1079,7 @@ app.post('/api/subjects/:id/cards', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // QUIZ RESULTS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/quiz', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/quiz', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT score,total,taken_at FROM quiz_results WHERE subject_id=$1 ORDER BY taken_at ASC',
@@ -1089,7 +1089,7 @@ app.get('/api/subjects/:id/quiz', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/quiz', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/quiz', async (req, res) => {
   const { score, total } = req.body;
   if (score == null || total == null) return res.status(400).json({ error: 'score und total erforderlich' });
   try {
@@ -1126,7 +1126,7 @@ app.post('/api/streak', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // GLOSSAR
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/glossar', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/glossar', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id,term,definition FROM glossar WHERE subject_id=$1 ORDER BY term ASC',
@@ -1136,7 +1136,7 @@ app.get('/api/subjects/:id/glossar', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/glossar', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/glossar', async (req, res) => {
   const { terms } = req.body; // array of {term, definition}
   if (!Array.isArray(terms)) return res.status(400).json({ error: 'terms array erforderlich' });
   try {
@@ -1278,7 +1278,7 @@ async function autoGenerateCards(subjectId, filename, content) {
 }
 
 // ── Stats endpoint ─────────────────────────────────────────────────────────
-app.get('/api/subjects/:id/stats', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/stats', async (req, res) => {
   const id = req.params.id;
   try {
     const [quizRes, cardsRes, docsRes, msgsRes] = await Promise.all([
@@ -1314,7 +1314,7 @@ app.get('/api/my-usage', authMiddleware, async (req, res) => {
       'SELECT cost_eur, calls FROM user_usage WHERE user_id=$1 AND date=$2',
       [req.user.id, today]
     );
-    res.json({ cost_eur: parseFloat(rows[0]?.cost_eur || 0), calls: rows[0]?.calls || 0, limit: 1.0 });
+    res.json({ cost_eur: parseFloat(rows[0]?.cost_eur || 0), calls: rows[0]?.calls || 0, limit: USER_DAILY_LIMIT });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1422,14 +1422,14 @@ app.post('/api/admin/set-limit', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // CHEAT SHEETS (Zusammenfassungen)
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/cheat', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT content FROM cheat_sheets WHERE subject_id=$1', [req.params.id]);
     res.json({ content: rows[0]?.content || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/cheat', async (req, res) => {
   const { content } = req.body;
   if (!content) return res.status(400).json({ error: 'content erforderlich' });
   try {
@@ -1442,7 +1442,7 @@ app.post('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/cheat', async (req, res) => {
   try {
     await pool.query('DELETE FROM cheat_sheets WHERE subject_id=$1', [req.params.id]);
     res.json({ ok: true });
@@ -1452,14 +1452,14 @@ app.delete('/api/subjects/:id/cheat', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // SCANNED TOPICS
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/topics', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT topics FROM scanned_topics WHERE subject_id=$1', [req.params.id]);
     res.json(rows[0]?.topics || []);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/topics', async (req, res) => {
   const { topics } = req.body;
   if (!Array.isArray(topics)) return res.status(400).json({ error: 'topics array erforderlich' });
   try {
@@ -1472,7 +1472,7 @@ app.post('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/topics', async (req, res) => {
   try {
     await pool.query('DELETE FROM scanned_topics WHERE subject_id=$1', [req.params.id]);
     res.json({ ok: true });
@@ -1480,14 +1480,14 @@ app.delete('/api/subjects/:id/topics', authMiddleware, async (req, res) => {
 });
 
 // Module structure (Kapitel + Lernziele), stored alongside flat topics
-app.get('/api/subjects/:id/structure', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/structure', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT structure FROM scanned_topics WHERE subject_id=$1', [req.params.id]);
     res.json(rows[0]?.structure || null);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/structure', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/structure', async (req, res) => {
   const { structure, topics } = req.body;
   if (!structure || !Array.isArray(topics)) return res.status(400).json({ error: 'structure und topics erforderlich' });
   try {
@@ -1503,7 +1503,7 @@ app.post('/api/subjects/:id/structure', authMiddleware, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // SAVED AUFGABEN
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/aufgaben', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/aufgaben', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id, topic, type, tasks_part, full_result, created_at FROM saved_aufgaben WHERE subject_id=$1 ORDER BY created_at DESC LIMIT 20',
@@ -1516,7 +1516,7 @@ app.get('/api/subjects/:id/aufgaben', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/aufgaben', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/aufgaben', async (req, res) => {
   const { id, topic, type, tasksPart, fullResult, createdAt } = req.body;
   if (!id || !fullResult) return res.status(400).json({ error: 'id und fullResult erforderlich' });
   try {
@@ -1534,7 +1534,7 @@ app.post('/api/subjects/:id/aufgaben', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/aufgaben/:aufgId', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/aufgaben/:aufgId', async (req, res) => {
   try {
     await pool.query('DELETE FROM saved_aufgaben WHERE id=$1 AND subject_id=$2', [req.params.aufgId, req.params.id]);
     res.json({ ok: true });
@@ -1544,7 +1544,7 @@ app.delete('/api/subjects/:id/aufgaben/:aufgId', authMiddleware, async (req, res
 // ═══════════════════════════════════════════════════════════════════════════
 // SAVED KLAUSUREN (Probeklausuren aus dem Klausur-Tab)
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/klausuren', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/klausuren', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT id, diff, content, created_at FROM saved_klausuren WHERE subject_id=$1 ORDER BY created_at DESC LIMIT 10',
@@ -1554,7 +1554,7 @@ app.get('/api/subjects/:id/klausuren', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/klausuren', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/klausuren', async (req, res) => {
   const { id, diff, content } = req.body;
   if (!id || !content) return res.status(400).json({ error: 'id und content erforderlich' });
   try {
@@ -1571,7 +1571,7 @@ app.post('/api/subjects/:id/klausuren', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/klausuren/:klId', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/klausuren/:klId', async (req, res) => {
   try {
     await pool.query('DELETE FROM saved_klausuren WHERE id=$1 AND subject_id=$2', [req.params.klId, req.params.id]);
     res.json({ ok: true });
@@ -1581,7 +1581,7 @@ app.delete('/api/subjects/:id/klausuren/:klId', authMiddleware, async (req, res)
 // ═══════════════════════════════════════════════════════════════════════════
 // LEARNED TOPICS (Lernpfad progress per user)
 // ═══════════════════════════════════════════════════════════════════════════
-app.get('/api/subjects/:id/learned-topics', authMiddleware, async (req, res) => {
+app.get('/api/subjects/:id/learned-topics', async (req, res) => {
   try {
     const { rows } = await pool.query(
       'SELECT topic FROM learned_topics WHERE subject_id=$1 AND user_id=$2 ORDER BY learned_at ASC',
@@ -1591,7 +1591,7 @@ app.get('/api/subjects/:id/learned-topics', authMiddleware, async (req, res) => 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/subjects/:id/learned-topics', authMiddleware, async (req, res) => {
+app.post('/api/subjects/:id/learned-topics', async (req, res) => {
   const { topic } = req.body;
   if (!topic) return res.status(400).json({ error: 'topic erforderlich' });
   try {
@@ -1603,7 +1603,7 @@ app.post('/api/subjects/:id/learned-topics', authMiddleware, async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/subjects/:id/learned-topics/:topic', authMiddleware, async (req, res) => {
+app.delete('/api/subjects/:id/learned-topics/:topic', async (req, res) => {
   try {
     await pool.query(
       'DELETE FROM learned_topics WHERE subject_id=$1 AND user_id=$2 AND topic=$3',
@@ -1632,7 +1632,7 @@ app.get('/api/admin/user-stats', authMiddleware, async (req, res) => {
       ) ut ON ut.user_id = u.id
       ORDER BY today_cost DESC, u.username ASC
     `, [today]);
-    res.json({ users: rows, limit: 1.0 });
+    res.json({ users: rows, limit: USER_DAILY_LIMIT });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

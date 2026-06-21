@@ -64,14 +64,8 @@ CREATE TABLE IF NOT EXISTS quiz_results (
   taken_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
--- User streak
-CREATE TABLE IF NOT EXISTS streak (
-  id          INT PRIMARY KEY DEFAULT 1,
-  count       INT DEFAULT 0,
-  last_date   TEXT
-);
-
-INSERT INTO streak (id, count, last_date) VALUES (1, 0, NULL) ON CONFLICT DO NOTHING;
+-- User streak: siehe Tabelle user_streaks (pro Nutzer), in server.js via initTables()
+-- angelegt. Die alte globale streak-Tabelle (id=1) war ungenutzt und wurde entfernt.
 
 -- Daily API usage tracking
 CREATE TABLE IF NOT EXISTS daily_usage (
