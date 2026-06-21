@@ -468,11 +468,14 @@ function friendlyApiError(errStr, status) {
   return errStr || `Serverfehler ${status}`;
 }
 
-async function claude(messages, systemBlocks, maxTokens = 1500) {
+async function claude(messages, systemBlocks, maxTokens = 1500, opts = {}) {
+  const body = { messages, system: systemBlocks, max_tokens: maxTokens, feature: currentFeature };
+  // Server-RAG nur anfordern, wenn wir NICHT ohnehin die vollen Unterlagen mitschicken.
+  if (!opts.noRag) body.subject_id = sessionId;
   const r = await fetch('/api/claude', { // raw-fetch-ok: eigene friendlyApiError-Behandlung + content[0].text
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ messages, system: systemBlocks, max_tokens: maxTokens, subject_id: sessionId, feature: currentFeature }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -682,9 +685,16 @@ async function buildDocOverview() {
   } catch { return null; }
 }
 
-function sysBlocks(extra = '') {
-  const blocks = [
-    {
+function sysBlocks(extra = '', opts = {}) {
+  // Hebel 1 (Chat-Sparmodus): Statt der vollen Unterlagen nur ein Hinweis, dass die
+  // relevanten Auszüge separat geliefert werden (Server-RAG bei /api/claude). Spart
+  // den großen ~12k-Token-Doku-Block. NUR für den Chat-Pfad nutzen – /api/local hat
+  // keine Server-RAG und braucht die vollen Unterlagen.
+  const omitDocs = opts.omitDocs === true;
+  const docsSection = omitDocs
+    ? 'Die für die aktuelle Frage relevanten Auszüge aus den Unterlagen werden dir separat als "Dokumenten-Kontext" bereitgestellt. Nutze AUSSCHLIESSLICH diese Auszüge als Wissensquelle. Findest du dort nichts Passendes, sage das offen und bitte den Studenten, gezielter mit konkreten Stichwörtern nachzufragen.'
+    : docsForPrompt();
+  const head = {
       type: 'text',
       text: `Du bist ein erfahrener Nachhilfelehrer für das Fach "${sessionMeta?.name || ''}". Du verwendest gezielt moderne lernpsychologische Methoden.
 
@@ -713,7 +723,7 @@ ANTWORTFORMAT IM CHAT:
 4. Optional: eine einprägsame Eselsbrücke oder Verknüpfung zu anderen Konzepten
 
 --- UNTERLAGEN (einzige erlaubte Wissensquelle) ---
-${docsForPrompt()}
+${docsSection}
 --- ENDE DER UNTERLAGEN ---
 
 DIAGRAMME: Wenn es das Verständnis fördert, erstelle Mermaid-Diagramme in \`\`\`mermaid ... \`\`\` Blöcken.
@@ -725,15 +735,34 @@ Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2
 Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
 
 Antworte immer auf Deutsch.${prefCalculator ? `\n\nTASCHENRECHNER: Der Student nutzt einen ${prefCalculator}. Gib bei Rechenaufgaben gezielte Tipps wie man die Berechnung auf diesem Modell effizient eingibt — Tasten, Menüpfade, Modi, nützliche eingebaute Funktionen. Erwähne konkrete Schritte (z.B. "Drücke MENU → 4 → 2" beim Casio).` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}`,
-      cache_control: { type: 'ephemeral', ttl: '1h' },
-    },
-  ];
+  };
+  // Sparmodus-Block ist klein → kein Caching (unter der Mindestgröße sowieso
+  // nicht cachebar); voller Doku-Block wird 1h gecacht.
+  if (!omitDocs) head.cache_control = { type: 'ephemeral', ttl: '1h' };
+  const blocks = [head];
   // Aufruf-spezifische Instruktionen (z.B. Quiz-Prompt mit der Liste bereits
   // gestellter Fragen) wechseln pro Anfrage. Sie kommen in einen EIGENEN, nicht
   // gecachten Block NACH dem Cache-Breakpoint – so bleibt der teure Unterlagen-
   // Block byte-identisch und der Prompt-Cache greift über alle Fragen hinweg.
   if (extra) blocks.push({ type: 'text', text: extra });
   return blocks;
+}
+
+// Hebel 1 – entscheidet pro Chat-Nachricht, ob die VOLLEN Unterlagen mitgehen
+// (teuer, aber vollständig) oder nur die Server-RAG-Auszüge (billig).
+const CHAT_FULLDOCS_MAX = 16000;   // kleine Fächer (<= ~4k Tokens): immer voll, ist eh billig
+// Klare Vertiefungs-/Nachhak-Marker zur vorigen Antwort.
+const CHAT_DEEPEN_RE = /(genauer|ausführlich|detaillier|im detail|tiefer|mehr dazu|noch mehr|nochmal|noch mal|schritt für schritt|vollständig|überblick|zusammenfass|was meinst|wie meinst|versteh.* ich nicht|nicht ganz|kapier)/i;
+function chatWantsFullDocs(message) {
+  // Kleine Fächer: immer komplett mitschicken (Qualität ohne Mehrkosten).
+  if (!sessionTxt || sessionTxt.length <= CHAT_FULLDOCS_MAX) return true;
+  const m = (message || '').trim().toLowerCase();
+  // Vertiefung/Nachhaken: Begrenzung für diese eine Antwort aufheben.
+  if (CHAT_DEEPEN_RE.test(m)) return true;
+  // Kurze Nachricht = kaum Inhaltswörter ("warum ist das so?", "und dann?") →
+  // die schlagwortbasierte RAG würde kaum greifen, daher volle Unterlagen.
+  if (m.split(/\s+/).filter(Boolean).length <= 5) return true;
+  return false;
 }
 
 // ── Dark Mode ──────────────────────────────────────────────────────────────
@@ -1886,10 +1915,14 @@ async function sendChat() {
   sessionMeta.chatHistory.push({ role: 'user', content: text });
   DB.addMessage(sessionId, 'user', text);
   try {
+    // Hebel 1: Große Fächer nutzen die Server-RAG; nur bei Vertiefungs-/Nachhak-Fragen
+    // (oder kleinen Fächern) gehen die vollen Unterlagen mit. Pro Nachricht neu entschieden.
+    const fullDocs = chatWantsFullDocs(text);
     const reply = await claude(sessionMeta.chatHistory, sysBlocks(
       'Erkläre mit echtem Verständnis – nicht nur Definitionen. Nutze Beispiele aus dem echten Leben, Analogien und erkläre den Hintergrund. ' +
-      'Wenn etwas unklar wirkt, gehe tiefer. Wenn sinnvoll, stelle am Ende eine Denkfrage um das Verständnis zu festigen.'
-    ));
+      'Wenn etwas unklar wirkt, gehe tiefer. Wenn sinnvoll, stelle am Ende eine Denkfrage um das Verständnis zu festigen.',
+      { omitDocs: !fullDocs }
+    ), 1500, { noRag: fullDocs });
     sessionMeta.chatHistory.push({ role: 'assistant', content: reply });
     DB.addMessage(sessionId, 'assistant', reply);
     if (sessionMeta.chatHistory.length > 20) {
