@@ -6120,6 +6120,31 @@ function numEqual(a, b, rel = 0.01) {
   return Math.abs(a - b) <= Math.max(1e-9, rel * Math.abs(b), 0.005);
 }
 
+// Zerlegt eine Musterlösung an fett markierten Teilaufgaben-Köpfen (**a)**, **2)** …),
+// damit korrekte Teile optisch eingeklappt und nur die falschen offen gezeigt werden.
+function splitLoesungParts(text) {
+  if (!text) return null;
+  const re = /\*\*\s*([a-zA-Z]|\d{1,2})\s*\)\s*\*\*/g;
+  const heads = [];
+  let m;
+  while ((m = re.exec(text)) !== null) heads.push({ label: m[1].toLowerCase(), idx: m.index });
+  if (heads.length < 2) return null;   // keine/zu wenige Teilaufgaben → nicht eindampfen
+  return heads.map((h, i) => ({
+    label: h.label,
+    text: text.slice(h.idx, i + 1 < heads.length ? heads[i + 1].idx : text.length).trim(),
+  }));
+}
+
+// Normalisiert das "falsche_teile"-Feld (Array oder String) zu einem Set kurzer Kennungen.
+function wrongPartSet(falscheTeile) {
+  let arr = falscheTeile;
+  if (typeof arr === 'string') arr = arr.split(/[,\s]+/);
+  if (!Array.isArray(arr)) return new Set();
+  return new Set(arr
+    .map(s => String(s).toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .filter(s => s.length >= 1 && s.length <= 2));   // lange Strings (Anweisungs-Echo) verwerfen
+}
+
 // Liest die Lernen-Zeichenfläche EINMAL aus und liefert in einem Durchgang:
 // ob Tinte vorhanden ist, deren Bounding-Box (für den Zuschnitt) und einen
 // Inhalts-Hash (für "unverändert? → kein erneuter API-Call").
@@ -6250,6 +6275,7 @@ ${strictNote}
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
   ${loesungField},
+  "falsche_teile": ["NUR die nicht korrekten Teilaufgaben als kurze Kennung ohne Klammer, z.B. \"b\"; leeres Array [] wenn es keine Teilaufgaben gibt oder alles korrekt ist"],
   "einschaetzung": "Fließtext NUR zu den NICHT korrekten Teilen: bei welcher Teilaufgabe was falsch/unvollständig ist und was konkret besser sein sollte. KORREKTE Teilaufgaben NICHT erklären oder wiederholen. Je betroffener Teilaufgabe ein eigener Absatz (z.B. **b)** …). Bei score=2 (alles korrekt) LEER LASSEN (\"\")."${numFields}
 }
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
@@ -6257,6 +6283,7 @@ KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder En
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
 KEIN AUSFÜHRLICHES FEEDBACK BEI KORREKT: Ist score=2, lass "einschaetzung" leer ("") – eine korrekte Lösung braucht keine Fehleranalyse. Das spart Antwortlänge; Urteil + Musterlösung reichen.
 NUR FALSCHE TEILE: Bei Teilaufgaben behandelt "einschaetzung" AUSSCHLIESSLICH die nicht korrekten Teilaufgaben. Sind z.B. a) und c) richtig und nur b) falsch, geht es allein um b) – a) und c) werden nicht weiter erklärt.
+TEILAUFGABEN-MARKIERUNG: Trage in "falsche_teile" exakt die Kennungen (Buchstabe oder Zahl, ohne Klammer) der Teilaufgaben ein, die NICHT vollständig korrekt sind. Beispiel: a) und c) richtig, b) falsch → ["b"]. Keine Teilaufgaben oder alles korrekt → [].
 Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}${transkriptionInstr}
 
 ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
@@ -6361,12 +6388,34 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
             `<div class="lernen-result-text">${safeHtml(md(ev.einschaetzung))}</div>` +
             `</div>`;
         }
-        // Musterlösung eingeklappt – nur bei Bedarf aufklappen
+        // Musterlösung: bei Teilaufgaben mit teils richtigen Teilen die korrekten
+        // einklappen und nur die falschen offen zeigen ("nur die Lösung von b").
         if (ev.loesung) {
-          html += `<details class="lernen-result-details">` +
-            `<summary>📌 Musterlösung anzeigen</summary>` +
-            `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(ev.loesung))}</div>` +
-            `</details>`;
+          const wrong = wrongPartSet(ev.falsche_teile);
+          const parts = splitLoesungParts(ev.loesung);
+          const mixed = parts && wrong.size &&
+            parts.some(p => wrong.has(p.label)) && parts.some(p => !wrong.has(p.label));
+          if (mixed) {
+            let inner = '';
+            for (const p of parts) {
+              if (wrong.has(p.label)) {
+                inner += `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(p.text))}</div>`;
+              } else {
+                inner += `<details class="lernen-result-details" style="margin-top:6px">` +
+                  `<summary>${esc(p.label)}) ✓ richtig – Lösung trotzdem zeigen</summary>` +
+                  `<div class="lernen-result-text" style="margin-top:6px">${safeHtml(md(p.text))}</div>` +
+                  `</details>`;
+              }
+            }
+            html += `<div class="lernen-result-prose">` +
+              `<div class="lernen-result-label">📌 Musterlösung – Fokus auf ${[...wrong].map(w => w + ')').join(', ')}</div>` +
+              inner + `</div>`;
+          } else {
+            html += `<details class="lernen-result-details">` +
+              `<summary>📌 Musterlösung anzeigen</summary>` +
+              `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(ev.loesung))}</div>` +
+              `</details>`;
+          }
         }
         html += `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">` +
           `<button class="btn-primary btn-sm" onclick="regenLernenTask()">→ Neue Aufgabe zum Thema</button>` +
