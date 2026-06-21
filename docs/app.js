@@ -472,6 +472,8 @@ async function claude(messages, systemBlocks, maxTokens = 1500, opts = {}) {
   const body = { messages, system: systemBlocks, max_tokens: maxTokens, feature: currentFeature };
   // Server-RAG nur anfordern, wenn wir NICHT ohnehin die vollen Unterlagen mitschicken.
   if (!opts.noRag) body.subject_id = sessionId;
+  // Phase 3: erlaubt dem Server, bei bereiter Wissensbasis auf das günstige Haiku zu wechseln.
+  if (opts.kbChat) body.kb_chat = true;
   const r = await fetch('/api/claude', { // raw-fetch-ok: eigene friendlyApiError-Behandlung + content[0].text
     method: 'POST',
     headers: authHeaders(),
@@ -765,6 +767,10 @@ function chatWantsFullDocs(message) {
   return false;
 }
 
+// Phase 3 (Admin-Schalter): Chat läuft über die Wissensbasis und darf serverseitig
+// auf das günstige Haiku-Modell wechseln, sobald die KB für das Fach bereit ist.
+function isKbChatHaiku() { return authIsAdmin && localStorage.getItem('kb_chat_haiku') === '1'; }
+
 // ── Dark Mode ──────────────────────────────────────────────────────────────
 async function initDarkMode() {
   try {
@@ -820,6 +826,8 @@ async function loadUsage() {
     document.getElementById('usage-bar').style.background = color;
     const inp = document.getElementById('admin-limit-input');
     if (inp && !inp.value) inp.value = u.limit_eur.toFixed(2);
+    const kbToggle = document.getElementById('kb-chat-haiku-toggle');
+    if (kbToggle) kbToggle.checked = localStorage.getItem('kb_chat_haiku') === '1';
     loadAdminUserStats();
     // Show pending user count badge
     api('/api/admin/pending-count').then(r => {
@@ -855,6 +863,13 @@ async function loadAdminUserStats() {
   } catch (e) { if (el) el.innerHTML = `<span style="color:var(--red);font-size:13px;">${e.message}</span>`; }
 }
 
+
+document.getElementById('kb-chat-haiku-toggle')?.addEventListener('change', e => {
+  localStorage.setItem('kb_chat_haiku', e.target.checked ? '1' : '0');
+  toast(e.target.checked
+    ? 'Chat nutzt jetzt die Wissensbasis + günstiges Modell (wo die KB bereit ist)'
+    : 'Chat wieder auf Standard (Sonnet, volle Unterlagen)', 'info');
+});
 
 document.getElementById('admin-set-limit-btn')?.addEventListener('click', async () => {
   const val = parseFloat(document.getElementById('admin-limit-input')?.value);
@@ -1975,14 +1990,16 @@ async function sendChat() {
   sessionMeta.chatHistory.push({ role: 'user', content: text });
   DB.addMessage(sessionId, 'user', text);
   try {
-    // Hebel 1: Große Fächer nutzen die Server-RAG; nur bei Vertiefungs-/Nachhak-Fragen
-    // (oder kleinen Fächern) gehen die vollen Unterlagen mit. Pro Nachricht neu entschieden.
-    const fullDocs = chatWantsFullDocs(text);
+    // Phase 3: Ist der KB-Chat-Modus (Admin) an, läuft der Chat immer über die KB
+    // (omitDocs + Server-Retrieval) und darf serverseitig auf Haiku wechseln.
+    // Sonst Hebel-1-Verhalten: große Fächer per RAG, Vertiefungsfragen mit vollen Doks.
+    const kbHaiku  = isKbChatHaiku();
+    const fullDocs = !kbHaiku && chatWantsFullDocs(text);
     const reply = await claude(sessionMeta.chatHistory, sysBlocks(
       'Erkläre mit echtem Verständnis – nicht nur Definitionen. Nutze Beispiele aus dem echten Leben, Analogien und erkläre den Hintergrund. ' +
       'Wenn etwas unklar wirkt, gehe tiefer. Wenn sinnvoll, stelle am Ende eine Denkfrage um das Verständnis zu festigen.',
       { omitDocs: !fullDocs }
-    ), 1500, { noRag: fullDocs });
+    ), 1500, { noRag: fullDocs, kbChat: kbHaiku });
     sessionMeta.chatHistory.push({ role: 'assistant', content: reply });
     DB.addMessage(sessionId, 'assistant', reply);
     if (sessionMeta.chatHistory.length > 20) {

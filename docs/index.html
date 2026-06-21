@@ -14,7 +14,7 @@
   <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com" />
   <meta name="theme-color" content="#5856d6" />
   <title>KI-Nachhilfelehrer</title>
-  <link rel="stylesheet" href="style.css?v=194" />
+  <link rel="stylesheet" href="style.css?v=195" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
@@ -87,6 +87,11 @@
             <button id="admin-set-limit-btn" class="btn-secondary" style="padding:7px 12px;font-size:13px;white-space:nowrap;">Setzen</button>
           </div>
           <p style="margin:5px 0 10px;font-size:11px;color:var(--text2);">Telegram: <code>/setlimit 2.00</code> · <code>/status</code></p>
+          <!-- Phase 3: Chat über Wissensbasis + günstiges Modell -->
+          <label style="display:flex;align-items:flex-start;gap:8px;margin:4px 0 12px;font-size:12px;cursor:pointer;color:var(--text2);">
+            <input type="checkbox" id="kb-chat-haiku-toggle" style="margin-top:2px;" />
+            <span>💸 Chat über Wissensbasis + günstiges Modell (Haiku), sobald die KB des Fachs bereit ist. Spart stark – Qualität gegen Sonnet vergleichen.</span>
+          </label>
           <!-- Per-user table -->
           <div style="font-size:12px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Nutzerverbrauch (1€/Tag pro Nutzer)</div>
           <div id="admin-user-stats" style="display:flex;flex-direction:column;gap:6px;">
@@ -978,7 +983,7 @@
 
 <!-- app.js zuletzt laden: alle Sheets/Elemente müssen im DOM stehen, bevor
      die Top-Level-Handler (z.B. .session-budget-btn) gebunden werden. -->
-<script defer src="app.js?v=194"></script>
+<script defer src="app.js?v=195"></script>
 
 </body>
 </html>

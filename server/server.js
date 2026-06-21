@@ -1041,6 +1041,7 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
     // Only for subjects the requesting user actually owns — otherwise the RAG
     // path could leak another user's documents into the response.
     let ownsSubject = false;
+    let kbHit = false;   // true, wenn die Wissensbasis (semantisch) sauberen Kontext lieferte
     if (req.body.subject_id) {
       const { rows } = await pool.query(
         'SELECT 1 FROM subjects WHERE id=$1 AND user_id=$2',
@@ -1059,6 +1060,7 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
         try { docContext = (await retrieveContext(req.body.subject_id, query, 6)) || ''; }
         catch (e) { console.error('KB retrieve skipped:', e.message); }
       }
+      kbHit = !!docContext;   // KB lieferte sauberen Kontext → Chat darf auf Haiku
 
       const docLabel = r => {
         const types = { skript:'Vorlesungsskript', formelsammlung:'Formelsammlung', klausur:'Klausur', altklausur:'Altklausur', uebungsblatt:'Übungsblatt', zusammenfassung:'Zusammenfassung', lehrbuch:'Lehrbuch' };
@@ -1102,8 +1104,11 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
     // Limit messages to last 12 to control costs
     const trimmedMessages = messages.slice(-12);
 
+    // Phase 3: Chat darf auf das günstige Haiku, WENN der Client es anfragt (kb_chat)
+    // UND die Wissensbasis sauberen Kontext geliefert hat. Sonst bleibt es bei Sonnet.
+    const chatModel = (req.body.kb_chat && kbHit) ? 'claude-haiku-4-5-20251001' : (model || 'claude-sonnet-4-6');
     const params = {
-      model: model || 'claude-sonnet-4-6',
+      model: chatModel,
       max_tokens: Math.min(max_tokens || 2000, 4096),
       messages: trimmedMessages,
     };
