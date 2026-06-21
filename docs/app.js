@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '182d';
+const APP_VERSION = '183';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3563,28 +3563,10 @@ function setupCanvasEvents() {
       }
       return;
     }
-    // Selbstheilung gegen iPadOS-Palm-Rejection (analog zum Lernen-Notizblock): Liegt die
-    // Handfläche auf, schickt Safari mitten im Strich – oder direkt nach dem Aufsetzen – ein
-    // pointercancel für den STIFT → isDrawingCanvas wird false und die folgenden pointermove-
-    // Events liefen ins Leere, bis man neu aufsetzte ("Aufsetzen wird nicht erkannt"). Kommt
-    // aber ein Stift-/Maus-Move, während der Stift nachweislich aufliegt (pressure>0 bzw.
-    // Maustaste gedrückt), nehmen wir den Strich an dieser Stelle wieder auf – ohne Hochheben.
-    // Nicht beim Line-Tool: dessen Startpunkt ist fix, ein Wiederaufsetzen würde ihn verschieben.
-    const pressing = e.pressure > 0 || (e.buttons & 1) === 1;
-    if (mathCtx && pressing && activeTool !== 'line' &&
-        (!isDrawingCanvas || e.pointerId !== canvasPenId)) {
-      if (currentStroke) { strokes.push(currentStroke); currentStroke = null; } // verwaisten Strich sichern
-      canvasPenId = e.pointerId;
-      penActive = (e.pointerType === 'pen');
-      isDrawingCanvas = true;
-      const pr = canvasPos(e, canvas);
-      canvasLastX = pr.x; canvasLastY = pr.y;
-      canvasLastMidX = pr.x; canvasLastMidY = pr.y;   // Glättung an der Wiederaufnahmestelle
-      canvasPtBuf = [];
-      currentStroke = { tool: activeTool, color: penColor, size: penSize,
-                        pts: [{ x: pr.x, y: pr.y, p: (e.pressure || 0.5) }] };
-      if (window.penDbg) window.penDbg('R-HEAL', e);
-    }
+    // KEINE Selbstheilung-auf-move mehr: Ein Strich startet ausschließlich über pointerdown.
+    // Die frühere Heilung (start bei jedem pressing-move, solange nicht gezeichnet wird)
+    // erzeugte Phantom-Striche – der Apple Pencil meldet beim Schweben/Absetzen kurze
+    // Druck-Transienten und iPadOS recycelt Pointer-IDs, sodass aus dem Nichts gemalt wurde.
     if (!isDrawingCanvas || !mathCtx) { if (window.penDbg) window.penDbg('R-DROP-notdraw', e); return; }
     if (e.pointerId !== canvasPenId) { if (window.penDbg) window.penDbg('R-DROP-id', e, 'cur=' + canvasPenId); return; }
     e.preventDefault();
@@ -5939,25 +5921,8 @@ function onLernenMove(e) {
     }
     return;
   }
-  // Selbstheilung gegen iPad-Palm-Rejection: Liegt die Handfläche auf, schickt iПadOS-Safari
-  // mitten im Strich ein pointercancel für den STIFT → isDrawingLernen wird false, die danach
-  // weiter eintreffenden pointermove-Events wurden verworfen und es kam KEIN Strich mehr, bis
-  // man neu aufsetzte. Kommt aber ein Stift-/Maus-Move, während der Stift nachweislich aufliegt
-  // (pressure>0 bzw. Maustaste gedrückt), nehmen wir den Strich an dieser Stelle einfach wieder
-  // auf – ohne Hochheben. lernenLastX/Y neu setzen, damit keine Linie aus dem Nichts gezogen wird.
-  const pressing = e.pressure > 0 || (e.buttons & 1) === 1;
-  if (lernenCtx && pressing && (!isDrawingLernen || e.pointerId !== lernenActivePtr)) {
-    lernenActivePtr = e.pointerId;
-    lernenPenActive = true;
-    const cv = e.target;
-    const rr = cv.getBoundingClientRect();
-    const pp = lernenPos(e, cv, rr);
-    lernenLastX = pp.x; lernenLastY = pp.y;
-    lernenLastMidX = pp.x; lernenLastMidY = pp.y;   // Glättung an der Wiederaufnahmestelle
-    lernenPtBuf = [];
-    isDrawingLernen = true;
-    if (window.penDbg) window.penDbg('L-HEAL', e);
-  }
+  // KEINE Selbstheilung-auf-move mehr (siehe Rechnen-Canvas): startete Phantom-Striche aus
+  // Druck-Transienten beim Schweben/Absetzen des Pencils. Ein Strich beginnt nur per pointerdown.
   if (!isDrawingLernen || !lernenCtx) { if (window.penDbg) window.penDbg('L-DROP-notdraw', e); return; }
   if (e.pointerId !== lernenActivePtr) { if (window.penDbg) window.penDbg('L-DROP-id', e, 'cur=' + lernenActivePtr); return; }
   e.preventDefault();
