@@ -4,12 +4,66 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '182';
+const APP_VERSION = '182d';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
   el.textContent = 'v' + APP_VERSION;
 });
+
+// ── TEMP Stift-Diagnose ───────────────────────────────────────────────────
+// Sichtbares Log ALLER Pointer-Events in der Capture-Phase auf window – also
+// BEVOR irgendein Handler sie verwerfen kann. Damit sehen wir beim nächsten
+// Auftreten des "Aufsetzen-nicht-erkannt"-Fehlers eindeutig, ob (a) der Browser
+// gar kein pointerdown liefert, oder (b) er es liefert und unser Code es danach
+// verwirft. Unsere Handler schreiben über window.penDbg eigene Marker (START /
+// DROP-…). Toggle: kleiner 🐞-Button unten links. KOMPLETT entfernen, sobald
+// die Ursache gefunden ist (dieser ganze Block + die penDbg-Aufrufe).
+(function setupPenDebug () {
+  let on = false;
+  const lines = [];
+  const panel = document.createElement('div');
+  panel.style.cssText =
+    'position:fixed;left:4px;bottom:46px;width:62vw;max-width:360px;height:40vh;' +
+    'overflow:hidden;background:rgba(0,0,0,.85);color:#3f6;font:10px/1.25 monospace;' +
+    'padding:5px 7px;border-radius:8px;z-index:99999;white-space:pre;display:none;pointer-events:none;';
+  const btn = document.createElement('button');
+  btn.textContent = '🐞';
+  btn.style.cssText =
+    'position:fixed;left:6px;bottom:6px;width:34px;height:34px;border-radius:50%;border:none;' +
+    'background:#222;color:#fff;font-size:16px;z-index:100000;touch-action:manipulation;opacity:.55;';
+  function render () { panel.textContent = lines.slice(-24).join('\n'); }
+  function log (tag, e, extra) {
+    if (!on) return;
+    const t  = performance.now() | 0;
+    const tg = (e && e.target && (e.target.id || e.target.tagName)) || '?';
+    lines.push(`${t} ${tag} ${e ? (e.pointerType || '') + '#' + e.pointerId : ''}` +
+               (e ? ` p=${(e.pressure || 0).toFixed(2)} b=${e.buttons} →${tg}` : '') +
+               (extra ? ' ' + extra : ''));
+    render();
+  }
+  window.penDbg = log;   // Handler-Marker (z.B. window.penDbg('START', e))
+  const mount = () => { document.body.appendChild(panel); document.body.appendChild(btn); };
+  if (document.body) mount(); else window.addEventListener('DOMContentLoaded', mount);
+  btn.addEventListener('click', () => {
+    on = !on;
+    panel.style.display = on ? 'block' : 'none';
+    btn.style.background = on ? '#0a6' : '#222';
+    if (on) { lines.push('── Log AN ' + new Date().toLocaleTimeString() + ' ──'); render(); }
+  });
+  // Capture-Phase (true): feuert vor allen anderen Listenern, egal wo das Event landet.
+  for (const ev of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture', 'gotpointercapture']) {
+    window.addEventListener(ev, e => log(ev.replace('pointer', ''), e), true);
+  }
+  // pointermove ist zu häufig für Volltext – pro Pointer zählen, höchstens alle 250ms zeigen.
+  let moveCount = 0, lastMove = 0;
+  window.addEventListener('pointermove', e => {
+    if (!on) return;
+    moveCount++;
+    const t = performance.now();
+    if (t - lastMove > 250) { lastMove = t; log('move×' + moveCount, e); moveCount = 0; }
+  }, true);
+})();
 
 // ── Global error safety net ───────────────────────────────────────────────
 window.addEventListener('error', e => {
@@ -3473,6 +3527,7 @@ function setupCanvasEvents() {
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     canvasPenId = e.pointerId;
     canvasDownTime = e.timeStamp;   // ab jetzt zählt nur, was NACH diesem Aufsetzen erzeugt wurde
+    if (window.penDbg) window.penDbg('R-START', e);
     penActive = (e.pointerType === 'pen');
     if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
     if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
@@ -3528,9 +3583,10 @@ function setupCanvasEvents() {
       canvasPtBuf = [];
       currentStroke = { tool: activeTool, color: penColor, size: penSize,
                         pts: [{ x: pr.x, y: pr.y, p: (e.pressure || 0.5) }] };
+      if (window.penDbg) window.penDbg('R-HEAL', e);
     }
-    if (!isDrawingCanvas || !mathCtx) return;
-    if (e.pointerId !== canvasPenId) return; // nur der zeichnende Stift malt (Palm-Rejection)
+    if (!isDrawingCanvas || !mathCtx) { if (window.penDbg) window.penDbg('R-DROP-notdraw', e); return; }
+    if (e.pointerId !== canvasPenId) { if (window.penDbg) window.penDbg('R-DROP-id', e, 'cur=' + canvasPenId); return; }
     e.preventDefault();
 
     if (activeTool === 'line') {
@@ -3572,8 +3628,9 @@ function setupCanvasEvents() {
     // veraltete Event dann NICHT (gleiche ID) und beendete den frischen Strich sofort
     // ("Aufsetzen wird nicht erkannt"). Der Zeitstempel ist eindeutig: ein up/cancel, das
     // VOR dem aktuellen Aufsetzen erzeugt wurde, gehört zum alten Strich → ignorieren.
-    if (isDrawingCanvas && e.timeStamp < canvasDownTime) return;
-    if (isDrawingCanvas && canvasPenId !== null && e.pointerId !== canvasPenId) return;
+    if (isDrawingCanvas && e.timeStamp < canvasDownTime) { if (window.penDbg) window.penDbg('R-end-STALEtime', e); return; }
+    if (isDrawingCanvas && canvasPenId !== null && e.pointerId !== canvasPenId) { if (window.penDbg) window.penDbg('R-end-STALEid', e, 'cur=' + canvasPenId); return; }
+    if (isDrawingCanvas && window.penDbg) window.penDbg('R-END', e);
     if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
     if (e.pointerId === canvasPenId) canvasPenId = null;       // Stift losgelassen
     if (!isDrawingCanvas) return;
@@ -5830,6 +5887,7 @@ function onLernenDown(e) {
   lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
   lernenActivePtr = e.pointerId;
   lernenDownTime  = e.timeStamp;   // ab jetzt zählt nur, was NACH diesem Aufsetzen erzeugt wurde
+  if (window.penDbg) window.penDbg('L-START', e);
   // Capture darf den Strich NICHT abwürgen: hält iPad-Safari bei zwei dicht aufeinander
   // folgenden Strichen die Capture des vorigen Pointers noch, wirft setPointerCapture für
   // den neuen Pointer – ungefangen bräche der ganze pointerdown ab und der Strich ginge
@@ -5898,9 +5956,10 @@ function onLernenMove(e) {
     lernenLastMidX = pp.x; lernenLastMidY = pp.y;   // Glättung an der Wiederaufnahmestelle
     lernenPtBuf = [];
     isDrawingLernen = true;
+    if (window.penDbg) window.penDbg('L-HEAL', e);
   }
-  if (!isDrawingLernen || !lernenCtx) return;
-  if (e.pointerId !== lernenActivePtr) return; // palm rejection
+  if (!isDrawingLernen || !lernenCtx) { if (window.penDbg) window.penDbg('L-DROP-notdraw', e); return; }
+  if (e.pointerId !== lernenActivePtr) { if (window.penDbg) window.penDbg('L-DROP-id', e, 'cur=' + lernenActivePtr); return; }
   e.preventDefault();
   const canvas = e.target;
   const r      = canvas.getBoundingClientRect();   // einmal pro Event, nicht pro Punkt
@@ -5922,8 +5981,9 @@ function onLernenUp(e) {
   // gestarteten nächsten Strich nicht abwürgen. Apple Pencil recycelt die pointerId, daher
   // greift der ID-Vergleich allein nicht: ein vor dem aktuellen Aufsetzen erzeugtes Event
   // gehört zum alten Strich und wird per Zeitstempel verworfen.
-  if (isDrawingLernen && e.timeStamp < lernenDownTime) return;
+  if (isDrawingLernen && e.timeStamp < lernenDownTime) { if (window.penDbg) window.penDbg('L-end-STALEtime', e); return; }
   if (e.pointerId === lernenActivePtr) {
+    if (window.penDbg) window.penDbg('L-END', e);
     // Noch gepufferte Punkte sofort zeichnen, damit der Strich vollständig ist.
     if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
     flushLernenBuf();
