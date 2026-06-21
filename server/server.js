@@ -742,12 +742,14 @@ async function rebuildSubjectKb(subjectId) {
   const overview = Object.entries(byTopic)
     .map(([t, hs]) => `• ${t}: ${[...new Set(hs.filter(Boolean))].slice(0, 8).join('; ')}`)
     .join('\n');
+  // 0 chunks (z.B. wegen Budget-Stopp) NICHT als 'ready' ausweisen → 'pending'.
+  const status = rows.length ? 'ready' : 'pending';
   await pool.query(
     `INSERT INTO subject_kb (subject_id, overview, status, updated_at)
-     VALUES ($1,$2,'ready',now())
-     ON CONFLICT (subject_id) DO UPDATE SET overview=$2, status='ready',
+     VALUES ($1,$2,$3,now())
+     ON CONFLICT (subject_id) DO UPDATE SET overview=$2, status=$3,
        kb_version=subject_kb.kb_version+1, updated_at=now()`,
-    [subjectId, overview]
+    [subjectId, overview, status]
   );
 }
 
@@ -786,6 +788,43 @@ async function indexDocument(subjectId, documentId, opts = {}) {
     console.error('indexDocument failed:', e.message);
     if (!opts.skipFinalize) await setKbStatus(subjectId, 'error');
   }
+}
+
+// ── Retrieval (Phase 2): semantische Suche über die Wissensbasis ─────────────
+function cosineSim(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+const KB_KIND_LABEL = { definition: 'Definition', formel: 'Formel', konzept: 'Konzept', beispiel: 'Beispiel', pruefungsfrage: 'Prüfungsfrage' };
+
+// Top-k chunks eines Fachs zu einer Anfrage. null = KB nicht bereit / kein
+// Embedding / keine chunks → der Aufrufer nutzt dann den bisherigen Keyword-RAG.
+async function rankChunks(subjectId, query, k = 6) {
+  const kb = (await pool.query('SELECT status FROM subject_kb WHERE subject_id=$1', [subjectId])).rows[0];
+  if (!kb || kb.status !== 'ready') return null;
+  const qvec = await embedText(query);
+  if (!qvec) return null;
+  const { rows } = await pool.query(
+    'SELECT kind, topic, heading, content, source_ref, embedding FROM doc_chunks WHERE subject_id=$1 AND embedding IS NOT NULL', [subjectId]
+  );
+  if (!rows.length) return null;
+  return rows
+    .map(r => ({ ...r, score: cosineSim(qvec, r.embedding) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+}
+
+// Fertiger Kontext-String (Themen-Überblick + Top-k chunks). null → Keyword-Fallback.
+async function retrieveContext(subjectId, query, k = 6) {
+  const ranked = await rankChunks(subjectId, query, k);
+  if (!ranked || !ranked.length) return null;
+  const overview = (await pool.query('SELECT overview FROM subject_kb WHERE subject_id=$1', [subjectId])).rows[0]?.overview;
+  const body = ranked.map(r =>
+    `[${KB_KIND_LABEL[r.kind] || 'Info'}${r.topic ? ' · ' + r.topic : ''}] ${r.heading || ''}\n${r.content}`
+  ).join('\n\n---\n\n');
+  return `${overview ? `Themen-Überblick des Fachs:\n${overview}\n\n` : ''}Relevante Auszüge aus den Unterlagen:\n${body}`;
 }
 
 app.get('/api/subjects/:id/documents', async (req, res) => {
@@ -948,6 +987,11 @@ app.get('/api/subjects/:id/kb', async (req, res) => {
 app.post('/api/subjects/:id/kb/reindex', async (req, res) => {
   try {
     const sid = req.params.id;
+    // Budget vorab prüfen → klares Feedback statt stiller, leerer Indexierung.
+    const { cost } = await checkDailyLimit();
+    if (cost >= await getDailyLimit()) {
+      return res.status(429).json({ error: 'Tagesbudget erreicht – Indexierung morgen erneut oder Limit erhöhen.' });
+    }
     const docs = (await pool.query('SELECT id FROM documents WHERE subject_id=$1', [sid])).rows;
     res.json({ started: true, documents: docs.length });   // sofort antworten
     (async () => {
@@ -958,6 +1002,24 @@ app.post('/api/subjects/:id/kb/reindex', async (req, res) => {
         await rebuildSubjectKb(sid);   // Status einmal am Ende auf 'ready'
       } catch (e) { console.error('KB reindex failed:', e.message); await setKbStatus(sid, 'error'); }
     })();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Retrieval-Test: zeigt, welche chunks die semantische Suche zu einer Anfrage liefert.
+app.get('/api/subjects/:id/kb/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toString().slice(0, 300);
+    if (!q) return res.status(400).json({ error: 'q (Suchbegriff) erforderlich' });
+    const ranked = await rankChunks(req.params.id, q, 8);
+    if (!ranked) return res.json({ query: q, ready: false, results: [] });
+    res.json({
+      query: q, ready: true,
+      results: ranked.map(r => ({
+        score: Math.round(r.score * 1000) / 1000,
+        kind: r.kind, topic: r.topic, heading: r.heading,
+        preview: (r.content || '').slice(0, 160),
+      })),
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -991,12 +1053,19 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
       const query = typeof lastMsg?.content === 'string' ? lastMsg.content.slice(0, 300) : '';
       let docContext = '';
 
+      // Phase 2: zuerst semantische Suche über die Wissensbasis (sauber + kompakt).
+      // Findet sie nichts (KB noch nicht bereit), greift unten der bisherige Keyword-RAG.
+      if (query) {
+        try { docContext = (await retrieveContext(req.body.subject_id, query, 6)) || ''; }
+        catch (e) { console.error('KB retrieve skipped:', e.message); }
+      }
+
       const docLabel = r => {
         const types = { skript:'Vorlesungsskript', formelsammlung:'Formelsammlung', klausur:'Klausur', altklausur:'Altklausur', uebungsblatt:'Übungsblatt', zusammenfassung:'Zusammenfassung', lehrbuch:'Lehrbuch' };
         return r.doc_type && types[r.doc_type] ? `[${types[r.doc_type]}: ${r.filename}]` : `[${r.filename}]`;
       };
 
-      if (query) {
+      if (!docContext && query) {
         try {
           const { rows } = await pool.query(`
             SELECT filename, doc_type,
