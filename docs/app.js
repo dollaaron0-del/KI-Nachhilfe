@@ -6250,11 +6250,12 @@ ${strictNote}
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
   ${loesungField},
-  "einschaetzung": "Fließtext: Was hat der Student richtig, was fehlt oder ist falsch, was sollte konkret besser sein. Bei Teilaufgaben ebenfalls je Absatz."${numFields}
+  "einschaetzung": "Fließtext NUR wenn etwas fehlt/falsch ist: Was sollte konkret besser sein. Bei Teilaufgaben je Absatz. Bei score=2 (alles korrekt) LEER LASSEN (\"\") – dann genügen Urteil + Musterlösung."${numFields}
 }
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
 KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
+KEIN AUSFÜHRLICHES FEEDBACK BEI KORREKT: Ist score=2, lass "einschaetzung" leer ("") – eine korrekte Lösung braucht keine Fehleranalyse. Das spart Antwortlänge; Urteil + Musterlösung reichen.
 Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}${transkriptionInstr}
 
 ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
