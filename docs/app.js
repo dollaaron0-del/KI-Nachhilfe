@@ -4,66 +4,12 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '183';
+const APP_VERSION = '184';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
   el.textContent = 'v' + APP_VERSION;
 });
-
-// ── TEMP Stift-Diagnose ───────────────────────────────────────────────────
-// Sichtbares Log ALLER Pointer-Events in der Capture-Phase auf window – also
-// BEVOR irgendein Handler sie verwerfen kann. Damit sehen wir beim nächsten
-// Auftreten des "Aufsetzen-nicht-erkannt"-Fehlers eindeutig, ob (a) der Browser
-// gar kein pointerdown liefert, oder (b) er es liefert und unser Code es danach
-// verwirft. Unsere Handler schreiben über window.penDbg eigene Marker (START /
-// DROP-…). Toggle: kleiner 🐞-Button unten links. KOMPLETT entfernen, sobald
-// die Ursache gefunden ist (dieser ganze Block + die penDbg-Aufrufe).
-(function setupPenDebug () {
-  let on = false;
-  const lines = [];
-  const panel = document.createElement('div');
-  panel.style.cssText =
-    'position:fixed;left:4px;bottom:46px;width:62vw;max-width:360px;height:40vh;' +
-    'overflow:hidden;background:rgba(0,0,0,.85);color:#3f6;font:10px/1.25 monospace;' +
-    'padding:5px 7px;border-radius:8px;z-index:99999;white-space:pre;display:none;pointer-events:none;';
-  const btn = document.createElement('button');
-  btn.textContent = '🐞';
-  btn.style.cssText =
-    'position:fixed;left:6px;bottom:6px;width:34px;height:34px;border-radius:50%;border:none;' +
-    'background:#222;color:#fff;font-size:16px;z-index:100000;touch-action:manipulation;opacity:.55;';
-  function render () { panel.textContent = lines.slice(-24).join('\n'); }
-  function log (tag, e, extra) {
-    if (!on) return;
-    const t  = performance.now() | 0;
-    const tg = (e && e.target && (e.target.id || e.target.tagName)) || '?';
-    lines.push(`${t} ${tag} ${e ? (e.pointerType || '') + '#' + e.pointerId : ''}` +
-               (e ? ` p=${(e.pressure || 0).toFixed(2)} b=${e.buttons} →${tg}` : '') +
-               (extra ? ' ' + extra : ''));
-    render();
-  }
-  window.penDbg = log;   // Handler-Marker (z.B. window.penDbg('START', e))
-  const mount = () => { document.body.appendChild(panel); document.body.appendChild(btn); };
-  if (document.body) mount(); else window.addEventListener('DOMContentLoaded', mount);
-  btn.addEventListener('click', () => {
-    on = !on;
-    panel.style.display = on ? 'block' : 'none';
-    btn.style.background = on ? '#0a6' : '#222';
-    if (on) { lines.push('── Log AN ' + new Date().toLocaleTimeString() + ' ──'); render(); }
-  });
-  // Capture-Phase (true): feuert vor allen anderen Listenern, egal wo das Event landet.
-  for (const ev of ['pointerdown', 'pointerup', 'pointercancel', 'lostpointercapture', 'gotpointercapture']) {
-    window.addEventListener(ev, e => log(ev.replace('pointer', ''), e), true);
-  }
-  // pointermove ist zu häufig für Volltext – pro Pointer zählen, höchstens alle 250ms zeigen.
-  let moveCount = 0, lastMove = 0;
-  window.addEventListener('pointermove', e => {
-    if (!on) return;
-    moveCount++;
-    const t = performance.now();
-    if (t - lastMove > 250) { lastMove = t; log('move×' + moveCount, e); moveCount = 0; }
-  }, true);
-})();
 
 // ── Global error safety net ───────────────────────────────────────────────
 window.addEventListener('error', e => {
@@ -385,10 +331,9 @@ let strokes         = [];             // committete Striche: { tool, color, size
 let redoStrokes     = [];             // für Redo zurückgelegte Striche
 let currentStroke   = null;           // gerade in Arbeit
 let baseImage       = null;           // geladenes PNG (Vorsession) als Hintergrund-Ebene
-let penActive       = false;          // Stift liegt gerade auf → Touch komplett ignorieren (Palm-Rejection)
-let canvasPenId     = null;           // PointerId des aktuell zeichnenden Stifts (nur dieser malt)
-let canvasDownTime  = 0;              // timeStamp des laufenden Strich-Beginns – verwirft veraltete up/cancel-Events (Apple Pencil recycelt pointerId)
-let fingerScrollId  = null;           // PointerId des Fingers, der gerade scrollt
+let canvasStylusId  = null;           // touch.identifier des aktuell zeichnenden Stifts (null = keiner)
+let lastInkTs       = 0;              // Zeitstempel des letzten Schreib-Ereignisses – Tab-Klick-Schutz gegen Handflächen-Taps
+let fingerScrollId  = null;           // touch.identifier des Fingers, der gerade scrollt
 let fingerStartY    = 0;
 let wrapScrollStart = 0;
 let savedCanvasData = null;
@@ -1845,7 +1790,13 @@ async function handleUpload(files) {
 // ══ MODE TABS ══════════════════════════════════════════════════════════════
 
 document.querySelectorAll('.tab').forEach(b =>
-  b.addEventListener('click', () => switchMode(b.dataset.mode)));
+  b.addEventListener('click', () => {
+    // Ein Handflächen-/Phantom-Tap während (oder unmittelbar nach) dem Schreiben darf den
+    // Tab NICHT wechseln. Beim Schreiben mit dem Pencil oben am Canvas rutscht die Handfläche
+    // sonst auf die Tab-Leiste und löst dort einen echten Klick aus.
+    if (isDrawingCanvas || isDrawingLernen || Date.now() - lastInkTs < 500) return;
+    switchMode(b.dataset.mode);
+  }));
 
 function switchMode(mode) {
   currentFeature = mode;
@@ -3490,90 +3441,44 @@ function flushCanvasBuf() {
 
 function setupCanvasEvents() {
   const canvas = document.getElementById('math-canvas');
+  const wrap   = document.getElementById('canvas-scroll-wrap');
 
-  const wrap = document.getElementById('canvas-scroll-wrap');
-
-  // Solange der Stift zeichnet (Rechnen ODER Lernen), darf ein gleichzeitiger
-  // Finger-/Handflächenkontakt KEINE Textmarkierung in der Aufgabenstellung
-  // auslösen. selectstart global (Capture) abfangen reicht – die Palm-Rejection
-  // auf der Fläche selbst verhindert Markierungen außerhalb nicht.
+  // Solange gezeichnet wird (Rechnen ODER Lernen), keine Textmarkierung in der
+  // Aufgabenstellung zulassen (Capture-Phase reicht).
   document.addEventListener('selectstart', e => {
-    if (penActive || isDrawingCanvas || lernenPenActive) e.preventDefault();
+    if (isDrawingCanvas || isDrawingLernen) e.preventDefault();
   }, true);
 
-  canvas.addEventListener('pointerdown', e => {
-    if (e.pointerType === 'touch') {
-      // Palm-Rejection: während der Stift zeichnet, alle Touches ignorieren.
-      // (Keine Größen-Heuristik – ein Fingerkontakt ist auf dem iPad oft >45px und würde sonst fälschlich geblockt.)
-      if (penActive) return;
-      // Finger → Fläche per JS scrollen (kein natives pan-y, sonst scrollt auch die Handfläche).
-      fingerScrollId  = e.pointerId;
-      fingerStartY    = e.clientY;
-      wrapScrollStart = wrap.scrollTop;
-      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-      return;
-    }
-    e.preventDefault();
-    // Ein neuer Stift-/Maus-Kontakt startet IMMER einen neuen Strich. Es gibt nur EINEN
-    // Pencil – das frühere "schon ein Stift aktiv"-ID-Match (canvasPenId !== e.pointerId
-    // → return) schützte vor nichts, konnte aber Striche komplett verschlucken: kam das
-    // pointerup des vorigen Strichs nicht an (Pointer-Capture-Verlust in iPad-Safari),
-    // blieb canvasPenId gesetzt und JEDER Folgestrich mit neuer pointerId wurde verworfen
-    // ("Strich wird nicht erkannt"). Stattdessen übernehmen wir den neuen Kontakt.
+  // ── Strich-Logik, geräteunabhängig (bekommt CSS-Pixel-Koordinaten + Druck 0..1) ──
+  function beginStroke(clientX, clientY, force) {
     if (currentStroke) { strokes.push(currentStroke); currentStroke = null; } // verwaisten Strich sichern
-    // Ungefangen würde eine geworfene Capture (alter Pointer bei iPad-Safari noch nicht
-    // freigegeben) den ganzen pointerdown abbrechen → Strich verschluckt. Capture ist nur
-    // Komfort, das Zeichnen läuft auch ohne; deshalb try/catch.
-    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    canvasPenId = e.pointerId;
-    canvasDownTime = e.timeStamp;   // ab jetzt zählt nur, was NACH diesem Aufsetzen erzeugt wurde
-    if (window.penDbg) window.penDbg('R-START', e);
-    penActive = (e.pointerType === 'pen');
-    if (penActive) clearTextSelection(); // evtl. durch Handfläche entstandene Markierung wegnehmen
-    if (penActive && fingerScrollId !== null) fingerScrollId = null; // Stift gewinnt: Finger-Scroll abbrechen
+    lastInkTs = Date.now();
     isDrawingCanvas = true;
     redoStrokes = [];
-    const p = canvasPos(e, canvas);
-    canvasLastX = p.x; canvasLastY = p.y;
-    canvasLastMidX = p.x; canvasLastMidY = p.y;     // Glättung: Startpunkt = erster Mittelpunkt
+    const r = canvas.getBoundingClientRect();
+    const x = clientX - r.left, y = clientY - r.top;
+    const p = force > 0 ? force : 0.5;
+    canvasLastX = x; canvasLastY = y;
+    canvasLastMidX = x; canvasLastMidY = y;          // Glättung: Startpunkt = erster Mittelpunkt
     canvasPtBuf = [];
     if (canvasRaf) { cancelAnimationFrame(canvasRaf); canvasRaf = 0; }
-    // Neuen Strich als Vektor mitschreiben – kein getImageData mehr beim Aufsetzen.
-    currentStroke = { tool: activeTool, color: penColor, size: penSize,
-                      pts: [{ x: p.x, y: p.y, p: (e.pressure || 0.5) }] };
-
-    if (activeTool === 'line') {
-      return; // Vorschau läuft über redrawCanvas() im pointermove
-    }
+    currentStroke = { tool: activeTool, color: penColor, size: penSize, pts: [{ x, y, p }] };
+    if (activeTool === 'line') return; // Vorschau läuft über redrawCanvas() im move
     if (activeTool === 'pen' || activeTool === 'highlighter') {
       applyCtxStyle();
       mathCtx.beginPath();
-      const r = Math.max(0.5, (e.pressure || 0.5) * PEN_BASE[penSize]);
-      mathCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      const rad = Math.max(0.5, p * PEN_BASE[penSize]);
+      mathCtx.arc(x, y, rad, 0, Math.PI * 2);
       mathCtx.fillStyle = activeTool === 'highlighter' ? 'rgba(255,214,10,0.35)' : penColor;
       mathCtx.fill();
     }
-  }, { passive: false });
+  }
 
-  canvas.addEventListener('pointermove', e => {
-    if (e.pointerType === 'touch') {
-      // Nur der als Finger erkannte Pointer scrollt; Handfläche/weitere Touches ignorieren.
-      if (e.pointerId === fingerScrollId) {
-        wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
-      }
-      return;
-    }
-    // KEINE Selbstheilung-auf-move mehr: Ein Strich startet ausschließlich über pointerdown.
-    // Die frühere Heilung (start bei jedem pressing-move, solange nicht gezeichnet wird)
-    // erzeugte Phantom-Striche – der Apple Pencil meldet beim Schweben/Absetzen kurze
-    // Druck-Transienten und iPadOS recycelt Pointer-IDs, sodass aus dem Nichts gemalt wurde.
-    if (!isDrawingCanvas || !mathCtx) { if (window.penDbg) window.penDbg('R-DROP-notdraw', e); return; }
-    if (e.pointerId !== canvasPenId) { if (window.penDbg) window.penDbg('R-DROP-id', e, 'cur=' + canvasPenId); return; }
-    e.preventDefault();
-
+  function moveStroke(clientX, clientY, force) {
+    if (!isDrawingCanvas || !mathCtx) return;
+    const r = canvas.getBoundingClientRect();
+    const x = clientX - r.left, y = clientY - r.top;
     if (activeTool === 'line') {
-      // Bestehende Striche neu zeichnen, dann frische Vorschau-Linie obendrauf.
-      const p = canvasPos(e, canvas);
       redrawCanvas();
       mathCtx.globalCompositeOperation = 'source-over';
       mathCtx.globalAlpha  = 1;
@@ -3581,81 +3486,110 @@ function setupCanvasEvents() {
       mathCtx.lineWidth    = PEN_BASE[penSize] * 2;
       mathCtx.beginPath();
       mathCtx.moveTo(canvasLastX, canvasLastY);
-      mathCtx.lineTo(p.x, p.y);
+      mathCtx.lineTo(x, y);
       mathCtx.stroke();
       return;
     }
-
-    // getCoalescedEvents liefert ALLE Zwischenpunkte eines schnellen Strichs –
-    // sonst gehen beim schnellen (Text-)Schreiben Punkte verloren und der Strich
-    // bricht ab, sodass man ihn nachzieht ("doppelte" Striche). Punkte nur puffern;
-    // gezeichnet wird gebündelt einmal pro Frame in flushCanvasBuf() (rAF).
-    // getBoundingClientRect EINMAL pro Event statt pro Punkt (kein Layout-Read im Hot-Loop).
-    const r = canvas.getBoundingClientRect();
-    const pts = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
-    for (const pt of pts) {
-      canvasPtBuf.push({ x: pt.clientX - r.left, y: pt.clientY - r.top,
-                         p: (pt.pressure > 0 ? pt.pressure : 0.5) });
-    }
+    canvasPtBuf.push({ x, y, p: force > 0 ? force : 0.5 });
     if (!canvasRaf) canvasRaf = requestAnimationFrame(flushCanvasBuf);
-  }, { passive: false });
+  }
 
-  const endDraw = (e) => {
-    if (e.pointerId === fingerScrollId) fingerScrollId = null; // Finger-Scroll beendet
-    // Ein verspätetes pointerup/pointercancel eines VORHERIGEN Stift-Kontakts (auf window /
-    // lostpointercapture gefangen) darf den bereits gestarteten NÄCHSTEN Strich nicht
-    // abwürgen. Beim schnellen Schreiben / zwei Strichen dicht hintereinander trifft das
-    // up von Strich N u.U. erst NACH dem pointerdown von Strich N+1 ein.
-    // WICHTIG: Apple Pencil recycelt die pointerId – der reine ID-Vergleich erkennt das
-    // veraltete Event dann NICHT (gleiche ID) und beendete den frischen Strich sofort
-    // ("Aufsetzen wird nicht erkannt"). Der Zeitstempel ist eindeutig: ein up/cancel, das
-    // VOR dem aktuellen Aufsetzen erzeugt wurde, gehört zum alten Strich → ignorieren.
-    if (isDrawingCanvas && e.timeStamp < canvasDownTime) { if (window.penDbg) window.penDbg('R-end-STALEtime', e); return; }
-    if (isDrawingCanvas && canvasPenId !== null && e.pointerId !== canvasPenId) { if (window.penDbg) window.penDbg('R-end-STALEid', e, 'cur=' + canvasPenId); return; }
-    if (isDrawingCanvas && window.penDbg) window.penDbg('R-END', e);
-    if (e.pointerType === 'pen' || e.pointerType === 'mouse') penActive = false;
-    if (e.pointerId === canvasPenId) canvasPenId = null;       // Stift losgelassen
+  function finishStroke(clientX, clientY) {
     if (!isDrawingCanvas) return;
+    lastInkTs = Date.now();
     isDrawingCanvas = false;
     if (currentStroke) {
       if (activeTool === 'line') {
-        const p = canvasPos(e, canvas);
-        currentStroke.pts = [currentStroke.pts[0], { x: p.x, y: p.y }];
+        const r = canvas.getBoundingClientRect();
+        currentStroke.pts = [currentStroke.pts[0], { x: clientX - r.left, y: clientY - r.top }];
       } else {
-        // Noch gepufferte Punkte sofort zeichnen, damit der Strich vollständig ist.
         if (canvasRaf) { cancelAnimationFrame(canvasRaf); canvasRaf = 0; }
-        flushCanvasBuf();
+        flushCanvasBuf();   // gepufferte Restpunkte sofort zeichnen
       }
       strokes.push(currentStroke);
       currentStroke = null;
     }
-    // Kein getImageData mehr – der Strich liegt schon live auf der Canvas und ist
-    // zusätzlich als Vektor in `strokes` gesichert. Line-Tool einmal sauber
-    // nachzeichnen (überschreibt die letzte Vorschau).
     if (activeTool === 'line') redrawCanvas();
     mathCtx.globalAlpha = 1;
     mathCtx.globalCompositeOperation = 'source-over';
     applyCtxStyle();
-  };
-  canvas.addEventListener('pointerup',     endDraw);
-  canvas.addEventListener('pointercancel', endDraw);
-  // Sicherheitsnetz: Verliert iPad-Safari den Pointer-Capture, kommt pointerup u.U.
-  // NICHT auf der Canvas an → canvasPenId/penActive blieben hängen und der nächste
-  // Strich würde nicht starten. Auf window fangen wir auch diese Fälle ab; endDraw ist
-  // idempotent (isDrawingCanvas-Guard), die Canvas-Listener feuern ohnehin zuerst.
-  window.addEventListener('pointerup',     endDraw);
-  window.addEventListener('pointercancel', endDraw);
-  canvas.addEventListener('lostpointercapture', e => { if (e.pointerId === canvasPenId) endDraw(e); });
-  // KEIN pointerleave → endDraw: dank setPointerCapture feuert pointerup zuverlässig,
-  // auch wenn der Stift den Canvas-Rand verlässt. pointerleave kann dagegen direkt
-  // nach dem Aufsetzen (oder beim Pencil-Hover) spurious feuern und beendete den
-  // gerade begonnenen Strich sofort → erster Kontakt ohne Strich.
-  canvas.addEventListener('contextmenu',   e => e.preventDefault());
-}
+  }
 
-function canvasPos(e, canvas) {
-  const r = canvas.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
+  // ── Touch (iPad): NUR der Apple Pencil (touch.touchType === 'stylus') zeichnet.
+  //    Finger und Handfläche ('direct') werden fürs Zeichnen komplett ignoriert →
+  //    Palm-Rejection ganz ohne Heuristik. Damit umgehen wir Safaris fehlerhafte
+  //    Pointer-Event-Palm-Rejection, die den Stift-Pointer mitten im Strich abbrach
+  //    ("Strich wird nicht erzeugt") bzw. Phantom-Striche erzeugte. ──
+  const stylusOf = list => { for (const t of list) if (t.touchType === 'stylus') return t; return null; };
+
+  canvas.addEventListener('touchstart', e => {
+    const st = stylusOf(e.touches);
+    if (st) {
+      e.preventDefault();                 // unterdrückt zugleich synthetische Maus-Events
+      fingerScrollId = null;              // Stift gewinnt gegen laufenden Finger-Scroll
+      // Nur ein NEU aufgesetzter Stift (in changedTouches) startet einen Strich – ein
+      // zweiter Touch (Handfläche), während der Stift schon liegt, hat den Stift zwar in
+      // e.touches, aber nicht in changedTouches und darf den laufenden Strich nicht neu
+      // starten.
+      const fresh = stylusOf(e.changedTouches);
+      if (fresh) {
+        // IMMER (neu) beginnen, nie auf einem hängenden canvasStylusId abblocken: kam ein
+        // früheres touchend nicht an, blieb die Id gesetzt und JEDER Folgestrich wurde
+        // verschluckt ("manchmal passiert gar nichts"). beginStroke sichert einen evtl.
+        // verwaisten Strich selbst.
+        canvasStylusId = fresh.identifier;
+        clearTextSelection();
+        beginStroke(fresh.clientX, fresh.clientY, fresh.force);
+      }
+      return;
+    }
+    // Kein Stift im Spiel → erster Finger scrollt die Fläche (JS-Scroll, da touch-action:none).
+    e.preventDefault();
+    const f = e.changedTouches[0];
+    fingerScrollId  = f.identifier;
+    fingerStartY    = f.clientY;
+    wrapScrollStart = wrap.scrollTop;
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    if (canvasStylusId !== null) {
+      e.preventDefault();   // während des Schreibens ALLE Touches (auch Handfläche) blocken –
+                            // sonst erzeugt Safari aus dem ungebremsten Handflächen-Touch
+                            // synthetische Maus-/Klick-Events (Phantom-Striche, Tab-Wechsel).
+      for (const t of e.changedTouches) {
+        if (t.identifier === canvasStylusId) { moveStroke(t.clientX, t.clientY, t.force); break; }
+      }
+      return;
+    }
+    for (const t of e.changedTouches) {
+      if (t.identifier === fingerScrollId) { e.preventDefault(); wrap.scrollTop = wrapScrollStart + (fingerStartY - t.clientY); break; }
+    }
+  }, { passive: false });
+
+  const onTouchEnd = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === canvasStylusId) { finishStroke(t.clientX, t.clientY); canvasStylusId = null; }
+      if (t.identifier === fingerScrollId) fingerScrollId = null;
+    }
+  };
+  canvas.addEventListener('touchend',    onTouchEnd);
+  canvas.addEventListener('touchcancel', onTouchEnd);
+
+  // ── Maus (Desktop): synthetische Maus-Events vom Touch sind oben per preventDefault
+  //    unterdrückt. Der mouseDrawing-Flag stellt sicher, dass window-mousemove/up NUR auf
+  //    einen echten, am Canvas begonnenen Maus-Zug reagieren – ein verirrtes synthetisches
+  //    mousemove (z.B. aus einem Handflächen-Touch) erzeugt sonst Phantom-Striche. ──
+  let mouseDrawing = false;
+  canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0 || canvasStylusId !== null) return;
+    mouseDrawing = true;
+    clearTextSelection();
+    beginStroke(e.clientX, e.clientY, 0.5);
+  });
+  window.addEventListener('mousemove', e => { if (mouseDrawing) moveStroke(e.clientX, e.clientY, 0.5); });
+  window.addEventListener('mouseup',   e => { if (mouseDrawing) { mouseDrawing = false; finishStroke(e.clientX, e.clientY); } });
+
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 // Entfernt eine (durch gleichzeitigen Handflächen-/Finger-Kontakt) entstandene
@@ -5360,10 +5294,8 @@ let lernenPtBuf     = [];           // gepufferte Punkte, einmal pro Frame gezei
 let lernenRaf       = 0;            // laufende requestAnimationFrame-ID (0 = keine)
 let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
-let lernenActivePtr = null; // palm rejection: track active pointer ID
-let lernenDownTime  = 0;    // timeStamp des Strich-Beginns – verwirft veraltete up/cancel (Apple Pencil recycelt pointerId)
-let lernenPenActive = false;        // Stift liegt auf → Touch ignorieren (Palm-Rejection)
-let lernenFingerId  = null;         // PointerId des scrollenden Fingers
+let lernenStylusId  = null; // touch.identifier des aktuell zeichnenden Stifts (null = keiner)
+let lernenFingerId  = null;         // touch.identifier des scrollenden Fingers
 let lernenFingerY0  = 0;            // Start-Y des Finger-Scrolls
 let lernenScroll0   = 0;            // scrollTop bei Scroll-Beginn
 const LERNEN_HEIGHT = 2400;         // langer Notizblock (scrollbar), nicht nur bildschirmhoch
@@ -5461,7 +5393,7 @@ function openUnit(unit) {
   lernenLastEval  = null;
   lernenHasInk    = false;
   lernenCtx       = null;
-  lernenActivePtr = null;
+  lernenStylusId  = null;
   isDrawingLernen = false;
   // Switch views
   document.getElementById('lernen-pfad-view').classList.add('hidden');
@@ -5810,21 +5742,24 @@ function initLernenCanvas() {
   // Bitmap bleibt transparent (nur Tinte); Weiß + Raster kommen aus dem CSS-Hintergrund.
   lernenCtx.lineCap  = 'round';
   lernenCtx.lineJoin = 'round';
-  // Remove any old listeners first (prevent accumulation across topic switches)
-  canvas.removeEventListener('pointerdown',   onLernenDown);
-  canvas.removeEventListener('pointermove',   onLernenMove);
-  canvas.removeEventListener('pointerup',     onLernenUp);
-  canvas.removeEventListener('pointercancel', onLernenUp);
-  canvas.addEventListener('pointerdown',   onLernenDown,   { passive: false });
-  canvas.addEventListener('pointermove',   onLernenMove,   { passive: false });
-  canvas.addEventListener('pointerup',     onLernenUp);
-  canvas.addEventListener('pointercancel', onLernenUp);
-  // Sicherheitsnetz wie beim Rechnen-Canvas: Verschluckt iPad-Safari das pointerup (Pointer-
-  // Capture-Verlust), blieben sonst lernenPenActive/isDrawingLernen hängen → Palm-Rejection
-  // sperrt den Finger-Scroll. Gleiche Fn-Referenz ⇒ addEventListener entdoppelt, kein
-  // Mehrfach-Listener über Themenwechsel hinweg. onLernenUp endet nur beim passenden Pointer.
-  window.addEventListener('pointerup',     onLernenUp);
-  window.addEventListener('pointercancel', onLernenUp);
+  // Touch (iPad): NUR der Stift (touchType==='stylus') zeichnet, Finger/Handfläche scrollen
+  // bzw. werden ignoriert – siehe Rechnen-Canvas. Maus für Desktop. Alte Listener zuerst
+  // entfernen (initLernenCanvas läuft beim Themenwechsel erneut, lernenCtx wird zurückgesetzt);
+  // gleiche Fn-Referenz ⇒ keine Mehrfach-Listener.
+  canvas.removeEventListener('touchstart',  onLernenTouchStart);
+  canvas.removeEventListener('touchmove',   onLernenTouchMove);
+  canvas.removeEventListener('touchend',    onLernenTouchEnd);
+  canvas.removeEventListener('touchcancel', onLernenTouchEnd);
+  canvas.removeEventListener('mousedown',   onLernenMouseDown);
+  canvas.addEventListener('touchstart',  onLernenTouchStart, { passive: false });
+  canvas.addEventListener('touchmove',   onLernenTouchMove,  { passive: false });
+  canvas.addEventListener('touchend',    onLernenTouchEnd);
+  canvas.addEventListener('touchcancel', onLernenTouchEnd);
+  canvas.addEventListener('mousedown',   onLernenMouseDown);
+  // Maus-Move/Up auf window (Strich soll auch außerhalb des Canvas enden). Gleiche
+  // Fn-Referenz ⇒ addEventListener entdoppelt über Themenwechsel hinweg.
+  window.addEventListener('mousemove', onLernenMouseMove);
+  window.addEventListener('mouseup',   onLernenMouseUp);
 }
 
 // Convert a pointer event to canvas context coordinates.
@@ -5840,49 +5775,32 @@ function lernenPos(e, canvas, r) {
   };
 }
 
-function onLernenDown(e) {
-  const canvas = e.target;
-  const wrap   = document.getElementById('lernen-canvas-wrap');
-  const isDrawer = (e.pointerType === 'pen' || e.pointerType === 'mouse');
-
-  if (!isDrawer) {
-    // Finger ODER Handfläche – zeichnen ist hier unmöglich (nur Stift/Maus zeichnen).
-    // Palm-Rejection: während der Stift schreibt, alle Touches ignorieren.
-    // (Keine Größen-Heuristik – ein Fingerkontakt ist auf dem iPad oft >45px und würde sonst fälschlich geblockt.)
-    if (lernenPenActive) return;
-    // Finger (oder ruhende Handfläche bei nicht schreibendem Stift) → Notizblock per JS scrollen.
-    lernenFingerId = e.pointerId;
-    lernenFingerY0 = e.clientY;
-    lernenScroll0  = wrap.scrollTop;
-    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
-    return;
-  }
-
-  // Stift / Maus → zeichnen
-  e.preventDefault();
-  // Ein neuer Stift-/Maus-Kontakt startet IMMER einen neuen Strich – nie auf einen alten
-  // lernenActivePtr abblocken. Kam dessen pointerup nicht an (Pointer-Capture-Verlust in
-  // iPad-Safari), blieb lernenActivePtr gesetzt und JEDER Folgestrich wurde verschluckt
-  // ("Schreiben funktioniert nicht mehr"). Stattdessen den neuen Kontakt übernehmen.
-  lernenPenActive = true;
-  clearTextSelection();                 // evtl. durch Handfläche entstandene Markierung wegnehmen
-  lernenFingerId  = null;               // Stift gewinnt: laufenden Finger-Scroll abbrechen
-  lernenActivePtr = e.pointerId;
-  lernenDownTime  = e.timeStamp;   // ab jetzt zählt nur, was NACH diesem Aufsetzen erzeugt wurde
-  if (window.penDbg) window.penDbg('L-START', e);
-  // Capture darf den Strich NICHT abwürgen: hält iPad-Safari bei zwei dicht aufeinander
-  // folgenden Strichen die Capture des vorigen Pointers noch, wirft setPointerCapture für
-  // den neuen Pointer – ungefangen bräche der ganze pointerdown ab und der Strich ginge
-  // verloren ("manchmal schreibt er nicht"). Capture ist nur Komfort; Zeichnen läuft auch ohne.
-  try { canvas.setPointerCapture(e.pointerId); } catch (_) {} // keep events even if pointer leaves canvas
+// Kern-Strich-Logik (geräteunabhängig, bekommt CSS-Pixel-Koordinaten).
+function lernenBegin(canvas, clientX, clientY) {
   const r = canvas.getBoundingClientRect();
-  const p = lernenPos(e, canvas, r);
-  lernenLastX = p.x;
-  lernenLastY = p.y;
+  const p = lernenPos({ clientX, clientY }, canvas, r);
+  lernenLastX = p.x; lernenLastY = p.y;
   lernenLastMidX = p.x; lernenLastMidY = p.y;     // Glättung: Startpunkt = erster Mittelpunkt
   lernenPtBuf = [];
   if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
+  lastInkTs = Date.now();
   isDrawingLernen = true;
+}
+
+function lernenMove(canvas, clientX, clientY) {
+  if (!isDrawingLernen || !lernenCtx) return;
+  const r = canvas.getBoundingClientRect();
+  const { x, y } = lernenPos({ clientX, clientY }, canvas, r);
+  lernenPtBuf.push({ x, y });
+  if (!lernenRaf) lernenRaf = requestAnimationFrame(flushLernenBuf);
+}
+
+function lernenFinish() {
+  if (!isDrawingLernen) return;
+  if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
+  flushLernenBuf();                 // gepufferte Restpunkte sofort zeichnen
+  lastInkTs = Date.now();
+  isDrawingLernen = false;
 }
 
 // Gepufferte Punkte einmal pro Frame zeichnen (rAF) mit Kurven-Glättung – analog
@@ -5912,50 +5830,71 @@ function flushLernenBuf() {
   }
 }
 
-function onLernenMove(e) {
-  if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') {
-    // Finger-Scroll (nur der erkannte Finger; Handfläche/weitere Touches ignorieren)
-    if (e.pointerId === lernenFingerId) {
-      const wrap = document.getElementById('lernen-canvas-wrap');
-      wrap.scrollTop = lernenScroll0 + (lernenFingerY0 - e.clientY);
+// ── Touch (iPad): NUR der Apple Pencil (touchType==='stylus') zeichnet; ein Finger scrollt
+//    den Notizblock; die Handfläche wird ignoriert. Spiegelbildlich zum Rechnen-Canvas. ──
+function lernenStylusOf(list) { for (const t of list) if (t.touchType === 'stylus') return t; return null; }
+
+function onLernenTouchStart(e) {
+  const canvas = e.currentTarget;
+  const wrap   = document.getElementById('lernen-canvas-wrap');
+  const st = lernenStylusOf(e.touches);
+  if (st) {
+    e.preventDefault();                 // unterdrückt zugleich synthetische Maus-Events
+    lernenFingerId = null;              // Stift gewinnt gegen laufenden Finger-Scroll
+    // Nur ein NEU aufgesetzter Stift (in changedTouches) startet einen Strich – nie auf
+    // einem hängenden lernenStylusId abblocken (sonst werden Folgestriche verschluckt).
+    const fresh = lernenStylusOf(e.changedTouches);
+    if (fresh) {
+      lernenStylusId = fresh.identifier;
+      clearTextSelection();
+      lernenBegin(canvas, fresh.clientX, fresh.clientY);
     }
     return;
   }
-  // KEINE Selbstheilung-auf-move mehr (siehe Rechnen-Canvas): startete Phantom-Striche aus
-  // Druck-Transienten beim Schweben/Absetzen des Pencils. Ein Strich beginnt nur per pointerdown.
-  if (!isDrawingLernen || !lernenCtx) { if (window.penDbg) window.penDbg('L-DROP-notdraw', e); return; }
-  if (e.pointerId !== lernenActivePtr) { if (window.penDbg) window.penDbg('L-DROP-id', e, 'cur=' + lernenActivePtr); return; }
+  // Kein Stift → erster Finger scrollt den Notizblock (JS-Scroll, da touch-action:none).
   e.preventDefault();
-  const canvas = e.target;
-  const r      = canvas.getBoundingClientRect();   // einmal pro Event, nicht pro Punkt
-  // getCoalescedEvents captures all intermediate points during fast strokes – nur puffern,
-  // gezeichnet wird gebündelt einmal pro Frame in flushLernenBuf() (rAF).
-  const pts  = (e.getCoalescedEvents ? e.getCoalescedEvents() : null) || [e];
-  for (const pt of pts) {
-    const { x, y } = lernenPos(pt, canvas, r);
-    lernenPtBuf.push({ x, y });
-  }
-  if (!lernenRaf) lernenRaf = requestAnimationFrame(flushLernenBuf);
+  const f = e.changedTouches[0];
+  lernenFingerId = f.identifier;
+  lernenFingerY0 = f.clientY;
+  lernenScroll0  = wrap.scrollTop;
 }
 
-function onLernenUp(e) {
-  if (e.pointerId === lernenFingerId) lernenFingerId = null; // Finger-Scroll beendet
-  if (e.pointerType === 'pen' || e.pointerType === 'mouse') lernenPenActive = false;
-  // Nur das Event des aktuell zeichnenden Pointers beendet den Strich – ein verspätetes
-  // up/cancel eines vorherigen Kontakts (z.B. via window-Sicherheitsnetz) darf den bereits
-  // gestarteten nächsten Strich nicht abwürgen. Apple Pencil recycelt die pointerId, daher
-  // greift der ID-Vergleich allein nicht: ein vor dem aktuellen Aufsetzen erzeugtes Event
-  // gehört zum alten Strich und wird per Zeitstempel verworfen.
-  if (isDrawingLernen && e.timeStamp < lernenDownTime) { if (window.penDbg) window.penDbg('L-end-STALEtime', e); return; }
-  if (e.pointerId === lernenActivePtr) {
-    if (window.penDbg) window.penDbg('L-END', e);
-    // Noch gepufferte Punkte sofort zeichnen, damit der Strich vollständig ist.
-    if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
-    flushLernenBuf();
-    lernenActivePtr = null;
-    isDrawingLernen = false;
+function onLernenTouchMove(e) {
+  if (lernenStylusId !== null) {
+    e.preventDefault();                 // während des Schreibens ALLE Touches (auch Handfläche) blocken
+    for (const t of e.changedTouches) {
+      if (t.identifier === lernenStylusId) { lernenMove(e.currentTarget, t.clientX, t.clientY); break; }
+    }
+    return;
+  }
+  for (const t of e.changedTouches) {
+    if (t.identifier === lernenFingerId) {
+      e.preventDefault();
+      document.getElementById('lernen-canvas-wrap').scrollTop = lernenScroll0 + (lernenFingerY0 - t.clientY);
+      break;
+    }
   }
 }
+
+function onLernenTouchEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === lernenStylusId) { lernenFinish(); lernenStylusId = null; }
+    if (t.identifier === lernenFingerId) lernenFingerId = null;
+  }
+}
+
+// Maus (Desktop): synthetische Maus-Events vom Touch sind per preventDefault unterdrückt.
+// lernenMouseDrawing stellt sicher, dass window-mousemove/up nur auf einen echten,
+// am Canvas begonnenen Maus-Zug reagieren (kein Phantom-Strich aus verirrtem mousemove).
+let lernenMouseDrawing = false;
+function onLernenMouseDown(e) {
+  if (e.button !== 0 || lernenStylusId !== null) return;
+  lernenMouseDrawing = true;
+  clearTextSelection();
+  lernenBegin(e.currentTarget, e.clientX, e.clientY);
+}
+function onLernenMouseMove(e) { if (lernenMouseDrawing) lernenMove(document.getElementById('lernen-canvas'), e.clientX, e.clientY); }
+function onLernenMouseUp(e)   { if (lernenMouseDrawing) { lernenMouseDrawing = false; lernenFinish(); } }
 
 // ── Sicherer Ausdrucks-Evaluator für die deterministische Rechen-Prüfung (#4) ──
 // Kein eval(): Tokenizer → Shunting-Yard → RPN. Erlaubt Zahlen (auch deutsches
