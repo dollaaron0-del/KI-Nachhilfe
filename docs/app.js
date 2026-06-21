@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '185';
+const APP_VERSION = '186';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6052,9 +6052,20 @@ async function checkLernenSolution() {
       ? `\nNUMERISCH: Fülle "endergebnis"/"endergebnis_rechnung" mit DEINEM korrekten Resultat und "schueler_endergebnis" mit der Endzahl des Studenten (null wenn keine). Punkt als Dezimaltrenner. Die endgültige Richtig/Falsch-Wertung der Zahl übernimmt das System.`
       : '';
 
+    // LESEN VOR BEWERTEN: Bei Handschrift transkribiert die KI ZUERST exakt, was dasteht,
+    // und ordnet jeden Block räumlich der richtigen Teilaufgabe zu. Das verhindert die
+    // a/b-Verwechslung (Rechnung aus b landet unter a) und falsches "zu wenig", wenn die
+    // KI Handschrift nicht lesen konnte. Bewertet wird nur die Transkription.
+    const transkriptionField = hasInk
+      ? `\n  "transkription": "Schreibe EXAKT ab, was in der Handschrift steht – nichts ergänzen, nichts raten, nichts aus einer anderen Teilaufgabe übernehmen. Bei Teilaufgaben je Absatz, beginnend mit der Bezeichnung fett (**a)** …), räumlich (Beschriftung bzw. Position von oben nach unten) der richtigen Teilaufgabe zugeordnet. Unsicher Lesbares als [unleserlich] markieren.",`
+      : '';
+    const transkriptionInstr = hasInk
+      ? `\nLESEN VOR BEWERTEN (Pflicht): Fülle ZUERST "transkription". Übernimm NIEMALS Rechnung/Notiz einer Teilaufgabe in eine andere – ordne jeden Handschrift-Block der Teilaufgabe zu, zu der er räumlich/per Beschriftung gehört. Was du nicht sicher lesen kannst, wird [unleserlich] markiert und NICHT als Fehler oder als fehlend gewertet (in der einschaetzung erwähnen, dass es unleserlich war). Bewerte ausschließlich, was in "transkription" steht.`
+      : '';
+
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
 ${strictNote}
-{
+{${transkriptionField}
   "score": 0,
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
@@ -6064,7 +6075,7 @@ ${strictNote}
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
 KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
-Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}
+Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}${transkriptionInstr}
 
 ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
 
@@ -6132,7 +6143,7 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     if (numNote) ev.feedback = ev.feedback ? `${ev.feedback} — ${numNote}` : numNote;
 
     lernenAttempts++;
-    lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung };
+    lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung, transkription: ev.transkription || '' };
     const understood = ev.understood === true && ev.score >= 2;
     if (ev.score >= 2) comboUp(); else comboReset();
     const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
@@ -6141,6 +6152,15 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     if (resultBar) {
       resultBar.className = `lernen-result-bar lernen-result-bar--${scoreClass}`;
       let html = `<div class="lernen-result-verdict lernen-result-verdict--${scoreClass}">${scoreIcon} ${esc(ev.feedback || '')}</div>`;
+
+      // So wurde die Handschrift gelesen – einklappbar, damit der Student Lesefehler
+      // (z.B. b)-Rechnung unter a) oder [unleserlich]) sofort erkennt und melden kann.
+      if (ev.transkription) {
+        html += `<details class="lernen-result-details">` +
+          `<summary>📖 So habe ich deine Handschrift gelesen</summary>` +
+          `<div class="lernen-result-text" style="margin-top:8px">${safeHtml(md(ev.transkription))}</div>` +
+          `</details>`;
+      }
 
       if (ev.score < 2) {
         // Einschätzung zuerst – was konkret falsch war, kurz und direkt
@@ -6214,9 +6234,14 @@ async function lernenQaSend() {
     const aufgCtx = lernenTopicData?.aufgabe
       ? `\n\nAKTUELLE ÜBUNGSAUFGABE DES STUDENTEN:\n"${lernenTopicData.aufgabe}"\nDer Student arbeitet gerade an dieser Aufgabe. Beantworte Fragen dazu direkt und konkret. Korrigiere Rechenfehler präzise, erkläre den richtigen Lösungsweg Schritt für Schritt.`
       : '';
+    // Chat an "Prüfen" koppeln: die offizielle Bewertung (inkl. transkribierter Handschrift)
+    // ist verbindlich, damit der Chat nicht "richtig" sagt, während "Prüfen" "zu wenig" sagte.
+    const evalCtx = lernenLastEval
+      ? `\n\nOFFIZIELLE BEWERTUNG VON "PRÜFEN" (verbindlich – du darfst die Richtig/Falsch-Wertung NICHT umdrehen):\n${lernenLastEval.transkription ? `So wurde die Handschrift des Studenten gelesen:\n"""\n${lernenLastEval.transkription}\n"""\n` : ''}Urteil: ${lernenLastEval.feedback || ''}\nEinschätzung: ${lernenLastEval.einschaetzung || ''}\nWenn der Student fragt, ob seine Antwort richtig/ausreichend ist, stütze dich GENAU auf diese Bewertung (score ${lernenLastEval.score}/2). Erkläre, was noch fehlt – bestätige NICHT pauschal "richtig", wenn die Prüfung das nicht tat. Meint der Student, die Handschrift sei falsch gelesen worden, bitte ihn, erneut auf "Prüfen" zu tippen.`
+      : '';
     const reply = await claudeLocal(
       lernenQaMsgs,
-      sysBlocks(`Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich.${aufgCtx}`),
+      sysBlocks(`Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich.${aufgCtx}${evalCtx}`),
       600
     );
     lernenQaMsgs.push({ role: 'assistant', content: reply });
