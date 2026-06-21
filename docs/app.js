@@ -315,6 +315,7 @@ let currentExplainerTopic = null;
 let currentUnit          = null;   // aktuelle Lerneinheit (1 Thema ODER zusammengesetzt, s. pathUnits)
 let rechnenDiff     = 'mittel';
 let rechnenLastFeedback = '';   // letztes Prüf-Feedback derselben Aufgabe (konsistente Re-Prüfung)
+let rechnenLastCheckSig = '';   // Signatur (Striche+Text+Aufgabe) der zuletzt geprüften Lösung → Re-Check ohne Änderung spart den API-Call
 let rechnenNextTask = null;     // Prefetch: { promise, diff, forSession } – nächste Aufgabe vorab geladen
 let rechnenLoesung  = null;     // Prefetch: { aufgabe, promise, text } – Musterlösung vorab generiert
 let mathCtx         = null;
@@ -3231,6 +3232,7 @@ function injectSolveButtons(tasksPart) {
 function sendToRechnen(text) {
   currentAufgabe = text;
   rechnenLastFeedback = '';
+  rechnenLastCheckSig = '';
   savedCanvasData = null;
   const input = document.getElementById('rechnen-task-input');
   if (input) input.value = text;
@@ -3836,6 +3838,7 @@ async function generateMathAufgabe() {
     taskInput.value = aufgabe.trim();
     currentAufgabe  = aufgabe.trim();
     rechnenLastFeedback = '';
+    rechnenLastCheckSig = '';
     savedCanvasData = null;
     clearCanvas();   // setzt strokes/redoStrokes/baseImage zurück
     rechnenLoesung = null;
@@ -3849,15 +3852,55 @@ async function generateMathAufgabe() {
   }
 }
 
+// Kompakte Signatur der aktuellen Lösung (Striche + getippter Text + Aufgabe).
+// Identische Signatur bei einem erneuten "Prüfen" ⇒ es hat sich nichts geändert,
+// also kann das alte Feedback ohne (teuren) API-Call wieder gezeigt werden.
+function rechnenSolutionSig(writtenText, taskText) {
+  let s = `${taskText}|${writtenText}|`;
+  for (const st of (strokes || [])) {
+    const pts = st.points || st.pts || st || [];
+    s += pts.length + ':';
+    const f = pts[0], l = pts[pts.length - 1];
+    if (f) s += `${f.x | 0},${f.y | 0}`;
+    if (l) s += `>${l.x | 0},${l.y | 0};`;
+  }
+  // djb2
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
+
+// Schlanker System-Prompt nur fürs Bewerten: OHNE den großen, gecachten
+// Unterlagen-Block. Zum Prüfen einer konkreten Rechnung ist das ganze Skript
+// selten nötig – das spart pro Prüfung Input-/Cache-Tokens.
+function checkSysBlocks() {
+  return [{
+    type: 'text',
+    text: `Du bist ein erfahrener, präziser Korrektor für das Fach "${sessionMeta?.name || ''}". Bewerte die Lösung eines Schülers fair und nachvollziehbar.
+MATHEMATIK: Verwende für Formeln LaTeX – inline $...$, Block $$...$$.
+Antworte immer auf Deutsch.${prefCalculator ? `\n\nDer Student nutzt einen ${prefCalculator}; gib bei Rechenwegen ggf. gerätespezifische Tipps.` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}`,
+  }];
+}
+
 async function checkHandwriting() {
   if (!mathCtx) return;
   const canvas = document.getElementById('math-canvas');
 
   // Bitmap ist transparent (nur Tinte) – Tinte über den Alpha-Kanal erkennen.
-  const px = mathCtx.getImageData(0, 0, canvas.width, canvas.height).data;
+  // In einem Durchgang zugleich die Bounding-Box der Tinte bestimmen, damit das
+  // Bild später nur auf den beschriebenen Bereich zugeschnitten gesendet wird.
+  const CW = canvas.width, CH = canvas.height;
+  const px = mathCtx.getImageData(0, 0, CW, CH).data;
   let hasInk = false;
-  for (let i = 3; i < px.length; i += 4) {
-    if (px[i] > 10) { hasInk = true; break; }
+  let minX = CW, minY = CH, maxX = 0, maxY = 0;
+  for (let y = 0; y < CH; y++) {
+    for (let x = 0; x < CW; x++) {
+      if (px[(y * CW + x) * 4 + 3] > 10) {
+        hasInk = true;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
   }
   const hasTypedAnswer = (document.getElementById('rechnen-task-input')?.value.trim() || '').length > 0;
   if (!hasInk && !hasTypedAnswer) { toast('Bitte zuerst eine Lösung in den Zeichen- oder Schreibbereich eingeben.', 'warn'); return; }
@@ -3871,6 +3914,17 @@ async function checkHandwriting() {
 
   const writtenText = document.getElementById('rechnen-task-input')?.value.trim() || '';
   const taskText    = writtenText || currentAufgabe;
+
+  // (A) Unveränderte Lösung erneut "geprüft" → kein API-Call, altes Feedback zeigen.
+  const sig = rechnenSolutionSig(writtenText, taskText);
+  if (rechnenLastFeedback && sig === rechnenLastCheckSig) {
+    document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(rechnenLastFeedback));
+    document.getElementById('rechnen-sheet-loading').classList.add('hidden');
+    document.getElementById('rechnen-sheet-result').classList.remove('hidden');
+    checkDone();
+    toast('Keine Änderung – bisheriges Feedback wird angezeigt.', 'info');
+    return;
+  }
 
   // Wartezustand beleben: wechselnde Status-Zeile statt statischem "wird geprüft",
   // und die vorgeladene Musterlösung schon zum Lesen anzeigen, sobald sie fertig ist.
@@ -3897,14 +3951,30 @@ async function checkHandwriting() {
   const writtenNote = writtenText
     ? `\n\n**Im Schreibbereich getippter Text des Schülers (Teil der Lösung, gleichwertig zur Zeichnung berücksichtigen):**\n${writtenText}`
     : '';
+  // (C) Auf den beschriebenen Bereich zuschneiden statt den ganzen 2000px-Canvas
+  // (meist überwiegend weiß) zu senden, plus Rand. (B) Anschließend auf eine
+  // maximale Kantenlänge herunterskalieren. Beides senkt die Vision-Tokens stark.
+  const MARGIN = 32, MAX_EDGE = 1024;
+  let sx = 0, sy = 0, sw = CW, sh = CH;
+  if (hasInk) {
+    sx = Math.max(0, minX - MARGIN);
+    sy = Math.max(0, minY - MARGIN);
+    sw = Math.min(CW, maxX + MARGIN) - sx;
+    sh = Math.min(CH, maxY + MARGIN) - sy;
+  } else {
+    // Nur getippter Text, keine Tinte → winziges Platzhalterbild genügt.
+    sw = Math.min(CW, 16); sh = Math.min(CH, 16);
+  }
+  const scale = Math.min(1, MAX_EDGE / Math.max(sw, sh));
   // Transparente Bitmap auf weißen Grund flachrechnen, damit die Vision-API
   // die Tinte auf Weiß sieht (statt auf transparentem/schwarzem Grund).
   const flat = document.createElement('canvas');
-  flat.width = canvas.width; flat.height = canvas.height;
+  flat.width  = Math.max(1, Math.round(sw * scale));
+  flat.height = Math.max(1, Math.round(sh * scale));
   const fc = flat.getContext('2d');
   fc.fillStyle = '#ffffff';
   fc.fillRect(0, 0, flat.width, flat.height);
-  fc.drawImage(canvas, 0, 0);
+  fc.drawImage(canvas, sx, sy, sw, sh, 0, 0, flat.width, flat.height);
   const dataURL   = flat.toDataURL('image/png');
   const base64   = dataURL.split(',')[1];
 
@@ -3952,7 +4022,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
   try {
     // Vision-Call bewertet nur die Schülerlösung – die Musterlösung kommt aus dem
     // Prefetch (sofort) bzw. wird, falls keiner vorliegt, jetzt einmalig nachgeladen.
-    const feedbackP = claudeLocalVision(base64, checkPrompt, sysBlocks(), 1400);
+    const feedbackP = claudeLocalVision(base64, checkPrompt, checkSysBlocks(), 1400);
     let loesungP;
     if (rechnenLoesung && rechnenLoesung.aufgabe === taskText) {
       loesungP = rechnenLoesung.promise;
@@ -3966,6 +4036,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
     const full = loesung ? `${feedback}\n\n## Musterlösung\n${loesung}` : feedback;
     checkDone(); stopStatus();
     rechnenLastFeedback = full;
+    rechnenLastCheckSig = sig;   // (A) Stand merken, damit ein unveränderter Re-Check gratis ist
     document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(full));
     document.getElementById('rechnen-sheet-loading').classList.add('hidden');
     document.getElementById('rechnen-sheet-result').classList.remove('hidden');
@@ -5328,6 +5399,9 @@ let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual overrid
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
 let lernenLastEval    = null;         // letzte KI-Auswertung derselben Aufgabe (konsistente Re-Prüfung)
+let lernenLastCheckSig   = '';        // Signatur (Aufgabe+Text+Tinte) der zuletzt geprüften Antwort → Re-Check ohne Änderung spart den API-Call
+let lernenLastResultHtml = '';        // gerendertes Ergebnis-HTML, um es bei unverändertem Re-Check ohne API-Call wieder zu zeigen
+let lernenLastResultClass = '';
 
 // Bewertungsmaßstab/Strenge an das Niveau gekoppelt (Modul-Ebene, damit sowohl die
 // Prüfung als auch der Musterlösungs-Prefetch dasselbe Niveau verwenden).
@@ -5412,6 +5486,8 @@ function openUnit(unit) {
   lernenQaMsgs    = [];
   lernenAttempts  = 0;
   lernenLastEval  = null;
+  lernenLastCheckSig = '';
+  lernenLastResultHtml = '';
   lernenHasInk    = false;
   lernenCtx       = null;
   lernenStylusId  = null;
@@ -5725,6 +5801,8 @@ async function regenLernenTask() {
       if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
       lernenAttempts = 0;
       lernenLastEval = null;
+      lernenLastCheckSig = '';
+      lernenLastResultHtml = '';
       lernenLoesung = null;        // alte Musterlösung verwerfen
       prefetchLernenLoesung();     // für die neue Aufgabe vorbereiten
       toast('Neue Aufgabe generiert', 'success', 2000);
@@ -5974,6 +6052,28 @@ function numEqual(a, b, rel = 0.01) {
   return Math.abs(a - b) <= Math.max(1e-9, rel * Math.abs(b), 0.005);
 }
 
+// Liest die Lernen-Zeichenfläche EINMAL aus und liefert in einem Durchgang:
+// ob Tinte vorhanden ist, deren Bounding-Box (für den Zuschnitt) und einen
+// Inhalts-Hash (für "unverändert? → kein erneuter API-Call").
+function lernenInkInfo() {
+  const canvas = document.getElementById('lernen-canvas');
+  if (!canvas || !lernenCtx) return null;
+  const CW = canvas.width, CH = canvas.height;
+  const px = lernenCtx.getImageData(0, 0, CW, CH).data;
+  let ink = false, minX = CW, minY = CH, maxX = 0, maxY = 0, h = 5381;
+  for (let y = 0; y < CH; y++) {
+    for (let x = 0; x < CW; x++) {
+      if (px[(y * CW + x) * 4 + 3] > 10) {
+        ink = true;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        h = ((h << 5) + h + x * 31 + y) | 0;
+      }
+    }
+  }
+  return { canvas, CW, CH, ink, minX, minY, maxX, maxY, hash: String(h >>> 0) };
+}
+
 async function checkLernenSolution() {
   if (!lernenTopicData) return;
   const checkBtn  = document.getElementById('lernen-check-btn');
@@ -5984,6 +6084,18 @@ async function checkLernenSolution() {
   const hasInk     = lernenHasInk && !!lernenCtx;
   if (!answerText && !hasInk) {
     toast('Bitte zuerst eine Antwort zeichnen oder eingeben.', 'warn', 3000);
+    return;
+  }
+
+  // Tinte einmal auslesen (Bounding-Box + Inhalts-Hash) und für den Zuschnitt merken.
+  const inkInfo = hasInk ? lernenInkInfo() : null;
+  const sig = `${lernenTopicData.aufgabe}|${answerText}|${inkInfo ? inkInfo.hash : 'noink'}`;
+
+  // (A) Unveränderte Antwort erneut "geprüft" → kein API-Call, altes Ergebnis zeigen.
+  if (lernenLastEval && resultBar && lernenLastResultHtml && sig === lernenLastCheckSig) {
+    resultBar.className = lernenLastResultClass;
+    resultBar.innerHTML = lernenLastResultHtml;
+    toast('Keine Änderung – bisheriges Feedback wird angezeigt.', 'info');
     return;
   }
 
@@ -6084,12 +6196,21 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     // (answerText/hasInk wurden oben bereits ermittelt und validiert.)
     if (hasInk) {
       // Zeichnung vorhanden → Vision; getippten Text (falls vorhanden) zusätzlich mitschicken.
-      const canvas = document.getElementById('lernen-canvas');
+      const canvas = inkInfo.canvas;
+      // (C) Auf den beschriebenen Bereich + Rand zuschneiden, (B) auf max. Kantenlänge
+      // herunterskalieren – statt den ganzen, meist überwiegend weißen Canvas zu senden.
+      const MARGIN = 32, MAX_EDGE = 1024;
+      const sx = Math.max(0, inkInfo.minX - MARGIN);
+      const sy = Math.max(0, inkInfo.minY - MARGIN);
+      const sw = Math.min(inkInfo.CW, inkInfo.maxX + MARGIN) - sx;
+      const sh = Math.min(inkInfo.CH, inkInfo.maxY + MARGIN) - sy;
+      const scale = Math.min(1, MAX_EDGE / Math.max(sw, sh));
       const flat = document.createElement('canvas');
-      flat.width = canvas.width; flat.height = canvas.height;
+      flat.width  = Math.max(1, Math.round(sw * scale));
+      flat.height = Math.max(1, Math.round(sh * scale));
       const fc = flat.getContext('2d');
       fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
-      fc.drawImage(canvas, 0, 0);
+      fc.drawImage(canvas, sx, sy, sw, sh, 0, 0, flat.width, flat.height);
       const base64 = flat.toDataURL('image/png').split(',')[1];
       const textPart = answerText
         ? `\n\nZusätzlich getippte Antwort des Studenten: ${answerText}\nWerte Zeichnung UND getippten Text zusammen als eine einzige Antwort.`
@@ -6097,7 +6218,7 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
       const result = await claudeLocalVision(
         base64,
         `Aufgabe: ${lernenTopicData.aufgabe}${textPart}\n\n${EVAL_SYS}`,
-        sysBlocks()
+        checkSysBlocks()
       );
       ev = parseJsonResponse(result);
       if (!ev) throw new Error('Keine Auswertung');
@@ -6196,6 +6317,10 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
         }
       }
       resultBar.innerHTML = html;
+      // (A) Stand + gerendertes Ergebnis merken → unveränderter Re-Check ohne API-Call.
+      lernenLastCheckSig    = sig;
+      lernenLastResultHtml  = html;
+      lernenLastResultClass = resultBar.className;
     }
     if (understood) {
       document.getElementById('lernen-done-btn').classList.remove('hidden');

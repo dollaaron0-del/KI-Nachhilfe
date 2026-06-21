@@ -263,6 +263,20 @@ const TOKEN_COST = {
   'claude-sonnet-4-6':        { in: 0.00000276, out: 0.0000138  },
   'claude-haiku-4-5-20251001':{ in: 0.00000023, out: 0.00000115 },
 };
+
+// Anthropic rechnet gecachte Tokens SEPARAT ab und liefert sie NICHT in
+// usage.input_tokens, sondern in eigenen Feldern. Wer nur input_tokens zählt,
+// unterschätzt die echten Kosten massiv (der große, gecachte Unterlagen-Block
+// zählt sonst als 0 €). Cache-WRITE = 1,25× Input, Cache-READ = 0,1× Input.
+function usageCost(model, usage = {}) {
+  const mc = TOKEN_COST[model] || TOKEN_COST['claude-sonnet-4-6'];
+  const inTok   = usage.input_tokens || 0;
+  const outTok  = usage.output_tokens || 0;
+  const cacheW  = usage.cache_creation_input_tokens || 0;
+  const cacheR  = usage.cache_read_input_tokens || 0;
+  return inTok * mc.in + outTok * mc.out
+       + cacheW * mc.in * 1.25 + cacheR * mc.in * 0.1;
+}
 async function checkDailyLimit() {
   const today = new Date().toISOString().slice(0, 10);
   const { rows } = await pool.query('SELECT cost_eur, calls FROM daily_usage WHERE date=$1', [today]);
@@ -290,9 +304,13 @@ async function usageLimitError(userId) {
   return null;
 }
 
-async function recordUsage(today, model, inputTokens, outputTokens, userId = null, feature = null) {
-  const mc = TOKEN_COST[model] || TOKEN_COST['claude-sonnet-4-6'];
-  const cost = inputTokens * mc.in + outputTokens * mc.out;
+async function recordUsage(today, model, usage = {}, userId = null, feature = null) {
+  const cost = usageCost(model, usage);
+  // tokens_in inkl. Cache-Tokens, damit die Statistik dem echten Verbrauch entspricht.
+  const inputTokens = (usage.input_tokens || 0)
+                    + (usage.cache_creation_input_tokens || 0)
+                    + (usage.cache_read_input_tokens || 0);
+  const outputTokens = usage.output_tokens || 0;
   const { rows } = await pool.query(`
     INSERT INTO daily_usage (date, cost_eur, calls, tokens_in, tokens_out)
     VALUES ($1, $2, 1, $3, $4)
@@ -819,11 +837,8 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
     const feature = req.body.feature || null;
 
     // Record usage then check 90% threshold (non-blocking)
-    recordUsage(today, params.model,
-      response.usage?.input_tokens || 0,
-      response.usage?.output_tokens || 0,
-      req.user.id, feature,
-    ).then(newCost => checkAndNotify90pct(today, newCost))
+    recordUsage(today, params.model, response.usage || {}, req.user.id, feature)
+     .then(newCost => checkAndNotify90pct(today, newCost))
      .catch(e => console.error('Usage tracking error:', e.message));
 
     res.json(response);
@@ -911,7 +926,7 @@ app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
       if (limitMsg) return res.status(429).json({ error: limitMsg });
       const { text: haikuText, usage } = await callHaiku();
       const todayH = new Date().toISOString().slice(0, 10);
-      recordUsage(todayH, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
+      recordUsage(todayH, 'claude-haiku-4-5-20251001', usage, req.user.id, feature).catch(() => {});
       return res.json({ content: [{ text: haikuText }] });
     }
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
@@ -938,7 +953,7 @@ app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
         console.warn('Ollama returned invalid/no JSON in json_mode – falling back to Haiku');
         const { text: haikuText, usage } = await callHaiku();
         const today2 = new Date().toISOString().slice(0, 10);
-        recordUsage(today2, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
+        recordUsage(today2, 'claude-haiku-4-5-20251001', usage, req.user.id, feature).catch(() => {});
         return res.json({ content: [{ text: haikuText }] });
       }
     }
@@ -948,7 +963,7 @@ app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
     try {
       const { text: haikuText, usage } = await callHaiku();
       const today3 = new Date().toISOString().slice(0, 10);
-      recordUsage(today3, 'claude-haiku-4-5-20251001', usage.input_tokens || 0, usage.output_tokens || 0, req.user.id, feature).catch(() => {});
+      recordUsage(today3, 'claude-haiku-4-5-20251001', usage, req.user.id, feature).catch(() => {});
       res.json({ content: [{ text: haikuText }] });
     } catch (e2) {
       console.error('Haiku fallback also failed:', e2.message);
@@ -983,7 +998,7 @@ app.post('/api/local/stream', claudeLimit, authMiddleware, async (req, res) => {
       }
       const finalMsg = await stream.finalMessage();
       const u = finalMsg.usage || {};
-      recordUsage(new Date().toISOString().slice(0, 10), 'claude-haiku-4-5-20251001', u.input_tokens || 0, u.output_tokens || 0, req.user.id, null).catch(() => {});
+      recordUsage(new Date().toISOString().slice(0, 10), 'claude-haiku-4-5-20251001', u, req.user.id, null).catch(() => {});
       res.write('data: [DONE]\n\n');
       return res.end();
     }
