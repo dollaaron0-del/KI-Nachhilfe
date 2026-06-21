@@ -725,7 +725,7 @@ Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2
 Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
 
 Antworte immer auf Deutsch.${prefCalculator ? `\n\nTASCHENRECHNER: Der Student nutzt einen ${prefCalculator}. Gib bei Rechenaufgaben gezielte Tipps wie man die Berechnung auf diesem Modell effizient eingibt — Tasten, Menüpfade, Modi, nützliche eingebaute Funktionen. Erwähne konkrete Schritte (z.B. "Drücke MENU → 4 → 2" beim Casio).` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}`,
-      cache_control: { type: 'ephemeral' },
+      cache_control: { type: 'ephemeral', ttl: '1h' },
     },
   ];
   // Aufruf-spezifische Instruktionen (z.B. Quiz-Prompt mit der Liste bereits
@@ -3694,6 +3694,41 @@ document.getElementById('canvas-redo-btn')?.addEventListener('click',  redoCanva
 document.getElementById('canvas-clear-btn')?.addEventListener('click', clearCanvas);
 document.getElementById('canvas-check-btn')?.addEventListener('click', checkHandwriting);
 
+// ── Hebel 4: faules Prefetching ────────────────────────────────────────────
+// Teure Vorab-Generierung (Musterlösung / nächste Aufgabe) erst starten, wenn der
+// Student wirklich anfängt zu arbeiten – nicht schon beim Laden der Aufgabe. Spart
+// die Generierung für Aufgaben, die nie bearbeitet werden.
+let rechnenPrefetchPending = null;   // Aufgabe, deren Prefetch noch auf Aktivität wartet
+let lernenPrefetchPending  = false;
+function armRechnenPrefetch(aufgabe) { rechnenPrefetchPending = aufgabe || null; }
+function fireRechnenPrefetch() {
+  const a = rechnenPrefetchPending;
+  if (!a) return;
+  rechnenPrefetchPending = null;
+  prefetchRechnenLoesung(a);
+  prefetchRechnenAufgabe(a);
+}
+function armLernenPrefetch()  { lernenPrefetchPending = true; }
+function fireLernenPrefetch() {
+  if (!lernenPrefetchPending) return;
+  lernenPrefetchPending = false;
+  prefetchLernenLoesung();
+}
+// Aktivität = erster Strich auf der Zeichenfläche ODER erste Tastatureingabe.
+// Delegiert + passiv, damit die (frisch stabilisierte) Zeichenlogik unberührt bleibt.
+['pointerdown', 'touchstart'].forEach(ev =>
+  document.addEventListener(ev, e => {
+    const id = e.target && e.target.id;
+    if (id === 'math-canvas') fireRechnenPrefetch();
+    else if (id === 'lernen-canvas') fireLernenPrefetch();
+  }, { passive: true, capture: true })
+);
+document.addEventListener('input', e => {
+  const id = e.target && e.target.id;
+  if (id === 'rechnen-task-input') fireRechnenPrefetch();
+  else if (id === 'lernen-text-answer') fireLernenPrefetch();
+}, true);
+
 // Feedback sheet buttons
 document.getElementById('rechnen-sheet-close-btn')?.addEventListener('click', () => {
   document.getElementById('rechnen-feedback-overlay').classList.add('hidden');
@@ -3842,8 +3877,8 @@ async function generateMathAufgabe() {
     savedCanvasData = null;
     clearCanvas();   // setzt strokes/redoStrokes/baseImage zurück
     rechnenLoesung = null;
-    prefetchRechnenLoesung(currentAufgabe);   // Musterlösung im Hintergrund vorbereiten
-    prefetchRechnenAufgabe(currentAufgabe);   // nächste Aufgabe im Hintergrund vorbereiten
+    // Hebel 4: erst vorladen, wenn der Student tatsächlich anfängt (erster Strich/Tippen).
+    armRechnenPrefetch(currentAufgabe);   // Musterlösung + nächste Aufgabe bei Aktivität
   } catch (e) {
     toast('Fehler: ' + e.message, 'error');
   } finally {
@@ -5688,7 +5723,7 @@ async function loadTopicContent(topic, forceFresh = false) {
   if (cached) {
     lernenTopicData = cached;
     renderTopicContent(topic, cached);
-    prefetchLernenLoesung(); // Musterlösung im Hintergrund vorbereiten
+    armLernenPrefetch(); // Hebel 4: Musterlösung erst bei Aktivität vorbereiten
     return;
   }
   const stopProg = startProgress('lernen-prog-bar', 'lernen-prog-pct', 18000);
@@ -5713,7 +5748,7 @@ async function loadTopicContent(topic, forceFresh = false) {
       [{
         type: 'text',
         text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
-        cache_control: { type: 'ephemeral' },
+        cache_control: { type: 'ephemeral', ttl: '1h' },
       }, {
         type: 'text',
         text: `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der obigen Unterlagen. Suche die passenden Stellen im gesamten Material.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
@@ -5730,7 +5765,7 @@ async function loadTopicContent(topic, forceFresh = false) {
     localforage.setItem(lernenCacheKey(), data).catch(() => {});
     stopProg();
     renderTopicContent(topic, data);
-    prefetchLernenLoesung(); // Musterlösung im Hintergrund vorbereiten
+    armLernenPrefetch(); // Hebel 4: Musterlösung erst bei Aktivität vorbereiten
   } catch (e) {
     // Stale guard: don't show error for a topic the user already navigated away from
     if (currentExplainerTopic !== topic) { stopProg(); return; }
@@ -5774,7 +5809,7 @@ async function regenLernenTask() {
       [{
         type: 'text',
         text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
-        cache_control: { type: 'ephemeral' },
+        cache_control: { type: 'ephemeral', ttl: '1h' },
       }, {
         type: 'text',
         text: `Generiere eine NEUE, andere Übungsaufgabe ${gegenstand} – ausschließlich auf Basis der obigen Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
@@ -5804,7 +5839,7 @@ async function regenLernenTask() {
       lernenLastCheckSig = '';
       lernenLastResultHtml = '';
       lernenLoesung = null;        // alte Musterlösung verwerfen
-      prefetchLernenLoesung();     // für die neue Aufgabe vorbereiten
+      armLernenPrefetch();         // Hebel 4: erst bei Aktivität vorbereiten
       toast('Neue Aufgabe generiert', 'success', 2000);
     } else {
       toast('Keine neue Aufgabe erhalten', 'warn');

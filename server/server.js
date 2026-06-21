@@ -241,11 +241,43 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // ── Anthropic ──────────────────────────────────────────────────────────────
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Header für die 1-Stunden-Cache-TTL (cache_control ttl:'1h'). Schadet nicht,
+// falls die TTL bereits ohne Beta-Flag unterstützt wird.
+const CACHE_TTL_HEADERS = { 'anthropic-beta': 'extended-cache-ttl-2025-04-11' };
+// Wird einmalig gesetzt, sobald die API die 1h-TTL ablehnt → danach senden alle
+// Pfade nur noch den regulären 5-Min-Cache (kein wiederholtes Anlaufen ins 400).
+let extendedTtlDisabled = false;
+
+// Entfernt ttl:'1h' aus allen cache_control-Markierungen → Fallback auf den
+// regulären 5-Min-Cache, falls die erweiterte TTL nicht verfügbar ist.
+function stripCacheTtl(params) {
+  const fix = b => {
+    if (b && b.cache_control && b.cache_control.ttl) {
+      b.cache_control = { type: b.cache_control.type || 'ephemeral' };
+    }
+  };
+  if (Array.isArray(params.system)) params.system.forEach(fix);
+  if (Array.isArray(params.messages)) {
+    for (const m of params.messages) if (Array.isArray(m.content)) m.content.forEach(fix);
+  }
+}
+const isTtlError = e => e && e.status === 400 && /ttl|cache|beta/i.test(e.message || '');
+const ttlOpts = () => (extendedTtlDisabled ? {} : { headers: CACHE_TTL_HEADERS });
+
 async function callClaude(params, maxRetries = 5) {
+  if (extendedTtlDisabled) stripCacheTtl(params);
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await anthropic.messages.create(params);
+      return await anthropic.messages.create(params, ttlOpts());
     } catch (e) {
+      // 1h-Cache nicht freigeschaltet? Einmalig TTL strippen und ohne Header neu
+      // versuchen, statt die ganze Anfrage scheitern zu lassen.
+      if (!extendedTtlDisabled && isTtlError(e)) {
+        console.warn('1h-Cache nicht verfügbar – Fallback auf 5-Min-Cache:', e.message);
+        extendedTtlDisabled = true;
+        stripCacheTtl(params);
+        continue;
+      }
       const retryable = e.status === 529 ||
         (e.message && (e.message.includes('overloaded') || e.message.includes('529')));
       if (retryable && attempt < maxRetries) {
@@ -272,10 +304,17 @@ function usageCost(model, usage = {}) {
   const mc = TOKEN_COST[model] || TOKEN_COST['claude-sonnet-4-6'];
   const inTok   = usage.input_tokens || 0;
   const outTok  = usage.output_tokens || 0;
-  const cacheW  = usage.cache_creation_input_tokens || 0;
   const cacheR  = usage.cache_read_input_tokens || 0;
+  // Cache-Writes nach TTL getrennt abrechnen: 5-Min = 1,25×, 1-Std = 2× Input.
+  // Anthropic liefert die Aufschlüsselung in usage.cache_creation; fehlt sie,
+  // gilt der Summenwert als 5-Min-Write (alte API ohne 1h-TTL).
+  const cc = usage.cache_creation || {};
+  const cacheW5  = (cc.ephemeral_5m_input_tokens != null)
+    ? cc.ephemeral_5m_input_tokens
+    : (usage.cache_creation_input_tokens || 0);
+  const cacheW1h = cc.ephemeral_1h_input_tokens || 0;
   return inTok * mc.in + outTok * mc.out
-       + cacheW * mc.in * 1.25 + cacheR * mc.in * 0.1;
+       + cacheW5 * mc.in * 1.25 + cacheW1h * mc.in * 2 + cacheR * mc.in * 0.1;
 }
 async function checkDailyLimit() {
   const today = new Date().toISOString().slice(0, 10);
@@ -990,13 +1029,30 @@ app.post('/api/local/stream', claudeLimit, authMiddleware, async (req, res) => {
     if (!USE_OLLAMA) {
       const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 3000, messages };
       if (system) params.system = system;
-      const stream = anthropic.messages.stream(params);
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
-          res.write(`data: ${JSON.stringify({ token: event.delta.text })}\n\n`);
+      if (extendedTtlDisabled) stripCacheTtl(params);
+      // Ein 1h-TTL-400 tritt vor dem ersten Token auf → solange noch nichts
+      // geschrieben wurde, TTL strippen und den Stream einmal neu aufsetzen.
+      let wroteAny = false;
+      const streamOnce = async () => {
+        const stream = anthropic.messages.stream(params, ttlOpts());
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+            wroteAny = true;
+            res.write(`data: ${JSON.stringify({ token: event.delta.text })}\n\n`);
+          }
         }
+        return stream.finalMessage();
+      };
+      let finalMsg;
+      try {
+        finalMsg = await streamOnce();
+      } catch (e) {
+        if (!extendedTtlDisabled && isTtlError(e) && !wroteAny) {
+          console.warn('1h-Cache nicht verfügbar (stream) – Fallback auf 5-Min-Cache:', e.message);
+          extendedTtlDisabled = true; stripCacheTtl(params);
+          finalMsg = await streamOnce();
+        } else throw e;
       }
-      const finalMsg = await stream.finalMessage();
       const u = finalMsg.usage || {};
       recordUsage(new Date().toISOString().slice(0, 10), 'claude-haiku-4-5-20251001', u, req.user.id, null).catch(() => {});
       res.write('data: [DONE]\n\n');
