@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '184';
+const APP_VERSION = '185';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3545,30 +3545,51 @@ function setupCanvasEvents() {
     }
     // Kein Stift im Spiel → erster Finger scrollt die Fläche (JS-Scroll, da touch-action:none).
     e.preventDefault();
+    endStylusStroke();                    // evtl. offenen Strich schließen (Stift-touchend verschluckt)
     const f = e.changedTouches[0];
     fingerScrollId  = f.identifier;
     fingerStartY    = f.clientY;
     wrapScrollStart = wrap.scrollTop;
   }, { passive: false });
 
+  // Schließt einen offenen Strich, ohne auf eine bestimmte touch.identifier zu vertrauen.
+  const endStylusStroke = () => {
+    if (canvasStylusId === null) return;
+    const r = canvas.getBoundingClientRect();
+    finishStroke(canvasLastX + r.left, canvasLastY + r.top);   // Koordinaten nur fürs Linien-Werkzeug relevant
+    canvasStylusId = null;
+  };
+
   canvas.addEventListener('touchmove', e => {
-    if (canvasStylusId !== null) {
+    // WICHTIG: Die Stift-Position wird IMMER frisch über touchType==='stylus' aus e.touches
+    // bestimmt – nie über eine gespeicherte identifier. iPadOS recycelt touch.identifier:
+    // kam das touchend des Stifts nicht an, trug ein später aufgesetzter Finger/Handballen
+    // dieselbe Id und wurde sonst als Stift weitergemalt → Strich quer von Stift zu Handballen.
+    const st = stylusOf(e.touches);
+    if (st) {
       e.preventDefault();   // während des Schreibens ALLE Touches (auch Handfläche) blocken –
                             // sonst erzeugt Safari aus dem ungebremsten Handflächen-Touch
                             // synthetische Maus-/Klick-Events (Phantom-Striche, Tab-Wechsel).
-      for (const t of e.changedTouches) {
-        if (t.identifier === canvasStylusId) { moveStroke(t.clientX, t.clientY, t.force); break; }
-      }
+      if (canvasStylusId !== null) moveStroke(st.clientX, st.clientY, st.force);
       return;
     }
+    // Kein Stift mehr auf dem Glas: ein noch offener Strich (verschlucktes touchend) wird hier
+    // beendet, bevor ein Finger/Handballen ihn fortsetzen könnte.
+    endStylusStroke();
     for (const t of e.changedTouches) {
       if (t.identifier === fingerScrollId) { e.preventDefault(); wrap.scrollTop = wrapScrollStart + (fingerStartY - t.clientY); break; }
     }
   }, { passive: false });
 
   const onTouchEnd = e => {
+    // Strich beenden, sobald KEIN Stift mehr aufliegt – unabhängig davon, welche identifier
+    // das end-Event trägt (schützt gegen verschlucktes / auf falscher Id geliefertes touchend).
+    if (canvasStylusId !== null && !stylusOf(e.touches)) {
+      const lift = stylusOf(e.changedTouches);
+      if (lift) { finishStroke(lift.clientX, lift.clientY); canvasStylusId = null; }
+      else endStylusStroke();
+    }
     for (const t of e.changedTouches) {
-      if (t.identifier === canvasStylusId) { finishStroke(t.clientX, t.clientY); canvasStylusId = null; }
       if (t.identifier === fingerScrollId) fingerScrollId = null;
     }
   };
@@ -5853,6 +5874,7 @@ function onLernenTouchStart(e) {
   }
   // Kein Stift → erster Finger scrollt den Notizblock (JS-Scroll, da touch-action:none).
   e.preventDefault();
+  if (lernenStylusId !== null) { lernenFinish(); lernenStylusId = null; }  // offenen Strich schließen (Stift-touchend verschluckt)
   const f = e.changedTouches[0];
   lernenFingerId = f.identifier;
   lernenFingerY0 = f.clientY;
@@ -5860,13 +5882,16 @@ function onLernenTouchStart(e) {
 }
 
 function onLernenTouchMove(e) {
-  if (lernenStylusId !== null) {
+  // Stift-Position IMMER frisch über touchType==='stylus' bestimmen, nie über gespeicherte
+  // identifier – iPadOS recycelt sie, sonst zeichnet ein Finger/Handballen mit der alten Id
+  // weiter (Strich quer von Stift zu Handballen). Siehe Rechnen-Canvas.
+  const st = lernenStylusOf(e.touches);
+  if (st) {
     e.preventDefault();                 // während des Schreibens ALLE Touches (auch Handfläche) blocken
-    for (const t of e.changedTouches) {
-      if (t.identifier === lernenStylusId) { lernenMove(e.currentTarget, t.clientX, t.clientY); break; }
-    }
+    if (lernenStylusId !== null) lernenMove(e.currentTarget, st.clientX, st.clientY);
     return;
   }
+  if (lernenStylusId !== null) { lernenFinish(); lernenStylusId = null; }  // Stift abgehoben → Strich schließen
   for (const t of e.changedTouches) {
     if (t.identifier === lernenFingerId) {
       e.preventDefault();
@@ -5877,8 +5902,9 @@ function onLernenTouchMove(e) {
 }
 
 function onLernenTouchEnd(e) {
+  // Strich beenden, sobald kein Stift mehr aufliegt – unabhängig von der end-identifier.
+  if (lernenStylusId !== null && !lernenStylusOf(e.touches)) { lernenFinish(); lernenStylusId = null; }
   for (const t of e.changedTouches) {
-    if (t.identifier === lernenStylusId) { lernenFinish(); lernenStylusId = null; }
     if (t.identifier === lernenFingerId) lernenFingerId = null;
   }
 }
