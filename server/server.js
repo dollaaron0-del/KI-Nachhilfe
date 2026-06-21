@@ -656,6 +656,129 @@ app.delete('/api/subjects/:id/messages', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // DOCUMENTS
 // ═══════════════════════════════════════════════════════════════════════════
+// ── Wissensbasis (Phase 1) ──────────────────────────────────────────────────
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+
+// Lokales Embedding via Ollama (nomic, CPU-schnell). null bei Fehler.
+async function embedText(text) {
+  try {
+    const r = await fetch('http://localhost:11434/api/embeddings', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: (text || '').slice(0, 8000) }),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    return Array.isArray(d.embedding) && d.embedding.length ? d.embedding : null;
+  } catch { return null; }
+}
+
+// Toleranter JSON-Extraktor (erstes '{' bis letztes '}').
+function safeJsonExtract(text) {
+  if (!text) return null;
+  const s = text.indexOf('{'), e = text.lastIndexOf('}');
+  if (s < 0 || e <= s) return null;
+  try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
+}
+
+const KB_EXTRACT_SYS = `Du strukturierst die Lernunterlagen eines Studenten in eine kompakte, durchsuchbare Wissensbasis.
+Gib AUSSCHLIESSLICH ein JSON-Objekt zurück – kein Text davor oder danach:
+{
+  "topics": ["die Oberthemen, die in diesem Auszug vorkommen"],
+  "chunks": [
+    {
+      "kind": "definition | formel | konzept | beispiel | pruefungsfrage",
+      "topic": "Oberthema, zu dem dieser Häppchen gehört",
+      "heading": "kurzer Titel (3–8 Wörter)",
+      "content": "eigenständig verständliche, kompakte Erklärung/Formel/Beispiel – ausschließlich aus dem Auszug, nichts erfinden",
+      "source_ref": "Fundstelle falls erkennbar (z.B. Kapitel/Seite), sonst weglassen"
+    }
+  ]
+}
+REGELN: Nur Inhalte aus dem Auszug, KEIN Allgemeinwissen, nichts hinzudichten. Formeln in LaTeX.
+Zerlege nach inhaltlichen Einheiten (nicht nach Seiten). Jeder chunk muss FÜR SICH verständlich sein (max ~250 Wörter). Antworte auf Deutsch.`;
+
+// Ein Dokument per Sonnet in chunks zerlegen (große Dokumente in Fenstern).
+async function structureDocument(content, filename) {
+  const WINDOW = 24000, MAX_WINDOWS = 8;   // Kostendeckel für sehr große Dokumente
+  const windows = [];
+  for (let i = 0; i < content.length && windows.length < MAX_WINDOWS; i += WINDOW) {
+    windows.push(content.slice(i, i + WINDOW));
+  }
+  const chunks = [];
+  for (const w of windows) {
+    const r = await callClaude({
+      model: 'claude-sonnet-4-6', max_tokens: 4096,
+      system: KB_EXTRACT_SYS,
+      messages: [{ role: 'user', content: `Dateiname: ${filename}\n\nAUSZUG:\n${w}` }],
+    });
+    // Kosten global + unter Feature 'kb_index' erfassen (userId=null → zählt nicht
+    // gegen das interaktive 1€-Tageslimit des Nutzers, ist aber im Gesamtbudget sichtbar).
+    recordUsage(new Date().toISOString().slice(0, 10), 'claude-sonnet-4-6', r.usage || {}, null, 'kb_index').catch(() => {});
+    const j = safeJsonExtract(r.content?.[0]?.text);
+    if (j && Array.isArray(j.chunks)) chunks.push(...j.chunks);
+  }
+  return chunks;
+}
+
+async function setKbStatus(subjectId, status) {
+  await pool.query(
+    `INSERT INTO subject_kb (subject_id, status) VALUES ($1,$2)
+     ON CONFLICT (subject_id) DO UPDATE SET status=$2, updated_at=now()`,
+    [subjectId, status]
+  ).catch(() => {});
+}
+
+// Themen-Landkarte je Fach aus den chunks neu aufbauen.
+async function rebuildSubjectKb(subjectId) {
+  const { rows } = await pool.query(
+    'SELECT topic, heading FROM doc_chunks WHERE subject_id=$1 ORDER BY topic, id', [subjectId]
+  );
+  const byTopic = {};
+  for (const r of rows) (byTopic[r.topic || 'Sonstiges'] ||= []).push(r.heading);
+  const overview = Object.entries(byTopic)
+    .map(([t, hs]) => `• ${t}: ${[...new Set(hs.filter(Boolean))].slice(0, 8).join('; ')}`)
+    .join('\n');
+  await pool.query(
+    `INSERT INTO subject_kb (subject_id, overview, status, updated_at)
+     VALUES ($1,$2,'ready',now())
+     ON CONFLICT (subject_id) DO UPDATE SET overview=$2, status='ready',
+       kb_version=subject_kb.kb_version+1, updated_at=now()`,
+    [subjectId, overview]
+  );
+}
+
+// Ein Dokument indexieren: strukturieren → embedden → speichern. Re-Index-sicher.
+async function indexDocument(subjectId, documentId) {
+  try {
+    // Budget-Schutz: bei erschöpftem Tagesbudget nicht teuer indexieren – später per Reindex.
+    const { cost } = await checkDailyLimit();
+    if (cost >= await getDailyLimit()) { await setKbStatus(subjectId, 'pending'); return; }
+
+    await setKbStatus(subjectId, 'indexing');
+    const { rows } = await pool.query(
+      'SELECT filename, content FROM documents WHERE id=$1 AND subject_id=$2', [documentId, subjectId]
+    );
+    if (!rows.length || !rows[0].content || rows[0].content.length < 20) { await rebuildSubjectKb(subjectId); return; }
+
+    const chunks = await structureDocument(rows[0].content, rows[0].filename);
+    await pool.query('DELETE FROM doc_chunks WHERE document_id=$1', [documentId]);  // alte Version weg
+    for (const c of chunks) {
+      const emb = await embedText(`${c.topic || ''} ${c.heading || ''} ${c.content || ''}`);
+      await pool.query(
+        `INSERT INTO doc_chunks (subject_id, document_id, kind, topic, heading, content, source_ref, tokens, embedding)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [subjectId, documentId, c.kind || null, c.topic || null, c.heading || null,
+         c.content || '', c.source_ref || rows[0].filename,
+         Math.round((c.content || '').length / 4), emb ? JSON.stringify(emb) : null]
+      );
+    }
+    await rebuildSubjectKb(subjectId);
+  } catch (e) {
+    console.error('indexDocument failed:', e.message);
+    await setKbStatus(subjectId, 'error');
+  }
+}
+
 app.get('/api/subjects/:id/documents', async (req, res) => {
   try {
     let rows;
@@ -740,6 +863,8 @@ app.post('/api/subjects/:id/documents/text', async (req, res) => {
     if (!skipCards) {
       autoGenerateCards(req.params.id, filename, content).catch(e => console.error('Auto-cards:', e.message));
     }
+    // Wissensbasis (Phase 1) im Hintergrund aufbauen – blockiert den Upload nicht.
+    indexDocument(req.params.id, rows[0].id).catch(e => console.error('KB index error:', e.message));
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -775,6 +900,8 @@ app.post('/api/subjects/:id/documents', upload.single('file'), async (req, res) 
       'INSERT INTO documents (subject_id,filename,content) VALUES ($1,$2,$3) RETURNING id,filename,uploaded_at',
       [req.params.id, req.file.originalname, content]
     );
+    // Wissensbasis (Phase 1) im Hintergrund aufbauen – blockiert den Upload nicht.
+    indexDocument(req.params.id, rows[0].id).catch(e => console.error('KB index error:', e.message));
     res.json(rows[0]);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -784,7 +911,42 @@ app.post('/api/subjects/:id/documents', upload.single('file'), async (req, res) 
 app.delete('/api/subjects/:id/documents/:docId', async (req, res) => {
   try {
     await pool.query('DELETE FROM documents WHERE id=$1 AND subject_id=$2', [req.params.docId, req.params.id]);
+    // Wissensbasis konsistent halten: chunks des Dokuments entfernen, Landkarte neu bauen.
+    await pool.query('DELETE FROM doc_chunks WHERE document_id=$1', [req.params.docId]).catch(() => {});
+    rebuildSubjectKb(req.params.id).catch(() => {});
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Status der Wissensbasis + Stichprobe der chunks (zum Prüfen der Qualität).
+app.get('/api/subjects/:id/kb', async (req, res) => {
+  try {
+    const sid = req.params.id;
+    const kb = (await pool.query(
+      'SELECT status, overview, kb_version, updated_at FROM subject_kb WHERE subject_id=$1', [sid]
+    )).rows[0] || { status: 'none' };
+    const c = (await pool.query(
+      'SELECT count(*)::int AS n, count(embedding)::int AS e FROM doc_chunks WHERE subject_id=$1', [sid]
+    )).rows[0];
+    const sample = (await pool.query(
+      'SELECT kind, topic, heading, LEFT(content,240) AS content FROM doc_chunks WHERE subject_id=$1 ORDER BY id LIMIT 25', [sid]
+    )).rows;
+    res.json({ ...kb, chunks: c.n, embedded: c.e, sample });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Wissensbasis für ein Fach (neu) aufbauen – auch für vor dem Feature hochgeladene Dokumente.
+app.post('/api/subjects/:id/kb/reindex', async (req, res) => {
+  try {
+    const sid = req.params.id;
+    const docs = (await pool.query('SELECT id FROM documents WHERE subject_id=$1', [sid])).rows;
+    res.json({ started: true, documents: docs.length });   // sofort antworten
+    (async () => {
+      await pool.query('DELETE FROM doc_chunks WHERE subject_id=$1', [sid]).catch(() => {});
+      await setKbStatus(sid, 'indexing');
+      for (const d of docs) await indexDocument(sid, d.id);
+      await rebuildSubjectKb(sid);
+    })().catch(e => console.error('KB reindex failed:', e.message));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1808,6 +1970,30 @@ async function initTables() {
       date     DATE NOT NULL,
       calls    INTEGER DEFAULT 0,
       PRIMARY KEY(feature, date)
+    );
+    -- Wissensbasis (Phase 1): strukturierte, durchsuchbare Häppchen je Dokument
+    -- + eine kompakte Themen-Landkarte je Fach. subject_id ist TEXT (wie überall).
+    CREATE TABLE IF NOT EXISTS doc_chunks (
+      id          SERIAL PRIMARY KEY,
+      subject_id  TEXT NOT NULL,
+      document_id INTEGER NOT NULL,
+      kind        TEXT,
+      topic       TEXT,
+      heading     TEXT,
+      content     TEXT,
+      source_ref  TEXT,
+      tokens      INTEGER,
+      embedding   JSONB,
+      kb_version  INTEGER DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_doc_chunks_subject  ON doc_chunks(subject_id);
+    CREATE INDEX IF NOT EXISTS idx_doc_chunks_document ON doc_chunks(document_id);
+    CREATE TABLE IF NOT EXISTS subject_kb (
+      subject_id  TEXT PRIMARY KEY,
+      overview    TEXT,
+      status      TEXT DEFAULT 'pending',
+      kb_version  INTEGER DEFAULT 1,
+      updated_at  TIMESTAMPTZ DEFAULT now()
     );
   `);
 }
