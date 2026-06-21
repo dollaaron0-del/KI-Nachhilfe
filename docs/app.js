@@ -6216,7 +6216,7 @@ async function checkLernenSolution() {
     // mitgeben und das loesung-Feld leer lassen – wir setzen sie unten selbst ein.
     const loesungField = preLoesung
       ? `"loesung": "" (LEER LASSEN – die Musterlösung ist bereits bekannt und wird separat angezeigt)`
-      : `"loesung": "Vollständige Musterlösung. Bei Teilaufgaben (a/b/c oder 1/2/3) bekommt JEDE Teilaufgabe einen eigenen Absatz, getrennt durch \\n\\n. Beginne jeden Absatz mit der Teilaufgaben-Bezeichnung fett: **a)** ..."`;
+      : `"loesung": "Musterlösung. Bei Teilaufgaben (a/b/c oder 1/2/3) je Absatz, getrennt durch \\n\\n, fett beginnend (**a)** ...). KORREKTE Teilaufgaben NUR kurz bestätigen (z.B. '**a)** ✓ korrekt'); die ausgearbeitete Lösung nur für die NICHT korrekten Teilaufgaben."`;
     const knownLoesungNote = preLoesung
       ? `\n\nDIE KORREKTE MUSTERLÖSUNG IST BEREITS BEKANNT (nutze sie als verbindlichen Maßstab für die Bewertung; schreibe sie NICHT erneut, lass das Feld "loesung" leer):\n"""\n${preLoesung}\n"""`
       : '';
@@ -6250,12 +6250,13 @@ ${strictNote}
   "understood": false,
   "feedback": "Ein-Satz-Urteil über die Antwort",
   ${loesungField},
-  "einschaetzung": "Fließtext NUR wenn etwas fehlt/falsch ist: Was sollte konkret besser sein. Bei Teilaufgaben je Absatz. Bei score=2 (alles korrekt) LEER LASSEN (\"\") – dann genügen Urteil + Musterlösung."${numFields}
+  "einschaetzung": "Fließtext NUR zu den NICHT korrekten Teilen: bei welcher Teilaufgabe was falsch/unvollständig ist und was konkret besser sein sollte. KORREKTE Teilaufgaben NICHT erklären oder wiederholen. Je betroffener Teilaufgabe ein eigener Absatz (z.B. **b)** …). Bei score=2 (alles korrekt) LEER LASSEN (\"\")."${numFields}
 }
 score: 2=vollständig korrekt (ALLE Teilergebnisse UND das Endergebnis stimmen exakt), 1=Ansatz/Teile richtig aber mindestens ein Ergebnis falsch oder unvollständig, 0=falsch oder zu wenig.
 KRITISCHE REGEL: Wenn bei einer Rechenaufgabe IRGENDEIN Zwischenergebnis oder Endergebnis numerisch falsch ist → score MAXIMAL 1, NIEMALS 2. Kein Ausnahme.
 understood: true NUR wenn score=2 UND alle Ergebnisse korrekt.
 KEIN AUSFÜHRLICHES FEEDBACK BEI KORREKT: Ist score=2, lass "einschaetzung" leer ("") – eine korrekte Lösung braucht keine Fehleranalyse. Das spart Antwortlänge; Urteil + Musterlösung reichen.
+NUR FALSCHE TEILE: Bei Teilaufgaben behandelt "einschaetzung" AUSSCHLIESSLICH die nicht korrekten Teilaufgaben. Sind z.B. a) und c) richtig und nur b) falsch, geht es allein um b) – a) und c) werden nicht weiter erklärt.
 Bei Rechenaufgaben: Berechne JEDEN Rechenschritt selbst nach und vergleiche exakt. Auch ein falscher Zwischenschritt der zufällig ein richtiges Endergebnis liefert → score=1.${numInstr}${transkriptionInstr}
 
 ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}${knownLoesungNote}`;
