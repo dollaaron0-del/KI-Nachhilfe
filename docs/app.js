@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '180';
+const APP_VERSION = '181';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3505,6 +3505,27 @@ function setupCanvasEvents() {
         wrap.scrollTop = wrapScrollStart + (fingerStartY - e.clientY);
       }
       return;
+    }
+    // Selbstheilung gegen iPadOS-Palm-Rejection (analog zum Lernen-Notizblock): Liegt die
+    // Handfläche auf, schickt Safari mitten im Strich – oder direkt nach dem Aufsetzen – ein
+    // pointercancel für den STIFT → isDrawingCanvas wird false und die folgenden pointermove-
+    // Events liefen ins Leere, bis man neu aufsetzte ("Aufsetzen wird nicht erkannt"). Kommt
+    // aber ein Stift-/Maus-Move, während der Stift nachweislich aufliegt (pressure>0 bzw.
+    // Maustaste gedrückt), nehmen wir den Strich an dieser Stelle wieder auf – ohne Hochheben.
+    // Nicht beim Line-Tool: dessen Startpunkt ist fix, ein Wiederaufsetzen würde ihn verschieben.
+    const pressing = e.pressure > 0 || (e.buttons & 1) === 1;
+    if (mathCtx && pressing && activeTool !== 'line' &&
+        (!isDrawingCanvas || e.pointerId !== canvasPenId)) {
+      if (currentStroke) { strokes.push(currentStroke); currentStroke = null; } // verwaisten Strich sichern
+      canvasPenId = e.pointerId;
+      penActive = (e.pointerType === 'pen');
+      isDrawingCanvas = true;
+      const pr = canvasPos(e, canvas);
+      canvasLastX = pr.x; canvasLastY = pr.y;
+      canvasLastMidX = pr.x; canvasLastMidY = pr.y;   // Glättung an der Wiederaufnahmestelle
+      canvasPtBuf = [];
+      currentStroke = { tool: activeTool, color: penColor, size: penSize,
+                        pts: [{ x: pr.x, y: pr.y, p: (e.pressure || 0.5) }] };
     }
     if (!isDrawingCanvas || !mathCtx) return;
     if (e.pointerId !== canvasPenId) return; // nur der zeichnende Stift malt (Palm-Rejection)
