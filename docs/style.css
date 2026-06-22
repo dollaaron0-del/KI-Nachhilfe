@@ -1035,6 +1035,27 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 .katex { font-size: 1.05em; }
 [data-theme="dark"] .katex { color: #f2f2f7; }
 
+/* ── Markdown-Tabellen ─────────────────────────────────────────────────────── */
+.table-wrap {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  margin: 12px 0; border-radius: 10px; border: 1px solid var(--border);
+}
+.md-table {
+  border-collapse: collapse; width: 100%; font-size: 14px;
+}
+.md-table th, .md-table td {
+  padding: 8px 12px; text-align: left;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.md-table th:last-child, .md-table td:last-child { border-right: none; }
+.md-table tbody tr:last-child td { border-bottom: none; }
+.md-table thead th {
+  background: var(--surface2, var(--surface));
+  font-weight: 600; white-space: nowrap;
+}
+.md-table tbody tr:nth-child(even) td { background: rgba(127,127,127,0.05); }
+
 /* ── Streak badge ────────────────────────────────────────────────────────── */
 .streak-badge {
   font-size: 17px; font-weight: 700;

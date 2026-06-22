@@ -40,6 +40,7 @@ const FN_DECLS = [
   'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'numericCheck', 'applyNumericVerdict',
   'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff',
+  'md', 'renderTable',
 ];
 const CONST_DECLS = ['isTopicUid', 'formatScanDiff'];
 
@@ -50,7 +51,7 @@ const assembled = [
 
 // In einen Scope hängen, der die Modul-globalen Bindings (topicUids, self/crypto,
 // pathTopics) bereitstellt — genau die, auf die die extrahierten Funktionen zugreifen.
-const factory = new Function('self', `
+const factory = new Function('self', 'katex', `
   let topicUids = {};
   let __path = [];
   function pathTopics() { return __path; }
@@ -59,12 +60,15 @@ const factory = new Function('self', `
     normTopic, jaccardTokens, parseNum, evalExpr, numEqual, numericCheck, applyNumericVerdict, isTopicUid,
     newTopicUid, topicId, topicKey, resolveKey,
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff,
+    md, renderTable,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
   };
 `);
-const M = factory({ crypto: require('crypto').webcrypto });
+// katex-Stub: markiert, dass eine Formel an KaTeX ging (display-Flag im Marker).
+const katexStub = { renderToString: (latex, opts) => `⟦KTX d=${opts.displayMode ? 1 : 0}:${latex}⟧` };
+const M = factory({ crypto: require('crypto').webcrypto }, katexStub);
 
 // ── Mini-Test-Runner ─────────────────────────────────────────────────────────
 let pass = 0, fail = 0;
@@ -323,6 +327,49 @@ group('applyNumericVerdict — Teilaufgaben (B.5, Verdikt pro Teil)', () => {
          teilergebnisse: [{ label: 'a', endergebnis: 4, schueler_endergebnis: 5 }] };
   M.applyNumericVerdict(ev, true, 'mittel');
   eq(ev.score, 1, 'teilergebnisse überschreibt die Einzelfeld-Auswertung');
+});
+
+// ── md() — Rendering von Rechenzeichen & Tabellen ─────────────────────────────
+group('md — Mathe-Delimiter ($, \\(\\), \\[\\])', () => {
+  eq(M.md('$E=mc^2$'), '<span class="math-inline">⟦KTX d=0:E=mc^2⟧</span>',
+     'Inline $…$ → KaTeX inline');
+  eq(M.md('$$\\int x$$'), '<div class="math-block">⟦KTX d=1:\\int x⟧</div>',
+     'Block $$…$$ → KaTeX display');
+  // Claude nutzt trotz Prompt oft \(…\) und \[…\] — müssen ebenfalls rendern.
+  ok(/math-inline">⟦KTX d=0:E = mc\^2⟧/.test(M.md('Text \\(E = mc^2\\) Ende')),
+     '\\(…\\) → KaTeX inline');
+  ok(/math-block">⟦KTX d=1:.*frac/.test(M.md('\\[ \\frac{1}{3} \\]')),
+     '\\[…\\] → KaTeX display');
+  // Roher LaTeX-Backslash darf NICHT als Klartext überleben:
+  ok(!M.md('\\(a+b\\)').includes('\\('), 'kein roher \\(-Delimiter im Output');
+});
+
+group('md — Multiplikation vs. Kursiv', () => {
+  eq(M.md('3 * 4 = 12'), '3 * 4 = 12', 'Stern mit Leerzeichen bleibt Multiplikation');
+  eq(M.md('a * b * c'), 'a * b * c', 'mehrere Multiplikationen unangetastet');
+  eq(M.md('*wichtig*'), '<em>wichtig</em>', 'echtes Kursiv funktioniert weiter');
+  eq(M.md('**fett**'), '<strong>fett</strong>', 'Fett funktioniert weiter');
+});
+
+group('md — GFM-Tabellen', () => {
+  const html = M.md('| A | B |\n|---|---|\n| 1 | 2 |');
+  ok(/<table class="md-table">/.test(html), 'erzeugt <table class="md-table">');
+  ok(/<thead><tr><th>A<\/th><th>B<\/th><\/tr><\/thead>/.test(html), 'Kopfzeile als <th>');
+  ok(/<tbody><tr><td>1<\/td><td>2<\/td><\/tr><\/tbody>/.test(html), 'Datenzeile als <td>');
+  ok(!html.includes('|'), 'keine rohen Pipe-Zeichen mehr im Output');
+
+  // Ausrichtung aus der Trennzeile (:--:, --:, :--).
+  const al = M.md('| L | C | R |\n|:--|:--:|--:|\n| a | b | c |');
+  ok(/<th style="text-align:center">C<\/th>/.test(al), 'zentrierte Spalte');
+  ok(/<th style="text-align:right">R<\/th>/.test(al), 'rechtsbündige Spalte');
+
+  // Math-Platzhalter in Zellen überleben bis zur KaTeX-Ersetzung.
+  const mt = M.md('| Formel |\n|---|\n| $x^2$ |');
+  ok(/<td><span class="math-inline">⟦KTX d=0:x\^2⟧<\/span><\/td>/.test(mt),
+     'Formel in Tabellenzelle wird gerendert');
+
+  // Kein Fehlalarm: normaler Text mit Pipe bleibt unverändert (keine Trennzeile).
+  ok(!/<table/.test(M.md('a | b ohne Trennzeile')), 'Pipe ohne Separator → keine Tabelle');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────

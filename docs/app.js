@@ -753,8 +753,16 @@ Verfügbare Typen: flowchart TD (Abläufe/Strukturen), mindmap (Konzepte), seque
 Halte Diagramme einfach – max. 8 Knoten. Nur einsetzen wenn es wirklich hilft.
 
 MATHEMATIK: Für mathematische Formeln und Gleichungen verwende LaTeX-Notation.
-Inline-Formeln: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$
+Inline-Formeln NUR mit Dollarzeichen: $E = mc^2$  |  Block-Formeln (zentriert, groß): $$\\int_0^1 x^2\\,dx = \\frac{1}{3}$$
+Verwende NIEMALS \\( \\) oder \\[ \\] als Formel-Begrenzer – ausschließlich $ … $ bzw. $$ … $$.
+Auch einzelne Rechenzeichen/Terme in Mathe-Kontext gehören in $…$ (z.B. $3 \\cdot 4 = 12$, $\\frac{a}{b}$, $x^2$), damit sie sauber gerendert werden.
 Verwende LaTeX immer wenn Formeln, Gleichungen, Summen, Integrale, Matrizen oder griechische Buchstaben vorkommen.
+
+TABELLEN: Für Vergleiche/Gegenüberstellungen nutze Markdown-Tabellen im Pipe-Format mit Trennzeile, z.B.:
+| Aspekt | A | B |
+|---|---|---|
+| Ort | … | … |
+Jede Zeile in einer eigenen Textzeile, keine Tabellen in Fließtext quetschen.
 
 Antworte immer auf Deutsch.${prefCalculator ? `\n\nTASCHENRECHNER: Der Student nutzt einen ${prefCalculator}. Gib bei Rechenaufgaben gezielte Tipps wie man die Berechnung auf diesem Modell effizient eingibt — Tasten, Menüpfade, Modi, nützliche eingebaute Funktionen. Erwähne konkrete Schritte (z.B. "Drücke MENU → 4 → 2" beim Casio).` : ''}${customPrompt ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN ---\n' + customPrompt + '\n--- ENDE ---' : ''}`,
   };
@@ -3059,6 +3067,15 @@ function md(text) {
   if (!text) return '';
   const e = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+  // Inline-Formatierung (fett/kursiv/code). Läuft auf bereits escaptem Text –
+  // wird sowohl im Fließtext als auch in Tabellenzellen verwendet.
+  // Kursiv erfordert Nicht-Leerzeichen direkt nach/vor dem * → "3 * 4"
+  // (Multiplikation) wird NICHT fälschlich zu Kursiv.
+  const inline = s => s
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(\S(?:[^*\n]*?\S)?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+
   // Extract mermaid blocks before HTML escaping
   const mermaidBlocks = [];
   text = text.replace(/```mermaid\n?([\s\S]*?)```/g, (_, code) => {
@@ -3066,33 +3083,62 @@ function md(text) {
     return `\x00MBL${mermaidBlocks.length - 1}\x00`;
   });
 
-  // Extract math before HTML escaping ($$...$$ then $...$)
+  // Extract math before HTML escaping. Reihenfolge: längste/eindeutigste zuerst.
+  // Claude nutzt trotz Prompt häufig \(...\) und \[...\] statt $...$ – beide werden
+  // unterstützt, sonst bleibt roher LaTeX ("Rechenzeichen") stehen.
   const mathParts = [];
-  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-    mathParts.push({ latex: latex.trim(), display: true });
+  const pushMath = (latex, display) => {
+    mathParts.push({ latex: latex.trim(), display });
     return `\x00MTH${mathParts.length - 1}\x00`;
-  });
-  text = text.replace(/\$([^\$\n]+?)\$/g, (_, latex) => {
-    mathParts.push({ latex: latex.trim(), display: false });
-    return `\x00MTH${mathParts.length - 1}\x00`;
-  });
+  };
+  text = text
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_, l) => pushMath(l, true))
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, l) => pushMath(l, true))
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, l) => pushMath(l, false))
+    .replace(/\$([^\$\n]+?)\$/g, (_, l) => pushMath(l, false));
+
+  // Extract GFM-Tabellen (zeilenbasiert) vor dem Escaping. md() kann sie sonst
+  // nicht darstellen → Pipe-Wirrwarr. Zellen behalten Math-Platzhalter.
+  const tables = [];
+  {
+    const isSep = l => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
+    const lines = text.split('\n');
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('|') && lines[i + 1] != null && isSep(lines[i + 1])) {
+        const header = lines[i], align = lines[i + 1], rows = [];
+        let j = i + 2;
+        while (j < lines.length && lines[j].includes('|') && lines[j].trim() !== '') {
+          rows.push(lines[j]); j++;
+        }
+        tables.push({ header, align, rows });
+        out.push(`\x00TBL${tables.length - 1}\x00`);
+        i = j - 1;
+      } else {
+        out.push(lines[i]);
+      }
+    }
+    text = out.join('\n');
+  }
 
   let html = e(text)
     .replace(/^---$/gm, '<hr>')
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/^[\*\-] (.+)$/gm, '<li>$1</li>')
-    .replace(/(<li>[\s\S]*?<\/li>)(?=\s*(?!<li>))/g, '<ul>$1</ul>')
+    .replace(/^[\*\-] (.+)$/gm, m => '<li>' + inline(m.slice(2)) + '</li>')
+    .replace(/(<li>[\s\S]*?<\/li>)(?=\s*(?!<li>))/g, '<ul>$1</ul>');
+  html = inline(html)
     .replace(/\n\n/g, '<br><br>')
     .trim();
 
   mermaidBlocks.forEach((code, i) => {
     html = html.replace(`\x00MBL${i}\x00`,
       `<div class="mermaid-wrap"><div class="mermaid">${code}</div></div>`);
+  });
+
+  tables.forEach((t, i) => {
+    html = html.replace(`\x00TBL${i}\x00`, renderTable(t, e, inline));
   });
 
   mathParts.forEach(({ latex, display }, i) => {
@@ -3106,6 +3152,28 @@ function md(text) {
   });
 
   return html;
+}
+
+// Rendert eine extrahierte GFM-Tabelle nach HTML. Zellen werden escaped und
+// inline-formatiert; Math-Platzhalter (\x00MTH..\x00) überleben und werden
+// später global ersetzt. Ausrichtung (:---:, ---:, :---) wird übernommen.
+function renderTable(t, e, inline) {
+  const splitRow = r => {
+    let s = r.trim();
+    if (s.startsWith('|')) s = s.slice(1);
+    if (s.endsWith('|')) s = s.slice(0, -1);
+    return s.split('|').map(c => c.trim());
+  };
+  const aligns = splitRow(t.align).map(c => {
+    const l = c.startsWith(':'), r = c.endsWith(':');
+    return (l && r) ? 'center' : r ? 'right' : l ? 'left' : '';
+  });
+  const cell = (c, tag, al) =>
+    `<${tag}${al ? ` style="text-align:${al}"` : ''}>${inline(e(c))}</${tag}>`;
+  const head = splitRow(t.header).map((c, i) => cell(c, 'th', aligns[i])).join('');
+  const body = t.rows.map(r =>
+    `<tr>${splitRow(r).map((c, i) => cell(c, 'td', aligns[i])).join('')}</tr>`).join('');
+  return `<div class="table-wrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 // ══ AUFGABEN ══════════════════════════════════════════════════════════════
