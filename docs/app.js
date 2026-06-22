@@ -2047,7 +2047,11 @@ async function rephraseReply(originalReply) {
   ];
   const typ = addTyping(chatMessages);
   try {
-    const rephrase = await claudeLocal(rephrasePrompt, sysBlocks(), 1000);
+    // RAG-Query = die ursprüngliche Frage des Studenten (semantisch näher am Stoff als
+    // die Synthese-Anweisung); Fallback auf die zu paraphrasierende Antwort selbst.
+    const lastUser = [...(sessionMeta.chatHistory || [])].reverse().find(m => m.role === 'user');
+    const ragQuery = (typeof lastUser?.content === 'string' && lastUser.content) || originalReply || '';
+    const rephrase = await claudeLocalKb(rephrasePrompt, '', 1000, ragQuery);
     typ.remove();
     addMsg(chatMessages, 'assistant', rephrase, () => rephraseReply(rephrase));
   } catch (e) {
@@ -3926,7 +3930,7 @@ async function sendAskQuestion() {
 Beantworte kurz und präzise. Gib einen hilfreichen Hinweis – keine vollständige Lösung.`;
 
   try {
-    const answer = await claudeLocal([{ role: 'user', content: question }], sysBlocks(extra), 400);
+    const answer = await claudeLocalKb([{ role: 'user', content: question }], extra, 400, question);
     aiBubble.innerHTML = safeHtml(md(answer));
   } catch (e) {
     aiBubble.textContent = '⚠️ ' + e.message;
