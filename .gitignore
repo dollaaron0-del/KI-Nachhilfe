@@ -4,3 +4,4 @@ uploads/
 *.pdf
 data/*.json
 data/*.txt
+graphify-out/
