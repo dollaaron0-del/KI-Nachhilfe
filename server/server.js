@@ -827,6 +827,38 @@ async function retrieveContext(subjectId, query, k = 6) {
   return `${overview ? `Themen-Überblick des Fachs:\n${overview}\n\n` : ''}Relevante Auszüge aus den Unterlagen:\n${body}`;
 }
 
+// Head/Mid/Tail-Stichprobe der vollen Unterlagen (spiegelt docsForPrompt() im Client).
+// Fallback für Generierungs-Pfade, wenn die Wissensbasis (noch) nicht bereit ist.
+function sampleDocs(txt, limit = 40000) {
+  if (!txt) return '';
+  if (txt.length <= limit) return txt;
+  const headLen = Math.floor(limit * 0.45);
+  const midLen  = Math.floor(limit * 0.30);
+  const tailLen = limit - headLen - midLen;
+  const midStart = Math.floor(txt.length / 2 - midLen / 2);
+  return `${txt.slice(0, headLen)}\n\n[…Auszug aus der Mitte der Unterlagen…]\n\n` +
+         `${txt.slice(midStart, midStart + midLen)}\n\n[…Auszug vom Ende der Unterlagen…]\n\n` +
+         `${txt.slice(txt.length - tailLen)}`;
+}
+
+// Kontext für Generierungs-Pfade (/api/local): semantischer KB-Treffer → kuratierter
+// Block; sonst die vollen Fach-Unterlagen aus der DB (Generierung braucht Breite, der
+// Client schickt den 40k-Dump dann nicht mehr selbst mit). '' wenn gar nichts da ist.
+async function generationDocContext(subjectId, query, k = 6) {
+  let ctx = '';
+  if (query) {
+    try { ctx = (await retrieveContext(subjectId, query, k)) || ''; }
+    catch (e) { console.error('KB retrieve (local) skipped:', e.message); }
+  }
+  if (ctx) return ctx;
+  try {
+    const { rows } = await pool.query(
+      'SELECT content FROM documents WHERE subject_id=$1 AND length(content) > 0 ORDER BY uploaded_at', [subjectId]
+    );
+    return sampleDocs(rows.map(r => r.content).filter(Boolean).join('\n\n'), 40000);
+  } catch (e) { console.error('full-docs fallback skipped:', e.message); return ''; }
+}
+
 app.get('/api/subjects/:id/documents', async (req, res) => {
   try {
     let rows;
@@ -1192,9 +1224,28 @@ async function localComplete(messages, maxTokens = 2000, jsonMode = false) {
 }
 
 app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
-  const { messages, system, max_tokens, json_mode, feature } = req.body;
+  const { messages, max_tokens, json_mode, feature } = req.body;
+  let system = req.body.system;
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'messages array erforderlich' });
+  }
+  // KB-Kontext für Generierungs-Pfade: der Client schickt subject_id + kb_query und
+  // lässt den vollen Doku-Block weg (omitDocs). Wir injizieren hier den kuratierten
+  // KB-Kontext (bzw. die vollen Unterlagen, falls die KB noch nicht bereit ist).
+  if (req.body.subject_id && req.body.kb_query) {
+    try {
+      const { rows } = await pool.query(
+        'SELECT 1 FROM subjects WHERE id=$1 AND user_id=$2', [req.body.subject_id, req.user.id]
+      );
+      if (rows.length) {
+        const k = Math.min(Math.max(parseInt(req.body.kb_k, 10) || 6, 1), 12);
+        const ctx = await generationDocContext(req.body.subject_id, String(req.body.kb_query).slice(0, 500), k);
+        if (ctx) {
+          const sysArr = Array.isArray(system) ? system : (system ? [{ type: 'text', text: system }] : []);
+          system = [...sysArr, { type: 'text', text: `Dokumenten-Kontext:\n${ctx}` }];
+        }
+      }
+    } catch (e) { console.error('local KB inject skipped:', e.message); }
   }
   const callHaiku = async () => {
     const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };

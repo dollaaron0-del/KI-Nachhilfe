@@ -288,6 +288,7 @@ async function checkAuth() {
 let sessionId      = null;
 let sessionMeta    = null;
 let sessionTxt     = '';
+let kbReady        = false;   // Wissensbasis des Fachs ist serverseitig „ready" → Generierung nutzt schlanken KB-Kontext
 let examDocContext  = '';
 let customPrompt    = '';
 let prefCalculator  = '';
@@ -498,6 +499,21 @@ async function claudeLocal(messages, systemBlocks, maxTokens = 2000, opts = {}) 
     throw new Error(e.error || `Serverfehler ${r.status}`);
   }
   return (await r.json()).content[0].text;
+}
+
+// Generierungs-Pfade (Aufgaben/Quiz/Musterlösung/Antwort-Bewertung): Bei bereiter
+// Wissensbasis schickt der Client NICHT mehr den vollen 40k-Doku-Dump, sondern lässt
+// den Server den schlanken, semantisch passenden KB-Kontext injizieren (omitDocs +
+// subject_id + kb_query). Ist die KB nicht bereit (oder fehlt eine Query), exakt das
+// bisherige Verhalten: volle Unterlagen im System-Prompt.
+function claudeLocalKb(messages, prompt, maxTokens = 2000, query = '', opts = {}) {
+  const q = String(query || '').trim();
+  if (kbReady && q) {
+    const body = { subject_id: sessionId, kb_query: q.slice(0, 500) };
+    if (opts.kbK) body.kb_k = opts.kbK;
+    return claudeLocal(messages, sysBlocks(prompt, { omitDocs: true }), maxTokens, body);
+  }
+  return claudeLocal(messages, sysBlocks(prompt), maxTokens);
 }
 
 // Escape the most common local-model JSON breakage: literal newline/CR/tab
@@ -1398,6 +1414,10 @@ async function openSubject(subj) {
       if (sessionTxt) DB.setContent(subj.id, sessionTxt).catch(() => {});
     }
   }
+  // Ist die Wissensbasis bereit, laufen Generierungs-Pfade über den schlanken,
+  // serverseitig injizierten KB-Kontext statt des vollen 40k-Doku-Dumps.
+  kbReady = false;
+  api(`/api/subjects/${subj.id}/kb`).then(kb => { kbReady = !!kb && kb.status === 'ready'; }).catch(() => {});
   examDocContext = await loadExamDocContext(subj.id);
   customPrompt = subj.custom_prompt || '';
   const serverTopics = await api(`/api/subjects/${subj.id}/topics`).catch(() => null);
@@ -1604,7 +1624,7 @@ function updateSettingsBadge() {
 // ══ UPLOAD SHEET ═══════════════════════════════════════════════════════════
 
 document.getElementById('back-btn')?.addEventListener('click', () => {
-  sessionId = null; sessionMeta = null; sessionTxt = ''; examDocContext = ''; customPrompt = '';
+  sessionId = null; sessionMeta = null; sessionTxt = ''; kbReady = false; examDocContext = ''; customPrompt = '';
   showScreen('subjects-screen'); loadSubjects();
 });
 document.getElementById('btn-add-docs')?.addEventListener('click', showUploadSheet);
@@ -1752,6 +1772,7 @@ function startKbPolling() {
     if (kb.status !== 'indexing') {
       clearInterval(kbPollTimer); kbPollTimer = null;
       renderKbStatus();
+      kbReady = kb.status === 'ready';   // Generierung darf ab sofort den KB-Kontext nutzen
       if (kb.status === 'ready') toast('Wissensbasis aktualisiert ✅', 'success');
       else if (kb.status === 'error') toast('Indexierung fehlgeschlagen', 'error');
     }
@@ -2117,14 +2138,19 @@ function buildQuestionPrompt(done, extraAvoid) {
     .filter(t => scannedTopics.includes(t));
   const weak = getWeakTopics(sessionMeta.quizStats.questions).slice(0, 4);
   let focusInstr = '';
+  // KB-Retrieval-Query: das Schwerpunktthema (falls vorhanden) holt gezielt dessen
+  // Auszüge; sonst greift der mitgelieferte Themen-Überblick für die Breite.
+  let query = sessionMeta.name || '';
   if (weak.length && done % 2 === 0) {
     focusInstr = `\nSCHWERPUNKT: Stelle die Frage zu einem dieser Themen, bei denen der Student noch Schwächen zeigt: ${weak.join(', ')}.`;
+    query = weak.join(', ');
   } else if (learnedNames.length) {
     const pick = learnedNames[Math.floor(Math.random() * learnedNames.length)];
     focusInstr = `\nSCHWERPUNKT: Stelle die Frage zum kürzlich gelernten Thema "${pick}" – aktives Erinnern festigt das Wissen.`;
+    query = pick;
   }
 
-  return `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
+  const prompt = `Stelle EINE Prüfungsfrage für "${sessionMeta.name}" (Frage ${done + 1}).
 ${focusInstr}
 Bevorzuge Fragen die echtes Verständnis testen:
 - "Erkläre warum…" / "Was passiert wenn…"
@@ -2135,15 +2161,17 @@ Bevorzuge Fragen die echtes Verständnis testen:
 Abwechslung: Mix aus Verständnis, Anwendung und Zusammenhängen.
 ${avoid ? `Bereits gestellte Fragen vermeiden:\n- ${avoid}` : ''}
 Antworte NUR mit der Frage, ohne Kommentar.`;
+  return { prompt, query };
 }
 
 // Holt eine Frage vom Modell. Modell-/Netzfehler sind oft kurzlebig → einmal
 // automatisch neu versuchen. Wirft erst, wenn beide Versuche scheitern.
-async function generateQuestionText(prompt) {
+// `p` ist das Objekt aus buildQuestionPrompt ({ prompt, query }).
+async function generateQuestionText(p) {
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await claudeLocal([{ role: 'user', content: 'Nächste Frage.' }], sysBlocks(prompt), 300);
+      const r = await claudeLocalKb([{ role: 'user', content: 'Nächste Frage.' }], p.prompt, 300, p.query);
       if (!r || !r.trim()) throw new Error('Leere Antwort');
       return r.trim();
     } catch (e) { lastErr = e; }
@@ -2253,9 +2281,10 @@ Antworte NUR als JSON:
 {"score":<0-3>,"correct":<true|false>,"topic":"<Thema max 4 Wörter>","feedback":"<2-3 Sätze mit Hintergrund>","correct_answer":"<Musterantwort mit Erklärung>"}`;
 
   try {
-    const raw = await claudeLocal(
+    const raw = await claudeLocalKb(
       [{ role: 'user', content: `Frage: ${sessionMeta.currentQuestion}\n\nAntwort: ${answer}` }],
-      sysBlocks(evalPrompt), 1200,  // 700 schnitt Feedback+Musterantwort ab → JSON unvollständig
+      evalPrompt, 1200,  // 700 schnitt Feedback+Musterantwort ab → JSON unvollständig
+      `${sessionMeta.currentQuestion}\n${answer}`,
     );
     // Robust parsen wie beim Blitz (v140): handhabt ```json-Fences und kaputte
     // Zeilenumbrüche in Strings – sonst scheitert die Bewertung unnötig oft.
@@ -2409,7 +2438,7 @@ Antworte NUR als JSON (kein Text davor oder danach):
       // 400 schnitt Frage+Optionen+Erklärung gelegentlich ab → JSON ohne
       // schließende "}" → parseJsonResponse lieferte null → "Ungültige Antwort"
       // bei jedem Versuch (deterministisch). 800 gibt genug Luft.
-      const raw = await claudeLocal([{ role: 'user', content: 'MC-Frage.' }], sysBlocks(blitzPrompt), 800);
+      const raw = await claudeLocalKb([{ role: 'user', content: 'MC-Frage.' }], blitzPrompt, 800, sessionMeta.name);
       const parsed = parseJsonResponse(raw);
       if (!parsed) throw new Error('Ungültige Antwort');
       if (!Array.isArray(parsed.options) || parsed.options.length < 2) throw new Error('Ungültige Antwortoptionen');
@@ -2672,7 +2701,7 @@ ${diffInstructions[selDiff] || diffInstructions.mittel}${curriculum}
 [Vollständige Lösungen]`;
 
   try {
-    const exam = await claudeLocal([{ role: 'user', content: 'Klausur erstellen.' }], sysBlocks(examPrompt), 3000);
+    const exam = await claudeLocalKb([{ role: 'user', content: 'Klausur erstellen.' }], examPrompt, 3000, sessionMeta.name, { kbK: 12 });
     currentExamText = exam;
     api(`/api/subjects/${sessionId}/klausuren`, {
       method: 'POST',
@@ -3924,7 +3953,7 @@ Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
 }
 
 function genRechnenAufgabe(avoid) {
-  return claudeLocal([{ role: 'user', content: 'Aufgabe erstellen.' }], sysBlocks(buildRechnenAufgabePrompt(avoid)), 500);
+  return claudeLocalKb([{ role: 'user', content: 'Aufgabe erstellen.' }], buildRechnenAufgabePrompt(avoid), 500, currentExplainerTopic || sessionMeta?.name || '');
 }
 
 // System-Prompt für die Standalone-Musterlösung (hängt nur an der Aufgabe, nicht
@@ -3943,7 +3972,7 @@ function prefetchRechnenLoesung(aufgabe) {
   const entry = { aufgabe, promise: null, text: '' };
   entry.promise = (async () => {
     try {
-      const r = await claudeLocal([{ role: 'user', content: `Aufgabe: ${aufgabe}` }], sysBlocks(sys), 1200);
+      const r = await claudeLocalKb([{ role: 'user', content: `Aufgabe: ${aufgabe}` }], sys, 1200, aufgabe);
       const txt = (r || '').trim();
       if (rechnenLoesung === entry) entry.text = txt; // nur cachen wenn noch aktuell
       return txt;
@@ -4172,7 +4201,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
     if (rechnenLoesung && rechnenLoesung.aufgabe === taskText) {
       loesungP = rechnenLoesung.promise;
     } else {
-      loesungP = claudeLocal([{ role: 'user', content: `Aufgabe: ${taskText}` }], sysBlocks(rechnenLoesungSys()), 1200)
+      loesungP = claudeLocalKb([{ role: 'user', content: `Aufgabe: ${taskText}` }], rechnenLoesungSys(), 1200, taskText)
         .then(r => (r || '').trim()).catch(() => '');
     }
     const feedback = await feedbackP;
@@ -5583,7 +5612,7 @@ Bei Rechenaufgaben: rechne jeden Schritt sauber und nachvollziehbar vor.`;
   const entry = { aufgabe, promise: null, text: '' };
   entry.promise = (async () => {
     try {
-      const r = await claudeLocal([{ role: 'user', content: `Aufgabe: ${aufgabe}` }], sysBlocks(sys), 1500);
+      const r = await claudeLocalKb([{ role: 'user', content: `Aufgabe: ${aufgabe}` }], sys, 1500, aufgabe);
       const txt = (r || '').trim();
       if (lernenLoesung === entry) entry.text = txt; // nur cachen wenn noch aktuell
       return txt;
@@ -6398,10 +6427,15 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
       if (!ev) throw new Error('Keine Auswertung');
     } else {
       // Nur getippter Text.
+      // Bei bereiter KB den kuratierten Fach-Kontext serverseitig injizieren lassen
+      // (Bewertung war bisher ungroundet); ohne KB unverändert nur EVAL_SYS.
+      const kbOpts = (kbReady && lernenTopicData.aufgabe)
+        ? { subject_id: sessionId, kb_query: `${lernenTopicData.aufgabe}\n${answerText}`.slice(0, 500) }
+        : {};
       const raw = await claudeLocal(
         [{ role: 'user', content: `Aufgabe: ${lernenTopicData.aufgabe}\n\nAntwort des Studenten: ${answerText}` }],
         [{ type: 'text', text: EVAL_SYS }],
-        2000, { json_mode: true }
+        2000, { json_mode: true, ...kbOpts }
       );
       ev = parseJsonResponse(raw);
       if (!ev) {
