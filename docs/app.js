@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '204';
+const APP_VERSION = '205';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -2395,13 +2395,14 @@ async function deepenWeakTopic(topicName) {
   const btn = document.getElementById('fb-deepen-btn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
-    const raw = await claudeLocal(
+    const raw = await claudeLocalKb(
       [{ role: 'user', content: `Teile das Thema "${topicName}" in 3–4 Unterteile auf.` }],
-      sysBlocks(`Du bist ein Lernassistent für das Fach "${sessionMeta?.name || ''}".
+      `Du bist ein Lernassistent für das Fach "${sessionMeta?.name || ''}".
 Teile das Thema "${topicName}" in 3–4 klar abgegrenzte Unterteile auf, die ein Student schrittweise lernen kann.
 Die Unterteile sollen KURZE Thementitel sein (max. 5 Wörter je Titel), keine Aufgaben.
-Antworte NUR als JSON: {"subtopics":["<Titel 1>","<Titel 2>","<Titel 3>"]}`),
-      300
+Antworte NUR als JSON: {"subtopics":["<Titel 1>","<Titel 2>","<Titel 3>"]}`,
+      300,
+      topicName
     );
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) throw new Error('Keine Subtopics erhalten');
@@ -6657,10 +6658,12 @@ async function lernenQaSend() {
     const evalCtx = lernenLastEval
       ? `\n\nOFFIZIELLE BEWERTUNG VON "PRÜFEN" (verbindlich – du darfst die Richtig/Falsch-Wertung NICHT umdrehen):\n${lernenLastEval.transkription ? `So wurde die Handschrift des Studenten gelesen:\n"""\n${lernenLastEval.transkription}\n"""\n` : ''}Urteil: ${lernenLastEval.feedback || ''}\nEinschätzung: ${lernenLastEval.einschaetzung || ''}\nWenn der Student fragt, ob seine Antwort richtig/ausreichend ist, stütze dich GENAU auf diese Bewertung (score ${lernenLastEval.score}/2). Erkläre, was noch fehlt – bestätige NICHT pauschal "richtig", wenn die Prüfung das nicht tat. Meint der Student, die Handschrift sei falsch gelesen worden, bitte ihn, erneut auf "Prüfen" zu tippen.`
       : '';
-    const reply = await claudeLocal(
+    const qaQuery = [...lernenQaMsgs].reverse().find(m => m.role === 'user')?.content || currentExplainerTopic || '';
+    const reply = await claudeLocalKb(
       lernenQaMsgs,
-      sysBlocks(`Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich.${aufgCtx}${evalCtx}`),
-      600
+      `Beantworte Fragen zum Thema "${currentExplainerTopic}" kurz und verständlich.${aufgCtx}${evalCtx}`,
+      600,
+      qaQuery
     );
     lernenQaMsgs.push({ role: 'assistant', content: reply });
     aEl.innerHTML = safeHtml(md(reply));
