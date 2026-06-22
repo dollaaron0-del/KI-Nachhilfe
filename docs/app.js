@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '186';
+const APP_VERSION = '203';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -350,6 +350,10 @@ let activeTool      = 'pen';      // 'pen' | 'eraser' | 'highlighter' | 'line'
 // burst of loads on a page open) only redirect once.
 let sessionExpiredHandled = false;
 function handleAuthExpired() {
+  // Kein Token gesendet ⇒ keine abgelaufene Sitzung, sondern nie eingeloggt:
+  // ein 401 auf einem ungeschützten Pfad (z.B. Streak-Load beim ersten Öffnen)
+  // darf KEINEN "Sitzung abgelaufen"-Toast auslösen.
+  if (!authToken) return;
   if (sessionExpiredHandled) return;
   sessionExpiredHandled = true;
   authToken = ''; authUsername = '';
@@ -7009,7 +7013,7 @@ async function initDashboard() {
 // ══ INIT ══════════════════════════════════════════════════════════════════
 (async () => {
   try { await initDarkMode(); } catch (_) { applyDarkMode(false); }
-  try { renderStreak(); } catch (_) {}
+  try { if (authToken) renderStreak(); } catch (_) {}
   try { prefCalculator = (await localforage.getItem('pref_calculator')) || ''; } catch (_) {}
   try {
     await checkAuth();
