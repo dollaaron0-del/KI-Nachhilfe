@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'ki-tutor-v205';
+const CACHE = 'ki-tutor-v206';
 const STATIC = ['./', './index.html', './app.js?v=203', './style.css?v=203', './icon.svg', './manifest.json'];
 
 self.addEventListener('install', e => {

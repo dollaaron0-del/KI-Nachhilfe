@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '205';
+const APP_VERSION = '206';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -2883,9 +2883,12 @@ Format:
 [Realistisch: wie viel Lernaufwand noch nötig ist, und ob das Lernziel von ${targetScore}% erreichbar ist]`;
 
   try {
+    // Analyse wertet ausschließlich die übergebenen Quiz-/Lernstats aus – kein
+    // Doku-Korpus nötig. Minimaler System-Block statt sysBlocks() spart den vollen
+    // docsForPrompt()-Dump und die hier kontraproduktive QUELLENREGEL.
     const analysis = await claudeLocal(
       [{ role: 'user', content: `Quiz-Ergebnisse:\n${statsText}\n\n${lernText}\n\nQuiz-Rohwert: ${quizRaw ?? '–'}% · Lernbereich: ${lernRaw ?? '–'}% · kombiniert: ${raw}%` }],
-      sysBlocks(analysisPrmt), 2000,
+      [{ type: 'text', text: `Du bist ein erfahrener Nachhilfelehrer für das Fach "${sessionMeta?.name || ''}".\n\n${analysisPrmt}` }], 2000,
     );
     const color = scoreColor(percent);
     const targetLeft = Math.min(Math.max(targetScore, 0), 100);
