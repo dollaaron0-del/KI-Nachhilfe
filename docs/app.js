@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '206';
+const APP_VERSION = '208';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3496,7 +3496,7 @@ async function initRechnen() {
   // Erste/nächste Aufgabe schon vorladen, sobald die Löse-Ansicht offen ist – so ist
   // der erste "Aufgabe erstellen"-Klick kein kalter LLM-Roundtrip mehr. Dedupt selbst
   // (Fach + Schwierigkeit), läuft also nicht doppelt, wenn schon eine vorgeladen ist.
-  if (sessionMeta && sessionId) prefetchRechnenAufgabe(currentAufgabe);
+  if (sessionMeta && sessionId) prefetchRechnenAufgabe();
 }
 
 function initResizeHandle() {
@@ -3886,7 +3886,7 @@ document.getElementById('rechnen-diff-sel')?.addEventListener('change', e => {
   rechnenDiff = e.target.value;
   // Die vorgeladene Aufgabe hat noch die alte Schwierigkeit → für die neue Stufe
   // neu vorladen, damit der nächste Klick wieder sofort die passende Aufgabe hat.
-  if (sessionMeta && sessionId) prefetchRechnenAufgabe(currentAufgabe);
+  if (sessionMeta && sessionId) prefetchRechnenAufgabe();
 });
 
 // ── Rechnen generate ───────────────────────────────────────────────────────
@@ -3927,7 +3927,7 @@ function fireRechnenPrefetch() {
   if (!a) return;
   rechnenPrefetchPending = null;
   prefetchRechnenLoesung(a);
-  prefetchRechnenAufgabe(a);
+  prefetchRechnenAufgabe();
 }
 function armLernenPrefetch()  { lernenPrefetchPending = true; }
 function fireLernenPrefetch() {
@@ -4016,12 +4016,49 @@ Beantworte kurz und präzise. Gib einen hilfreichen Hinweis – keine vollständ
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-// Prompt für eine einzelne Rechen-Aufgabe. `avoid` (optional) hält den Prefetch
-// davon ab, dieselbe Aufgabe wie die gerade bearbeitete erneut zu erzeugen.
-function buildRechnenAufgabePrompt(avoid) {
-  const avoidNote = avoid
-    ? `\n\nDie neue Aufgabe MUSS sich inhaltlich klar von dieser unterscheiden (andere Zahlen/Szenario):\n"""\n${avoid}\n"""`
-    : '';
+// ── Aufgaben-Historie pro (Fach+Thema) ──────────────────────────────────────
+// Verhindert, dass Generierung/Regen denselben "Kern" wiederholt: die zuletzt
+// gestellten Aufgaben werden als Avoid-Liste in den Prompt gehängt. In-Memory
+// für synchronen Prompt-Aufbau, gespiegelt nach localforage → überlebt Reloads.
+const TASK_HIST_MAX = 8;
+const taskHist = new Map();                 // scope-key → [aufgabentext, ...] (neueste zuletzt)
+function taskHistKey(scope) { return `taskhist_${scope}`; }
+async function hydrateTaskHist(scope) {
+  const k = taskHistKey(scope);
+  if (taskHist.has(k)) return taskHist.get(k);
+  let arr = [];
+  try { const v = await localforage.getItem(k); if (Array.isArray(v)) arr = v; } catch {}
+  taskHist.set(k, arr);
+  return arr;
+}
+function recentTasks(scope) { return taskHist.get(taskHistKey(scope)) || []; }
+function rememberTask(scope, text) {
+  const t = (text || '').replace(/\s+/g, ' ').trim();
+  if (!t) return;
+  const k = taskHistKey(scope);
+  const next = (taskHist.get(k) || []).filter(x => x !== t);   // exakte Dubletten entfernen
+  next.push(t);
+  while (next.length > TASK_HIST_MAX) next.shift();
+  taskHist.set(k, next);
+  localforage.setItem(k, next).catch(() => {});
+}
+// Avoid-Block für den Prompt aus der Historie (gekürzt, damit der Kontext schlank bleibt).
+function taskAvoidBlock(scope) {
+  const arr = recentTasks(scope);
+  if (!arr.length) return '';
+  const list = arr.map(t => `- ${t.slice(0, 220)}`).join('\n');
+  return `\n\nBereits gestellte Aufgaben (NICHT wiederholen – die neue Aufgabe muss sich in Szenario UND Zahlen klar davon unterscheiden):\n${list}`;
+}
+// Scope-Key für die Rechen-Aufgaben (Fach + aktuelles Thema bzw. Fachname).
+function rechnenScope() { return `${sessionId}_${currentExplainerTopic || sessionMeta?.name || ''}`; }
+// Scope-Key für die Lernen-Aufgaben – an die stabile Einheits-ID gekoppelt
+// (trennt zusammengesetzte Einheiten von Einzel-Themen, überlebt Re-Scan).
+function lernenScope() { return `lrn_${sessionId}_${unitId(curUnit())}`; }
+
+// Prompt für eine einzelne Rechen-Aufgabe. Die Avoid-Liste kommt aus der
+// persistenten Aufgaben-Historie (scope), damit nicht derselbe Kern wiederkehrt.
+function buildRechnenAufgabePrompt(scope) {
+  const avoidNote = taskAvoidBlock(scope);
   return `Erstelle EINE einzelne Aufgabe (Schwierigkeit: ${rechnenDiff}) aus dem Lernstoff von "${sessionMeta.name}".
 
 Regeln:
@@ -4034,8 +4071,12 @@ Regeln:
 Antworte NUR mit der Aufgabenstellung, kein zusätzlicher Text.`;
 }
 
-function genRechnenAufgabe(avoid) {
-  return claudeLocalKb([{ role: 'user', content: 'Aufgabe erstellen.' }], buildRechnenAufgabePrompt(avoid), 500, currentExplainerTopic || sessionMeta?.name || '');
+function genRechnenAufgabe() {
+  const scope = rechnenScope();
+  return (async () => {
+    await hydrateTaskHist(scope);   // Avoid-Liste vor dem Prompt-Aufbau laden
+    return claudeLocalKb([{ role: 'user', content: 'Aufgabe erstellen.' }], buildRechnenAufgabePrompt(scope), 500, currentExplainerTopic || sessionMeta?.name || '');
+  })();
 }
 
 // System-Prompt für die Standalone-Musterlösung (hängt nur an der Aufgabe, nicht
@@ -4065,10 +4106,10 @@ function prefetchRechnenLoesung(aufgabe) {
 }
 
 // Nächste Aufgabe vorab laden, während der Nutzer die aktuelle bearbeitet.
-function prefetchRechnenAufgabe(avoid) {
+function prefetchRechnenAufgabe() {
   if (!sessionMeta || !sessionId) return;
   if (rechnenNextTask && rechnenNextTask.forSession === sessionId && rechnenNextTask.diff === rechnenDiff) return;
-  const promise = genRechnenAufgabe(avoid);
+  const promise = genRechnenAufgabe();   // Avoid-Liste kommt aus der Aufgaben-Historie
   promise.catch(() => {});
   rechnenNextTask = { promise, diff: rechnenDiff, forSession: sessionId };
 }
@@ -4093,6 +4134,7 @@ async function generateMathAufgabe() {
     const taskInput = document.getElementById('rechnen-task-input');
     taskInput.value = aufgabe.trim();
     currentAufgabe  = aufgabe.trim();
+    rememberTask(rechnenScope(), currentAufgabe);   // in Historie aufnehmen → nächste Aufgabe vermeidet sie
     rechnenLastFeedback = '';
     rechnenLastCheckSig = '';
     savedCanvasData = null;
@@ -5979,10 +6021,12 @@ async function loadTopicContent(topic, forceFresh = false) {
     : '';
   const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
   const kbQ = isComposite ? unit.themen.join(', ') : topic;
+  const scope = lernenScope();
+  await hydrateTaskHist(scope);   // Avoid-Liste der zuletzt gestellten Aufgaben laden
   try {
     const raw = await claudeLocalKb(
       [{ role: 'user', content: `Behandle ${subjectClause} auf dem vorgegebenen Niveau.` }],
-      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
+      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!${taskAvoidBlock(scope)}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
       2500,
       kbQ
     );
@@ -5993,6 +6037,7 @@ async function loadTopicContent(topic, forceFresh = false) {
     if (m) { try { data = parseJsonLoose(m[0]); } catch { data = null; } }
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
+    if (data.aufgabe) rememberTask(scope, data.aufgabe);   // in Historie → künftige Aufgaben vermeiden Wiederholung
     localforage.setItem(lernenCacheKey(), data).catch(() => {});
     stopProg();
     renderTopicContent(topic, data);
@@ -6036,9 +6081,11 @@ async function regenLernenTask() {
     const gegenstand = isComposite ? `zur Einheit "${topic}" (Themen: ${unit.themen.join(', ')})` : `zum Thema "${topic}"`;
     const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
     const kbQ = isComposite ? unit.themen.join(', ') : topic;
+    const scope = lernenScope();
+    await hydrateTaskHist(scope);   // Avoid-Liste der zuletzt gestellten Aufgaben laden
     const raw = await claudeLocalKb(
       [{ role: 'user', content: `Generiere eine neue Übungsaufgabe ${gegenstand}.` }],
-      `Generiere eine NEUE, andere Übungsaufgabe ${gegenstand} – ausschließlich auf Basis der bereitgestellten Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
+      `Generiere eine NEUE, andere Übungsaufgabe ${gegenstand} – ausschließlich auf Basis der bereitgestellten Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!${taskAvoidBlock(scope)}\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
       600,
       kbQ
     );
@@ -6046,6 +6093,7 @@ async function regenLernenTask() {
     let newAufgabe = null;
     if (m) { try { newAufgabe = parseJsonLoose(m[0]).aufgabe; } catch {} }
     if (newAufgabe && newAufgabe.trim()) {
+      rememberTask(scope, newAufgabe);   // in Historie → nächste Regen vermeidet sie
       lernenTopicData.aufgabe = newAufgabe;
       document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(newAufgabe));
       localforage.setItem(lernenCacheKey(), lernenTopicData).catch(() => {});
