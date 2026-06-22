@@ -3302,9 +3302,9 @@ Format:
 [Vollständige Lösungen mit Hintergrundinformationen]`;
 
   try {
-    const result = await claudeLocal(
+    const result = await claudeLocalKb(
       [{ role: 'user', content: 'Aufgaben erstellen.' }],
-      sysBlocks(prompt), 2500,
+      prompt, 2500, selTopic,   // themen-gebunden → gezieltes KB-Retrieval statt 40k-Dump
     );
     currentAufgabenResult = result;
     const body = document.getElementById('aufgaben-body');
