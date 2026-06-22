@@ -37,7 +37,7 @@ function extractConst(name) {
 }
 
 const FN_DECLS = [
-  'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'applyNumericVerdict',
+  'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'numericCheck', 'applyNumericVerdict',
   'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids',
 ];
@@ -56,7 +56,7 @@ const factory = new Function('self', `
   function pathTopics() { return __path; }
   ${assembled}
   return {
-    normTopic, jaccardTokens, parseNum, evalExpr, numEqual, applyNumericVerdict, isTopicUid,
+    normTopic, jaccardTokens, parseNum, evalExpr, numEqual, numericCheck, applyNumericVerdict, isTopicUid,
     newTopicUid, topicId, topicKey, resolveKey,
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids,
     _setUids: m => { topicUids = m; },
@@ -203,10 +203,20 @@ group('applyNumericVerdict — Zahl überstimmt LLM (#4)', () => {
   eq(ev.understood, true, 'understood bleibt true');
   ok(/✓/.test(ev.feedback), '✓-Notiz gesetzt');
 
-  // endergebnis_rechnung (Ausdruck) härtet/überstimmt die LLM-"endergebnis"-Zahl.
-  ev = { score: 0, understood: false, feedback: '', endergebnis: 999, endergebnis_rechnung: '500 * 1.08', schueler_endergebnis: 540 };
+  // endergebnis_rechnung (Ausdruck) ist alleinige Referenz, wenn keine endergebnis-Zahl da ist.
+  ev = { score: 0, understood: false, feedback: '', endergebnis_rechnung: '500 * 1.08', schueler_endergebnis: 540 };
   M.applyNumericVerdict(ev, true, 'mittel');
-  ok(/✓/.test(ev.feedback), 'Referenz aus nachgerechnetem Ausdruck (540), nicht aus falschem endergebnis (999)');
+  ok(/✓/.test(ev.feedback), 'Referenz aus nachgerechnetem Ausdruck (540) bei fehlender endergebnis-Zahl');
+
+  // B.5 In-Band-Doppelcheck: Ausdruck (540) und endergebnis (999) widersprechen sich →
+  // Ground Truth unsicher → KEIN Override, LLM-Urteil bleibt stehen.
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 999, endergebnis_rechnung: '500 * 1.08', schueler_endergebnis: 540 };
+  eq(M.applyNumericVerdict(ev, true, 'mittel'), '', 'widersprüchliche Referenz → keine Notiz/kein Verdikt');
+  eq(ev.score, 2, 'widersprüchliche Referenz → score bleibt (LLM-Urteil)');
+  // Stimmen Ausdruck und endergebnis überein, greift das Verdikt normal.
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 540, endergebnis_rechnung: '500 * 1.08', schueler_endergebnis: 500 };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 1, 'konsistente Referenz (540==540) + falsche Schülerzahl → Deckelung');
 
   // Falsche Zahl bei bereits niedrigem score → bleibt (kein Hochstufen), understood=false.
   ev = { score: 0, understood: false, feedback: '', endergebnis: 540, schueler_endergebnis: 1 };
@@ -242,6 +252,58 @@ group('applyNumericVerdict — Zahl überstimmt LLM (#4)', () => {
   ev = { score: 2, understood: true, feedback: '', endergebnis: 1234.56, schueler_endergebnis: '1.234,56 €' };
   M.applyNumericVerdict(ev, true, 'mittel');
   eq(ev.score, 2, 'deutsche Zahl "1.234,56 €" == 1234.56');
+});
+
+group('numericCheck — Einzelvergleich + In-Band-Doppelcheck (B.5)', () => {
+  eq(M.numericCheck('500*1.08', 540, 540, 0.02).verdict, 'ok', 'konsistent + richtig → ok');
+  eq(M.numericCheck('500*1.08', 540, 500, 0.02).verdict, 'abweichung', 'konsistent + falsch → abweichung');
+  eq(M.numericCheck('500*1.08', 999, 540, 0.02).verdict, null, 'Ausdruck≠endergebnis → null (unsicher)');
+  eq(M.numericCheck('', 540, 540, 0.02).verdict, 'ok', 'nur endergebnis-Zahl als Referenz');
+  eq(M.numericCheck('500*1.08', null, 540, 0.02).verdict, 'ok', 'nur Ausdruck als Referenz');
+  eq(M.numericCheck('500*1.08', 540, null, 0.02).verdict, null, 'keine Schülerzahl → null');
+  eq(M.numericCheck('', '', '', 0.02).verdict, null, 'gar keine Referenz → null');
+});
+
+group('applyNumericVerdict — Teilaufgaben (B.5, Verdikt pro Teil)', () => {
+  // Ein falscher Teil deckelt den Gesamt-Score; Notiz nennt genau diesen Teil.
+  let ev = { score: 2, understood: true, feedback: '', teilergebnisse: [
+    { label: 'a', endergebnis_rechnung: '2+2', endergebnis: 4, schueler_endergebnis: 4 },
+    { label: 'b', endergebnis_rechnung: '10*3', endergebnis: 30, schueler_endergebnis: 25 },
+  ]};
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 1, 'ein falscher Teil → Gesamt-score gedeckelt');
+  eq(ev.understood, false, 'understood=false bei falschem Teil');
+  ok(/b\)/.test(ev.feedback) && !/a\)/.test(ev.feedback), 'Notiz nennt nur den falschen Teil b)');
+
+  // Alle Teile korrekt → score bleibt, Sammel-✓.
+  ev = { score: 2, understood: true, feedback: '', teilergebnisse: [
+    { label: 'a', endergebnis: 4, schueler_endergebnis: 4 },
+    { label: 'b', endergebnis: 30, schueler_endergebnis: 30 },
+  ]};
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 2, 'alle Teile korrekt → score bleibt 2');
+  ok(/✓/.test(ev.feedback), 'Sammel-✓ gesetzt');
+
+  // Mehrere falsche Teile werden alle aufgeführt.
+  ev = { score: 2, understood: true, feedback: '', teilergebnisse: [
+    { label: 'a', endergebnis: 4, schueler_endergebnis: 9 },
+    { label: 'b', endergebnis: 30, schueler_endergebnis: 25 },
+  ]};
+  M.applyNumericVerdict(ev, true, 'mittel');
+  ok(/a\)/.test(ev.feedback) && /b\)/.test(ev.feedback), 'beide falschen Teile genannt');
+
+  // Teile ohne belastbares Verdikt (keine Schülerzahl) → keine Übersteuerung.
+  ev = { score: 2, understood: true, feedback: '', teilergebnisse: [
+    { label: 'a', endergebnis: 4, schueler_endergebnis: null },
+  ]};
+  eq(M.applyNumericVerdict(ev, true, 'mittel'), '', 'kein belastbares Teil-Verdikt → keine Notiz');
+  eq(ev.score, 2, 'kein belastbares Teil-Verdikt → score bleibt');
+
+  // teilergebnisse hat Vorrang vor den Einzelfeldern.
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 100, schueler_endergebnis: 100,
+         teilergebnisse: [{ label: 'a', endergebnis: 4, schueler_endergebnis: 5 }] };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 1, 'teilergebnisse überschreibt die Einzelfeld-Auswertung');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────

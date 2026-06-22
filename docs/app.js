@@ -6230,28 +6230,64 @@ function numEqual(a, b, rel = 0.01) {
   return Math.abs(a - b) <= Math.max(1e-9, rel * Math.abs(b), 0.005);
 }
 
+// Deterministisches Verdikt für EINE Zahl. Liefert { verdict, ref, stud } mit
+// verdict ∈ 'ok' | 'abweichung' | null. null = KEIN belastbares Urteil: entweder
+// fehlt eine Zahl ODER die LLM-Ground-Truth ist intern widersprüchlich – dann bleibt
+// das LLM-Urteil stehen statt es auf wackeliger Basis zu überstimmen.
+// In-Band-Doppelcheck (B.5): liegen sowohl ein nachgerechneter Ausdruck als auch eine
+// genannte "endergebnis"-Zahl vor, MÜSSEN sie übereinstimmen – sonst ist die Referenz
+// unsicher (verdict=null). Liegt nur eine der beiden vor, dient sie als Referenz.
+function numericCheck(rechnung, endergebnis, schueler, tol) {
+  const r1 = evalExpr(rechnung);
+  const r2 = parseNum(endergebnis);
+  const stud = parseNum(schueler);
+  let ref;
+  if (isFinite(r1) && isFinite(r2)) {
+    if (!numEqual(r1, r2, tol)) return { verdict: null, ref: r1, stud };  // intern widersprüchlich
+    ref = r1;
+  } else {
+    ref = isFinite(r1) ? r1 : r2;
+  }
+  if (!isFinite(ref) || !isFinite(stud)) return { verdict: null, ref, stud };
+  return { verdict: numEqual(stud, ref, tol) ? 'ok' : 'abweichung', ref, stud };
+}
+
 // Deterministische Rechen-Prüfung (#4) als isolierte, unit-testbare Funktion: der CODE
-// vergleicht die Zahlen, nicht das LLM. Referenz = nachgerechneter Ausdruck (härtet die
-// LLM-Zahl), sonst dessen "endergebnis". Nachweislich falsches Endergebnis ⇒ nie volle
+// vergleicht die Zahlen, nicht das LLM. Nachweislich falsches Endergebnis ⇒ nie volle
 // Punktzahl (score auf 1 gedeckelt, understood=false) – überstimmt eine LLM-Fehlein-
-// schätzung und bleibt über Re-Prüfungen stabil. Mutiert `ev` (score/understood/feedback)
-// und gibt die angehängte Notiz zurück. Toleranz strenger auf hohen Niveaus.
+// schätzung und bleibt über Re-Prüfungen stabil. Bei mehreren Teilaufgaben mit je eigenem
+// Zahlergebnis (ev.teilergebnisse) wird pro Teil geprüft und der Gesamt-Score aus den
+// Teil-Verdikten gebildet (B.5). Mutiert `ev` (score/understood/feedback), gibt die
+// angehängte Notiz zurück. Toleranz strenger auf hohen Niveaus.
 function applyNumericVerdict(ev, isCalcTask, diff) {
+  if (!isCalcTask) return '';
+  const tol = (diff === 'pruefungsnah' || diff === 'schwer') ? 0.005 : 0.02;
+  const fmt = n => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
+  const parts = Array.isArray(ev.teilergebnisse) && ev.teilergebnisse.length ? ev.teilergebnisse : null;
   let note = '';
-  if (isCalcTask) {
-    const refByExpr = evalExpr(ev.endergebnis_rechnung);
-    const ref  = isFinite(refByExpr) ? refByExpr : parseNum(ev.endergebnis);
-    const stud = parseNum(ev.schueler_endergebnis);
-    if (isFinite(ref) && isFinite(stud)) {
-      const tol = (diff === 'pruefungsnah' || diff === 'schwer') ? 0.005 : 0.02;
-      const fmt = n => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
-      if (numEqual(stud, ref, tol)) {
-        note = `🔢 Endergebnis geprüft: ${fmt(stud)} ✓`;
-      } else {
-        note = `🔢 Endergebnis weicht ab – erwartet ${fmt(ref)}, deine Antwort ${fmt(stud)}.`;
-        if (ev.score >= 2) ev.score = 1;
-        ev.understood = false;
-      }
+  if (parts) {
+    const bad = [];
+    let anyVerdict = false;
+    parts.forEach((p, i) => {
+      const c = numericCheck(p.endergebnis_rechnung, p.endergebnis, p.schueler_endergebnis, tol);
+      if (c.verdict) anyVerdict = true;
+      if (c.verdict === 'abweichung') bad.push(`${p.label || i + 1}) erwartet ${fmt(c.ref)}, deine ${fmt(c.stud)}`);
+    });
+    if (bad.length) {
+      if (ev.score >= 2) ev.score = 1;
+      ev.understood = false;
+      note = `🔢 Endergebnis weicht ab bei ${bad.join('; ')}.`;
+    } else if (anyVerdict) {
+      note = `🔢 Alle geprüften Teilergebnisse korrekt ✓`;
+    }
+  } else {
+    const c = numericCheck(ev.endergebnis_rechnung, ev.endergebnis, ev.schueler_endergebnis, tol);
+    if (c.verdict === 'abweichung') {
+      if (ev.score >= 2) ev.score = 1;
+      ev.understood = false;
+      note = `🔢 Endergebnis weicht ab – erwartet ${fmt(c.ref)}, deine Antwort ${fmt(c.stud)}.`;
+    } else if (c.verdict === 'ok') {
+      note = `🔢 Endergebnis geprüft: ${fmt(c.stud)} ✓`;
     }
   }
   if (note) ev.feedback = ev.feedback ? `${ev.feedback} — ${note}` : note;
@@ -6390,9 +6426,11 @@ async function checkLernenSolution() {
     const numFields = isCalcTask ? `,
   "endergebnis_rechnung": "reiner Rechenausdruck für DAS korrekte Endergebnis, nur Zahlen/Operatoren (z.B. \\"500*1.08\\"); leer wenn nicht sinnvoll",
   "endergebnis": <korrektes Endergebnis als reine Zahl, Punkt als Dezimaltrenner>,
-  "schueler_endergebnis": <Endzahl, die der Student angibt, als reine Zahl – null wenn keine genannt>` : '';
+  "schueler_endergebnis": <Endzahl, die der Student angibt, als reine Zahl – null wenn keine genannt>,
+  "teilergebnisse": [{ "label": "a", "endergebnis_rechnung": "Ausdruck", "endergebnis": <zahl>, "schueler_endergebnis": <zahl oder null> }]` : '';
     const numInstr = isCalcTask
-      ? `\nNUMERISCH: Fülle "endergebnis"/"endergebnis_rechnung" mit DEINEM korrekten Resultat und "schueler_endergebnis" mit der Endzahl des Studenten (null wenn keine). Punkt als Dezimaltrenner. Die endgültige Richtig/Falsch-Wertung der Zahl übernimmt das System.`
+      ? `\nNUMERISCH: Fülle "endergebnis"/"endergebnis_rechnung" mit DEINEM korrekten Resultat und "schueler_endergebnis" mit der Endzahl des Studenten (null wenn keine). Punkt als Dezimaltrenner. WICHTIG: "endergebnis_rechnung" und "endergebnis" MÜSSEN dasselbe Resultat ergeben – rechne den Ausdruck selbst nach. Die endgültige Richtig/Falsch-Wertung der Zahl übernimmt das System.
+TEILAUFGABEN MIT EIGENEM ZAHLERGEBNIS: Hat die Aufgabe mehrere Teilaufgaben (a/b/c) mit JE EIGENEM numerischen Endergebnis, fülle "teilergebnisse" mit einem Eintrag pro Teil ("label" = Kennung ohne Klammer) und lass die oberen Einzelfelder leer. Gibt es nur EIN Endergebnis, nutze die oberen Felder und lass "teilergebnisse" als leeres Array [].`
       : '';
 
     // LESEN VOR BEWERTEN: Bei Handschrift transkribiert die KI ZUERST exakt, was dasteht,

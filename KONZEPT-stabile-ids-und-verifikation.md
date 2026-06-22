@@ -222,13 +222,19 @@ Modell geurteilt. Das LLM liefert nur noch qualitatives Feedback zum *Vorgehen*.
 - Vorsicht bei Rundungs-/Zwischenschritt-Aufgaben → Toleranz aus der Musterlösung
   (`toleranz_rel`) mitführen.
 
-### B.5 Optionale Härtung
+### B.5 Optionale Härtung (erledigt, v201)
 
-- **Doppelte Generierung:** Musterlösung zweimal (oder mit Verifier-Prompt)
-  erzeugen, nur trauen wenn die Endzahlen übereinstimmen – billiger
-  Zuverlässigkeits-Boost für die Ground Truth.
-- **Mehrere Endergebnisse / Teilaufgaben:** `endergebnis` als Array je Teilaufgabe;
-  Vergleich pro Teil, Gesamt-`score` aus den Teil-Verdikten.
+- **Zuverlässigkeit der Ground Truth (In-Band statt zweitem Call):** Da ein
+  Bewertungs-Call bereits `endergebnis_rechnung` (Ausdruck) UND `endergebnis` (Zahl)
+  liefert, prüft `numericCheck()` beide gegeneinander. Stimmen sie nicht überein, ist
+  die Referenz intern widersprüchlich → `verdict=null`, das numerische Verdikt
+  übersteuert NICHT (LLM-Urteil bleibt). Kosten-frei, kein zweiter Generierungs-Call
+  (bewusst so gewählt wegen der Budget-Caps / Cloud-Haiku als Zielmodell).
+- **Mehrere Endergebnisse / Teilaufgaben:** optionales `ev.teilergebnisse`-Array
+  (`{label, endergebnis_rechnung, endergebnis, schueler_endergebnis}`); `applyNumericVerdict`
+  prüft pro Teil via `numericCheck`, deckelt den Gesamt-`score` sobald EIN Teil abweicht
+  und benennt die abweichenden Teile in der Notiz. Fällt ohne `teilergebnisse` auf den
+  Einzelwert-Pfad zurück. Getestet in `scripts/test-pure.js`.
 
 ### B.6 Was das löst
 
@@ -257,6 +263,8 @@ die Funktionen zur Laufzeit aus `docs/app.js` (kein Copy-Paste → driftsicher):
   `dedupeTopicUids` (Erhalt von Fortschritt über Umbenennungen, #2/#6/#7).
 - Ausdrucks-Evaluator `evalExpr`/`parseNum`/`numEqual` (Arithmetik, deutsche Zahlen,
   Toleranz, Einheiten).
+- Verdikt-Integration `applyNumericVerdict`/`numericCheck` (Übersteuerung des LLM-Scores,
+  In-Band-Doppelcheck, Niveau-Toleranz, Re-Check-Stabilität, Teilaufgaben).
 
 ## Offen / bewusst nicht umgesetzt (optional)
 
@@ -264,7 +272,6 @@ die Funktionen zur Laufzeit aus `docs/app.js` (kein Copy-Paste → driftsicher):
   Fortschritt bleibt auch ohne Anzeige erhalten.
 - **`archived:true`-Markierung** unmatchter Alt-Themen (A.5) – überflüssig, da die
   `topicUids`-Map ohnehin erhalten bleibt und die learned-Rows referenzierbar lässt.
-- **B.5 Härtung** (Doppel-Generierung der Musterlösung, `endergebnis`-Array je Teilaufgabe).
 
 ## Risiken
 
