@@ -6230,6 +6230,34 @@ function numEqual(a, b, rel = 0.01) {
   return Math.abs(a - b) <= Math.max(1e-9, rel * Math.abs(b), 0.005);
 }
 
+// Deterministische Rechen-Prüfung (#4) als isolierte, unit-testbare Funktion: der CODE
+// vergleicht die Zahlen, nicht das LLM. Referenz = nachgerechneter Ausdruck (härtet die
+// LLM-Zahl), sonst dessen "endergebnis". Nachweislich falsches Endergebnis ⇒ nie volle
+// Punktzahl (score auf 1 gedeckelt, understood=false) – überstimmt eine LLM-Fehlein-
+// schätzung und bleibt über Re-Prüfungen stabil. Mutiert `ev` (score/understood/feedback)
+// und gibt die angehängte Notiz zurück. Toleranz strenger auf hohen Niveaus.
+function applyNumericVerdict(ev, isCalcTask, diff) {
+  let note = '';
+  if (isCalcTask) {
+    const refByExpr = evalExpr(ev.endergebnis_rechnung);
+    const ref  = isFinite(refByExpr) ? refByExpr : parseNum(ev.endergebnis);
+    const stud = parseNum(ev.schueler_endergebnis);
+    if (isFinite(ref) && isFinite(stud)) {
+      const tol = (diff === 'pruefungsnah' || diff === 'schwer') ? 0.005 : 0.02;
+      const fmt = n => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
+      if (numEqual(stud, ref, tol)) {
+        note = `🔢 Endergebnis geprüft: ${fmt(stud)} ✓`;
+      } else {
+        note = `🔢 Endergebnis weicht ab – erwartet ${fmt(ref)}, deine Antwort ${fmt(stud)}.`;
+        if (ev.score >= 2) ev.score = 1;
+        ev.understood = false;
+      }
+    }
+  }
+  if (note) ev.feedback = ev.feedback ? `${ev.feedback} — ${note}` : note;
+  return note;
+}
+
 // Zerlegt eine Musterlösung an fett markierten Teilaufgaben-Köpfen (**a)**, **2)** …),
 // damit korrekte Teile optisch eingeklappt und nur die falschen offen gezeigt werden.
 function splitLoesungParts(text) {
@@ -6452,28 +6480,10 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     // gelassen, damit die Bewertung schneller war).
     if (preLoesung) ev.loesung = preLoesung;
 
-    // Deterministische Rechen-Prüfung (#4): der CODE vergleicht die Zahlen, nicht das
-    // LLM. Referenz = nachgerechneter Ausdruck (härtet die LLM-Zahl), sonst dessen
-    // "endergebnis". Nachweislich falsches Endergebnis ⇒ nie volle Punktzahl –
-    // überstimmt eine LLM-Fehleinschätzung und bleibt über Re-Prüfungen stabil.
-    let numNote = '';
-    if (isCalcTask) {
-      const refByExpr = evalExpr(ev.endergebnis_rechnung);
-      const ref  = isFinite(refByExpr) ? refByExpr : parseNum(ev.endergebnis);
-      const stud = parseNum(ev.schueler_endergebnis);
-      if (isFinite(ref) && isFinite(stud)) {
-        const tol = (lernenCurrentDiff === 'pruefungsnah' || lernenCurrentDiff === 'schwer') ? 0.005 : 0.02;
-        const fmt = n => (Math.round(n * 1000) / 1000).toLocaleString('de-DE');
-        if (numEqual(stud, ref, tol)) {
-          numNote = `🔢 Endergebnis geprüft: ${fmt(stud)} ✓`;
-        } else {
-          numNote = `🔢 Endergebnis weicht ab – erwartet ${fmt(ref)}, deine Antwort ${fmt(stud)}.`;
-          if (ev.score >= 2) ev.score = 1;
-          ev.understood = false;
-        }
-      }
-    }
-    if (numNote) ev.feedback = ev.feedback ? `${ev.feedback} — ${numNote}` : numNote;
+    // Deterministische Rechen-Prüfung (#4) – Logik isoliert in applyNumericVerdict()
+    // (unit-getestet in scripts/test-pure.js). Mutiert ev: deckelt den Score und setzt
+    // understood/feedback, wenn das Endergebnis nachweislich abweicht.
+    applyNumericVerdict(ev, isCalcTask, lernenCurrentDiff);
 
     lernenAttempts++;
     lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung, transkription: ev.transkription || '' };

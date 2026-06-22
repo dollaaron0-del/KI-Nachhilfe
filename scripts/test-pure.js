@@ -37,7 +37,7 @@ function extractConst(name) {
 }
 
 const FN_DECLS = [
-  'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual',
+  'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'applyNumericVerdict',
   'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids',
 ];
@@ -56,7 +56,7 @@ const factory = new Function('self', `
   function pathTopics() { return __path; }
   ${assembled}
   return {
-    normTopic, jaccardTokens, parseNum, evalExpr, numEqual, isTopicUid,
+    normTopic, jaccardTokens, parseNum, evalExpr, numEqual, applyNumericVerdict, isTopicUid,
     newTopicUid, topicId, topicKey, resolveKey,
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids,
     _setUids: m => { topicUids = m; },
@@ -182,6 +182,66 @@ group('numEqual — Toleranz', () => {
   ok(!M.numEqual(100, 102, 0.01), '2 von 100 außerhalb 1%');
   ok(M.numEqual(100, 100.5, 0.01), '0,5 von 100 innerhalb 1%');
   ok(!M.numEqual(NaN, 5), 'NaN → false');
+});
+
+// ── Teil B (Integration): applyNumericVerdict — Score-Zusammensetzung (KONZEPT B.6) ──
+// Die Verhaltensgarantie: das deterministische Zahl-Verdikt überstimmt das LLM-Urteil.
+// ev wird mutiert (score/understood/feedback). diff steuert die Toleranz.
+group('applyNumericVerdict — Zahl überstimmt LLM (#4)', () => {
+  // Falsche Zahl trotz LLM-score=2 → Deckelung auf 1, understood=false, Notiz.
+  let ev = { score: 2, understood: true, feedback: 'Sauberer Weg', endergebnis: 540, schueler_endergebnis: 500 };
+  const note = M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 1, 'falsches Endergebnis deckelt score 2→1');
+  eq(ev.understood, false, 'understood wird false');
+  ok(/weicht ab/.test(note) && /weicht ab/.test(ev.feedback), 'Abweichungs-Notiz angehängt');
+  ok(/Sauberer Weg/.test(ev.feedback), 'bestehendes Feedback bleibt erhalten');
+
+  // Richtige Zahl → score unverändert, ✓-Notiz, understood bleibt.
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 540, schueler_endergebnis: 540 };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 2, 'korrektes Endergebnis lässt score=2');
+  eq(ev.understood, true, 'understood bleibt true');
+  ok(/✓/.test(ev.feedback), '✓-Notiz gesetzt');
+
+  // endergebnis_rechnung (Ausdruck) härtet/überstimmt die LLM-"endergebnis"-Zahl.
+  ev = { score: 0, understood: false, feedback: '', endergebnis: 999, endergebnis_rechnung: '500 * 1.08', schueler_endergebnis: 540 };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  ok(/✓/.test(ev.feedback), 'Referenz aus nachgerechnetem Ausdruck (540), nicht aus falschem endergebnis (999)');
+
+  // Falsche Zahl bei bereits niedrigem score → bleibt (kein Hochstufen), understood=false.
+  ev = { score: 0, understood: false, feedback: '', endergebnis: 540, schueler_endergebnis: 1 };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 0, 'score=0 wird nicht angehoben');
+  eq(ev.understood, false, 'understood bleibt false');
+
+  // Keine Rechenaufgabe → keine Mutation, leere Notiz (Konzept-Themen bleiben LLM-bewertet).
+  ev = { score: 2, understood: true, feedback: 'gut', endergebnis: 540, schueler_endergebnis: 500 };
+  eq(M.applyNumericVerdict(ev, false, 'mittel'), '', 'Nicht-Rechenaufgabe → keine Notiz');
+  eq(ev.score, 2, 'Nicht-Rechenaufgabe: score unangetastet');
+
+  // Schüler nennt keine Zahl → LLM-Urteil bleibt stehen (kein deterministisches Verdikt).
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 540, schueler_endergebnis: null };
+  eq(M.applyNumericVerdict(ev, true, 'mittel'), '', 'kein Schüler-Endergebnis → keine Übersteuerung');
+  eq(ev.score, 2, 'ohne Schülerzahl: score unangetastet');
+
+  // Niveau-abhängige Toleranz: 1%-Abweichung besteht bei "mittel" (2%), scheitert bei "pruefungsnah" (0,5%).
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 100, schueler_endergebnis: 101 };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 2, '1%-Abweichung bei "mittel" toleriert');
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 100, schueler_endergebnis: 101 };
+  M.applyNumericVerdict(ev, true, 'pruefungsnah');
+  eq(ev.score, 1, '1%-Abweichung bei "pruefungsnah" gedeckelt');
+
+  // Re-Check-Stabilität: dasselbe falsche ev erneut geprüft bleibt ≤1 (deterministisch).
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 540, schueler_endergebnis: 500 };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 1, 'Re-Check zementiert kein Fehlurteil – bleibt 1');
+
+  // Deutsche Schülerzahl mit Einheit wird korrekt geparst.
+  ev = { score: 2, understood: true, feedback: '', endergebnis: 1234.56, schueler_endergebnis: '1.234,56 €' };
+  M.applyNumericVerdict(ev, true, 'mittel');
+  eq(ev.score, 2, 'deutsche Zahl "1.234,56 €" == 1234.56');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────
