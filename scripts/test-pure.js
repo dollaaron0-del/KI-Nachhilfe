@@ -39,9 +39,9 @@ function extractConst(name) {
 const FN_DECLS = [
   'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'numericCheck', 'applyNumericVerdict',
   'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
-  'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids',
+  'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff',
 ];
-const CONST_DECLS = ['isTopicUid'];
+const CONST_DECLS = ['isTopicUid', 'formatScanDiff'];
 
 const assembled = [
   ...CONST_DECLS.map(extractConst),
@@ -58,7 +58,7 @@ const factory = new Function('self', `
   return {
     normTopic, jaccardTokens, parseNum, evalExpr, numEqual, numericCheck, applyNumericVerdict, isTopicUid,
     newTopicUid, topicId, topicKey, resolveKey,
-    dedupeTopicUids, reconcileTopicUids, ensureTopicUids,
+    dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
@@ -142,6 +142,25 @@ group('newTopicUid — eindeutig & wohlgeformt', () => {
   const ids = new Set();
   for (let i = 0; i < 1000; i++) { const u = M.newTopicUid(); ok(M.isTopicUid(u), 'gültiges Format'); ids.add(u); }
   eq(ids.size, 1000, '1000 IDs alle eindeutig (kein Millisekunden-Kollaps)');
+});
+
+group('scanDiff — Re-Scan-Diff (#7)', () => {
+  M._setUids({});
+  // Erstscan: alles neu.
+  eq(JSON.stringify(M.scanDiff([], ['A', 'B', 'C'])), JSON.stringify({ added: 3, removed: 0, unchanged: 0 }), 'Erstscan → alles neu');
+  // Keine Änderung.
+  eq(JSON.stringify(M.scanDiff(['A', 'B'], ['A', 'B'])), JSON.stringify({ added: 0, removed: 0, unchanged: 2 }), 'identisch → alles unverändert');
+  // Eins dazu, eins weg (über normalisierte Namen, ohne UIDs).
+  eq(JSON.stringify(M.scanDiff(['A', 'B'], ['A', 'C'])), JSON.stringify({ added: 1, removed: 1, unchanged: 1 }), 'A bleibt, B weg, C neu');
+  // Normalisierung: Artikel-Variante zählt als unverändert.
+  eq(JSON.stringify(M.scanDiff(['Photosynthese'], ['Die Photosynthese'])), JSON.stringify({ added: 0, removed: 0, unchanged: 1 }), 'Artikel-Rename → unverändert');
+
+  // Rename mit erhaltener UID (Zustand nach reconcileTopicUids) → unverändert, nicht neu+weg.
+  M._setUids({ 'lineare algebra grundlagen': 't_la', 'lineare algebra': 't_la' });
+  eq(JSON.stringify(M.scanDiff(['Lineare Algebra Grundlagen'], ['Lineare Algebra'])), JSON.stringify({ added: 0, removed: 0, unchanged: 1 }), 'Rename mit gleicher UID → unverändert');
+  M._setUids({});
+
+  eq(M.formatScanDiff({ added: 3, removed: 2, unchanged: 18 }), '3 neu · 2 entfernt · 18 unverändert', 'Format-String');
 });
 
 // ── Teil B: Ausdrucks-Evaluator ───────────────────────────────────────────────

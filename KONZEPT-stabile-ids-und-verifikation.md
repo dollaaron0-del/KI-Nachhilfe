@@ -268,10 +268,12 @@ die Funktionen zur Laufzeit aus `docs/app.js` (kein Copy-Paste → driftsicher):
 
 ## Offen / bewusst nicht umgesetzt (optional)
 
-- **Re-Scan-Diff-UX** („3 neu · 2 entfernt · 18 unverändert", A.5 Bonus) – nicht gebaut;
-  Fortschritt bleibt auch ohne Anzeige erhalten.
 - **`archived:true`-Markierung** unmatchter Alt-Themen (A.5) – überflüssig, da die
   `topicUids`-Map ohnehin erhalten bleibt und die learned-Rows referenzierbar lässt.
+
+(Erledigt v202: **Re-Scan-Diff-UX** „X neu · Y entfernt · Z unverändert" via `scanDiff()`/
+`formatScanDiff()`, als Toast in beiden Scan-Pfaden bei einem Re-Scan. Rename zählt als
+unverändert, da die ID erhalten bleibt.)
 
 ## Risiken
 

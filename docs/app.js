@@ -3203,6 +3203,8 @@ async function scanTopics() {
     aufgabenScanDone();
     renderTopicChips();
     showAufgabenState(document.getElementById('aufgaben-topics'));
+    // Re-Scan: statt stiller Überschreibung zeigen, was sich geändert hat (#7).
+    if (prevTopics.length) toast(`🔄 Themen aktualisiert: ${formatScanDiff(scanDiff(prevTopics, scannedTopics))}`, 'success', 4000);
   } catch (e) {
     aufgabenScanDone();
     showAufgabenState(document.getElementById('aufgaben-idle'));
@@ -4862,6 +4864,21 @@ function reconcileTopicUids(prevNames, newNames) {
     else topicUids[k] = newTopicUid();
   });
 }
+
+// Re-Scan-Diff (#7-Bonus): zählt anhand der stabilen IDs, wie viele Themen neu sind,
+// verschwunden und erhalten geblieben. Ein Rename zählt als "unverändert", weil die ID
+// beim Reconcile erhalten bleibt (= Fortschritt bleibt). MUSS nach reconcileTopicUids
+// laufen, damit die neuen Namen ihre IDs schon tragen.
+function scanDiff(prevNames, newNames) {
+  const prevUids = new Set((prevNames || []).map(topicId));
+  const newUids  = new Set((newNames  || []).map(topicId));
+  let added = 0, unchanged = 0;
+  for (const u of newUids) (prevUids.has(u) ? unchanged++ : added++);
+  let removed = 0;
+  for (const u of prevUids) if (!newUids.has(u)) removed++;
+  return { added, removed, unchanged };
+}
+const formatScanDiff = d => `${d.added} neu · ${d.removed} entfernt · ${d.unchanged} unverändert`;
 
 // IDs in die geteilte Struktur (Server + lokal) schreiben, plus lokaler Fallback.
 function persistTopicUids(subjId) {
@@ -6758,7 +6775,9 @@ async function scanModuleStructure(btn) {
     }).catch(() => {});
     renderMilestone();
     loadLernpfad();
-    toast(`🗺️ ${hauptthemen.length} Hauptthemen · ${scannedTopics.length} Lernthemen erkannt!`, 'success');
+    // Re-Scan: zusätzlich anzeigen, was sich gegenüber der alten Struktur geändert hat (#7).
+    const diffNote = prevNames.length ? ` (${formatScanDiff(scanDiff(prevNames, newNames))})` : '';
+    toast(`🗺️ ${hauptthemen.length} Hauptthemen · ${scannedTopics.length} Lernthemen erkannt!${diffNote}`, 'success');
   } catch (e) {
     toast('Fehler beim Erkennen: ' + e.message, 'error');
   }
