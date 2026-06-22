@@ -1,6 +1,15 @@
 # Konzept: Stabile Themen-IDs + Verifikationsschicht (Lern-Tab)
 
-Status: Entwurf · betrifft `docs/app.js` (Client) und `server/server.js` (+ `schema.sql`)
+Status: **umgesetzt** (v22.06.2026) · betrifft `docs/app.js` (Client) und `server/server.js` (+ `schema.sql`)
+
+> **Umsetzungs-Notiz:** Teil A wurde mit einer leichten Architektur-Abweichung gebaut –
+> statt `{id,name}`-Objekte in die Struktur einzubetten und eine riskante Migration zu
+> fahren, hält der Client eine separate, fach-global geteilte Map `topicUids` (`normName → uid`)
+> und löst Fortschritts-Schlüssel **beim Lesen** über `resolveKey()` auf. Alt-Zeilen
+> (`name::diff`) werden dadurch nie destruktiv umgeschrieben → kein Migrations-Teilabbruch
+> möglich (#6 entfällt strukturell). Teil B ist vollständig (`evalExpr` Shunting-Yard ohne
+> `eval`). Die im Abschnitt „Tests" geforderte Harness existiert jetzt: `scripts/test-pure.js`
+> (`npm test`).
 
 Dieses Dokument beschreibt zwei zusammenhängende Umbauten am Lern-Tab:
 
@@ -233,17 +242,29 @@ Modell geurteilt. Das LLM liefert nur noch qualitatives Feedback zum *Vorgehen*.
 ## Phasen / Rollout
 
 - **Phase 0 (erledigt):** normTopic-Matching im Lese-Vergleich (v155).
-- **Phase 1 — Stabile IDs:** Struktur-Upgrade + Migration + Reconcile.
-  Hinter `idmigr_v1`-Flag, Legacy-Keys als Fallback behalten → reversibel.
-- **Phase 2 — Verifikation:** Ausdrucks-Evaluator + getrennte Bewertung für
-  Rechenaufgaben.
+- **Phase 1 — Stabile IDs (erledigt):** `topicUids`-Map (`normName → uid`) in der
+  geteilten Struktur, `resolveKey()`-Auflösung beim Lesen (Legacy-`name::diff`-Keys als
+  Fallback → reversibel), `reconcileTopicUids()` beim Re-Scan, `dedupeTopicUids()`-
+  Selbstheilung. Kein `idmigr_v1`-Flag nötig, da nicht destruktiv migriert wird.
+- **Phase 2 — Verifikation (erledigt):** Ausdrucks-Evaluator `evalExpr` + getrennte,
+  deterministische Bewertung (`numEqual`) für Rechenaufgaben in `checkLernenSolution`.
 
-## Tests (es gibt noch keine Harness)
+## Tests (erledigt — `scripts/test-pure.js`, `npm test`)
 
-Beide Bausteine sind als **reine Funktionen** isolierbar und sollten eine kleine
-Node-Testdatei bekommen:
-- `normTopic`-Matching-Leiter (Erhalt von Fortschritt über Umbenennungen).
-- Ausdrucks-Evaluator (Arithmetik, deutsche Zahlen, Toleranz, Einheiten).
+Beide Bausteine sind als **reine Funktionen** isoliert getestet. Der Harness extrahiert
+die Funktionen zur Laufzeit aus `docs/app.js` (kein Copy-Paste → driftsicher):
+- `normTopic`-Matching-Leiter inkl. `topicId`/`resolveKey`/`reconcileTopicUids`/
+  `dedupeTopicUids` (Erhalt von Fortschritt über Umbenennungen, #2/#6/#7).
+- Ausdrucks-Evaluator `evalExpr`/`parseNum`/`numEqual` (Arithmetik, deutsche Zahlen,
+  Toleranz, Einheiten).
+
+## Offen / bewusst nicht umgesetzt (optional)
+
+- **Re-Scan-Diff-UX** („3 neu · 2 entfernt · 18 unverändert", A.5 Bonus) – nicht gebaut;
+  Fortschritt bleibt auch ohne Anzeige erhalten.
+- **`archived:true`-Markierung** unmatchter Alt-Themen (A.5) – überflüssig, da die
+  `topicUids`-Map ohnehin erhalten bleibt und die learned-Rows referenzierbar lässt.
+- **B.5 Härtung** (Doppel-Generierung der Musterlösung, `endergebnis`-Array je Teilaufgabe).
 
 ## Risiken
 

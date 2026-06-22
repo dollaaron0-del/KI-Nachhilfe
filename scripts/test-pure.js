@@ -1,0 +1,189 @@
+#!/usr/bin/env node
+// Test-Harness für die reinen Funktionen aus docs/app.js (KONZEPT-Abschnitt "Tests").
+// Deckt die zwei im KONZEPT genannten Bausteine ab:
+//   1. Teil A — die normTopic-Matching-Leiter (Erhalt von Fortschritt über Umbenennungen).
+//   2. Teil B — den Ausdrucks-Evaluator (Arithmetik, deutsche Zahlen, Toleranz).
+//
+// Die Funktionen werden ZUR LAUFZEIT aus docs/app.js extrahiert (kein Copy-Paste),
+// damit der Test nicht von der Quelle driften kann. app.js bleibt einzige Wahrheit.
+// Läuft ohne Abhängigkeiten:  node scripts/test-pure.js   (oder: npm test)
+
+const fs = require('fs');
+const path = require('path');
+
+const APP = path.join(__dirname, '..', 'docs', 'app.js');
+const src = fs.readFileSync(APP, 'utf8');
+
+// ── Extraktion ──────────────────────────────────────────────────────────────
+// Top-Level-Funktionsdeklaration `function NAME(...) { ... }` per Klammer-Matching.
+function extractFn(name) {
+  const m = src.match(new RegExp('function\\s+' + name + '\\s*\\('));
+  if (!m) throw new Error(`Funktion ${name} nicht in app.js gefunden`);
+  let i = src.indexOf('{', m.index);
+  if (i < 0) throw new Error(`Kein Body für ${name}`);
+  let depth = 0;
+  for (let j = i; j < src.length; j++) {
+    const c = src[j];
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return src.slice(m.index, j + 1); }
+  }
+  throw new Error(`Body für ${name} nicht geschlossen`);
+}
+// Einzeilige `const NAME = ...;`-Deklaration (z. B. isTopicUid).
+function extractConst(name) {
+  const m = src.match(new RegExp('const\\s+' + name + '\\s*=[^\\n]*;'));
+  if (!m) throw new Error(`const ${name} nicht in app.js gefunden`);
+  return m[0];
+}
+
+const FN_DECLS = [
+  'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual',
+  'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
+  'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids',
+];
+const CONST_DECLS = ['isTopicUid'];
+
+const assembled = [
+  ...CONST_DECLS.map(extractConst),
+  ...FN_DECLS.map(extractFn),
+].join('\n\n');
+
+// In einen Scope hängen, der die Modul-globalen Bindings (topicUids, self/crypto,
+// pathTopics) bereitstellt — genau die, auf die die extrahierten Funktionen zugreifen.
+const factory = new Function('self', `
+  let topicUids = {};
+  let __path = [];
+  function pathTopics() { return __path; }
+  ${assembled}
+  return {
+    normTopic, jaccardTokens, parseNum, evalExpr, numEqual, isTopicUid,
+    newTopicUid, topicId, topicKey, resolveKey,
+    dedupeTopicUids, reconcileTopicUids, ensureTopicUids,
+    _setUids: m => { topicUids = m; },
+    _getUids: () => topicUids,
+    _setPath: p => { __path = p; },
+  };
+`);
+const M = factory({ crypto: require('crypto').webcrypto });
+
+// ── Mini-Test-Runner ─────────────────────────────────────────────────────────
+let pass = 0, fail = 0;
+function ok(cond, msg) { if (cond) { pass++; } else { fail++; console.error('  ✗ ' + msg); } }
+function eq(a, b, msg) { ok(Object.is(a, b) || a === b, `${msg}  (erwartet ${JSON.stringify(b)}, war ${JSON.stringify(a)})`); }
+function approx(a, b, msg) { ok(Math.abs(a - b) < 1e-6, `${msg}  (erwartet ≈${b}, war ${a})`); }
+function group(name, fn) { console.log('• ' + name); fn(); }
+
+// ── Teil A: normTopic-Matching-Leiter ─────────────────────────────────────────
+group('normTopic — Normalisierung', () => {
+  eq(M.normTopic('Die Lichtreaktion'), 'lichtreaktion', 'führender Artikel entfernt');
+  eq(M.normTopic('LICHTREAKTION!'), 'lichtreaktion', 'lowercase + Satzzeichen weg');
+  eq(M.normTopic('  Lichtreaktion  '), 'lichtreaktion', 'getrimmt');
+  eq(M.normTopic('Energieübertragung'), 'energieubertragung', 'Umlaut → ASCII');
+  eq(M.normTopic('Lineare   Algebra'), 'lineare algebra', 'Mehrfach-Whitespace kollabiert');
+  // Re-Scan-Stabilität: Schreibvarianten kollabieren auf denselben Schlüssel.
+  eq(M.normTopic('Die Photosynthese'), M.normTopic('photosynthese'), 'Artikel-Variante == Basis');
+});
+
+group('jaccardTokens — Rename-Ähnlichkeit', () => {
+  approx(M.jaccardTokens('lineare algebra grundlagen', 'lineare algebra'), 2 / 3, '2/3 Überlappung');
+  eq(M.jaccardTokens('foo', 'bar'), 0, 'keine Überlappung → 0');
+  eq(M.jaccardTokens('', 'x'), 0, 'leer → 0');
+  eq(M.jaccardTokens('a b', 'a b'), 1, 'identisch → 1');
+});
+
+group('topicId / topicKey / resolveKey — Fallback & Auflösung', () => {
+  M._setUids({});
+  eq(M.topicId('Die Lichtreaktion'), 'lichtreaktion', 'ohne UID: Fallback auf normName (v155)');
+  eq(M.topicKey('Die Lichtreaktion', 'mittel'), 'lichtreaktion::mittel', 'Key = normName::diff');
+
+  M._setUids({ lichtreaktion: 't_abc123' });
+  eq(M.topicId('Lichtreaktion!'), 't_abc123', 'mit UID: stabile ID');
+  eq(M.topicKey('Lichtreaktion', 'schwer'), 't_abc123::schwer', 'Key = uid::diff');
+  // Alt-Eintrag (Name::diff) UND ID-Eintrag lösen auf dieselbe ID auf → #2/#6:
+  eq(M.resolveKey('Lichtreaktion::mittel'), 't_abc123::mittel', 'Legacy-Key → uid');
+  eq(M.resolveKey('t_abc123::mittel'), 't_abc123::mittel', 'ID-Key bleibt');
+  eq(M.resolveKey('Lichtreaktion'), 't_abc123::einsteiger', 'Key ohne diff → einsteiger');
+});
+
+group('reconcileTopicUids — Erhalt über Re-Scan (#7)', () => {
+  // 1) exakt/normalisiert: gleicher (umbenannter mit Artikel) Name behält UID.
+  M._setUids({ photosynthese: 't_p1' });
+  M.reconcileTopicUids(['Photosynthese'], ['Die Photosynthese']);
+  eq(M.topicId('Die Photosynthese'), 't_p1', 'Artikel-Rename behält UID (normalisiert-Treffer)');
+
+  // 2) Ähnlichkeit ≥ 0.6: Teil-Rename matcht das alte Thema.
+  M._setUids({ 'lineare algebra grundlagen': 't_la' });
+  M.reconcileTopicUids(['Lineare Algebra Grundlagen'], ['Lineare Algebra']);
+  eq(M.topicId('Lineare Algebra'), 't_la', 'ähnlicher Name (≥0.6) erbt UID');
+
+  // 3) kein Match: echtes neues Thema bekommt frische, eigene UID.
+  M._setUids({ photosynthese: 't_p1' });
+  M.reconcileTopicUids(['Photosynthese'], ['Quantenmechanik']);
+  const fresh = M.topicId('Quantenmechanik');
+  ok(M.isTopicUid(fresh) && fresh !== 't_p1', 'fremdes Thema → neue, eigene UID');
+
+  // 4) Mehrere neue Themen konkurrieren nicht um dieselbe alte UID (used-Set).
+  M._setUids({ 'lineare algebra grundlagen': 't_la' });
+  M.reconcileTopicUids(['Lineare Algebra Grundlagen'], ['Lineare Algebra', 'Lineare Algebra Vertiefung']);
+  ok(M.topicId('Lineare Algebra') !== M.topicId('Lineare Algebra Vertiefung'), 'zwei neue Themen → verschiedene UIDs');
+});
+
+group('dedupeTopicUids — Selbstheilung kollabierter IDs', () => {
+  M._setUids({ a: 't_x', b: 't_x' });          // zwei Namen, eine UID (Bug-Zustand)
+  const changed = M.dedupeTopicUids();
+  ok(changed, 'erkennt Kollision');
+  ok(M._getUids().a !== M._getUids().b, 'Dubletten bekommen verschiedene UIDs');
+
+  M._setUids({ a: 't_x', b: 't_y' });
+  ok(!M.dedupeTopicUids(), 'saubere Map: keine Änderung');
+});
+
+group('newTopicUid — eindeutig & wohlgeformt', () => {
+  const ids = new Set();
+  for (let i = 0; i < 1000; i++) { const u = M.newTopicUid(); ok(M.isTopicUid(u), 'gültiges Format'); ids.add(u); }
+  eq(ids.size, 1000, '1000 IDs alle eindeutig (kein Millisekunden-Kollaps)');
+});
+
+// ── Teil B: Ausdrucks-Evaluator ───────────────────────────────────────────────
+group('parseNum — deutsche Zahlen & Einheiten', () => {
+  eq(M.parseNum(42), 42, 'Zahl bleibt Zahl');
+  approx(M.parseNum('3,14'), 3.14, 'Dezimal-Komma');
+  approx(M.parseNum('1.234,56'), 1234.56, 'Tausenderpunkt + Komma');
+  approx(M.parseNum('540 €'), 540, 'Einheiten-Suffix abgetrennt');
+  approx(M.parseNum('1.000.000'), 1000000, 'mehrere Tausenderpunkte');
+  ok(Number.isNaN(M.parseNum('keine zahl')), 'kein Treffer → NaN');
+  ok(Number.isNaN(M.parseNum(null)), 'null → NaN');
+});
+
+group('evalExpr — Arithmetik ohne eval', () => {
+  approx(M.evalExpr('500 * 0.08'), 40, 'Multiplikation');
+  approx(M.evalExpr('500 + 40'), 540, 'Addition');
+  approx(M.evalExpr('2 + 3 * 4'), 14, 'Punkt vor Strich');
+  approx(M.evalExpr('(2 + 3) * 4'), 20, 'Klammern');
+  approx(M.evalExpr('2^10'), 1024, 'Potenz (^)');
+  approx(M.evalExpr('2 hoch 8'), 256, '"hoch" → ^');
+  approx(M.evalExpr('sqrt(144)'), 12, 'sqrt');
+  approx(M.evalExpr('wurzel(16)'), 4, '"wurzel" → sqrt');
+  approx(M.evalExpr('10 % 3'), 1, 'Modulo');
+  approx(M.evalExpr('100 - 30 - 20'), 50, 'Links-Assoziativität Minus');
+  approx(M.evalExpr('2 ^ 3 ^ 2'), 512, 'Potenz rechts-assoziativ');
+  approx(M.evalExpr('6 · 7'), 42, 'Mal-Punkt ·');
+  approx(M.evalExpr('84 ÷ 2'), 42, 'Geteilt ÷');
+  // Deutsche Zahlen direkt im Ausdruck:
+  approx(M.evalExpr('1.000,5 + 0,5'), 1001, 'Tausenderpunkt + Dezimal-Komma im Term');
+  ok(Number.isNaN(M.evalExpr(null)), 'null → NaN');
+  ok(Number.isNaN(M.evalExpr('+')), 'Müll → NaN');
+});
+
+group('numEqual — Toleranz', () => {
+  ok(M.numEqual(540, 540.1, 0.01), '0,1 von 540 innerhalb 1%');
+  ok(!M.numEqual(40, 44, 0.01), '44 ≠ 40 (10% > 1%)');
+  ok(M.numEqual(0, 0.004), 'absoluter Boden (~0,005) fängt Null-Nähe');
+  ok(!M.numEqual(100, 102, 0.01), '2 von 100 außerhalb 1%');
+  ok(M.numEqual(100, 100.5, 0.01), '0,5 von 100 innerhalb 1%');
+  ok(!M.numEqual(NaN, 5), 'NaN → false');
+});
+
+// ── Ergebnis ──────────────────────────────────────────────────────────────────
+console.log(`\n${fail ? '✗' : '✓'} ${pass} bestanden, ${fail} fehlgeschlagen`);
+process.exit(fail ? 1 : 0);
