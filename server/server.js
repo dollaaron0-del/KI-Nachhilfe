@@ -660,13 +660,16 @@ app.delete('/api/subjects/:id/messages', async (req, res) => {
 const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
 
 // Lokales Embedding via Ollama (nomic, CPU-schnell). null bei Fehler.
+// keep_alive: -1 hält das Modell dauerhaft im RAM – warm ~0,1s, sonst Cold-Start
+// ~21s beim Nachladen (CPU-VM ohne GPU). Timeout deckt den einmaligen Cold-Load
+// nach Server-Neustart ab; danach bleibt das Modell resident.
 async function embedText(text) {
   const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 15000);   // hängendes Ollama nicht ewig abwarten
+  const to = setTimeout(() => ctrl.abort(), 30000);   // hängendes Ollama nicht ewig abwarten (deckt 1x Cold-Load ab)
   try {
     const r = await fetch('http://localhost:11434/api/embeddings', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: (text || '').slice(0, 8000) }),
+      body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: (text || '').slice(0, 8000), keep_alive: -1 }),
       signal: ctrl.signal,
     });
     if (!r.ok) return null;
@@ -1406,7 +1409,7 @@ app.post('/api/local/vision', authMiddleware, async (req, res) => {
     const r = await fetch('http://localhost:11434/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_VISION_MODEL, messages, stream: false }),
+      body: JSON.stringify({ model: OLLAMA_VISION_MODEL, messages, stream: false, keep_alive: -1 }),
     });
     if (!r.ok) throw new Error(`Ollama vision ${r.status}: ${await r.text()}`);
     const data = await r.json();
