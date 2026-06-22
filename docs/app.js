@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '203';
+const APP_VERSION = '204';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -5906,18 +5906,13 @@ async function loadTopicContent(topic, forceFresh = false) {
     ? `\n- Dies ist EINE zusammengesetzte Einheit: gib eine kompakte gemeinsame Einordnung (nicht jedes Thema einzeln durchdeklinieren) und in "aufgabe" GENAU EINE integrierte, mehrteilige Aufgabe, die die Themen verbindet.`
     : '';
   const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
+  const kbQ = isComposite ? unit.themen.join(', ') : topic;
   try {
-    const raw = await claudeLocal(
+    const raw = await claudeLocalKb(
       [{ role: 'user', content: `Behandle ${subjectClause} auf dem vorgegebenen Niveau.` }],
-      [{
-        type: 'text',
-        text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
-        cache_control: { type: 'ephemeral', ttl: '1h' },
-      }, {
-        type: 'text',
-        text: `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der obigen Unterlagen. Suche die passenden Stellen im gesamten Material.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
-      }],
-      2500
+      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
+      2500,
+      kbQ
     );
     // Stale guard: discard if user opened a different topic while AI was running
     if (currentExplainerTopic !== topic) { stopProg(); return; }
@@ -5968,17 +5963,12 @@ async function regenLernenTask() {
     const lernziel = unit.lernziel || chapterOf(unit.themen[0])?.lernziel || chapterOf(topic)?.lernziel || '';
     const gegenstand = isComposite ? `zur Einheit "${topic}" (Themen: ${unit.themen.join(', ')})` : `zum Thema "${topic}"`;
     const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
-    const raw = await claudeLocal(
+    const kbQ = isComposite ? unit.themen.join(', ') : topic;
+    const raw = await claudeLocalKb(
       [{ role: 'user', content: `Generiere eine neue Übungsaufgabe ${gegenstand}.` }],
-      [{
-        type: 'text',
-        text: `Unterlagen des Fachs "${sessionMeta?.name || ''}" (einzige erlaubte Wissensquelle):\n${docsForPrompt()}`,
-        cache_control: { type: 'ephemeral', ttl: '1h' },
-      }, {
-        type: 'text',
-        text: `Generiere eine NEUE, andere Übungsaufgabe ${gegenstand} – ausschließlich auf Basis der obigen Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
-      }],
-      600
+      `Generiere eine NEUE, andere Übungsaufgabe ${gegenstand} – ausschließlich auf Basis der bereitgestellten Unterlagen.\n${diffInstr}\n\nDie Aufgabe muss dem Niveau entsprechen (Komplexität, Sprache, Tiefe).\nBei mehreren Teilfragen jede Frage auf einer neuen Zeile (\\n\\n).\nNIEMALS Lösungen, Musterlösungen oder Hinweise auf die richtigen Antworten im Aufgabentext!\n\nAntworte NUR als JSON:\n{"aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile."}`,
+      600,
+      kbQ
     );
     const m = raw.match(/\{[\s\S]*\}/);
     let newAufgabe = null;
