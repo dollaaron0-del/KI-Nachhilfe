@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '208';
+const APP_VERSION = '209';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6859,11 +6859,13 @@ async function scanModuleStructure(btn) {
     const hauptthemen = parseJsonLoose(m1[0]).filter(t => typeof t === 'string' && t.trim()).slice(0, 8);
     if (!hauptthemen.length) throw new Error('Keine Hauptthemen gefunden');
 
-    // Phase 2: For each Hauptthema generate 3–5 specific Lernthemen using full content
+    // Phase 2: For each Hauptthema generate Lernthemen using full content.
+    // Budget global statt pro Kapitel: "3–5 pro Kapitel" × bis zu 8 Kapiteln ergab
+    // sonst bis zu 40 Themen trotz "max 30" (widersprüchlich) → echtes Gesamt-Budget.
     btn.textContent = 'Lernthemen…';
     const p2Raw = await claudeLocal(
-      [{ role: 'user', content: `Strukturiere den Lernstoff in diese Hauptthemen:\n${hauptthemen.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n\nErstelle für jedes Hauptthema 3–5 konkrete Lernthemen (max. 4 Wörter), die in den Unterlagen behandelt werden. Didaktische Reihenfolge: Grundlagen zuerst.` }],
-      sysBlocks(`Antworte NUR als JSON:\n{"kapitel":[{"titel":"Hauptthema","lernziel":"Nach diesem Kapitel kannst du …(ein Satz)","themen":["Lernthema 1","Lernthema 2"]}]}\nRegeln: Themennamen max. 4 Wörter, jedes Thema nur einmal, insgesamt max. 30 Themen.`),
+      [{ role: 'user', content: `Strukturiere den Lernstoff in diese Hauptthemen:\n${hauptthemen.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n\nErstelle pro Hauptthema ca. 3–4 konkrete Lernthemen (max. 4 Wörter), die in den Unterlagen behandelt werden – insgesamt HÖCHSTENS 28. Didaktische Reihenfolge: Grundlagen zuerst.` }],
+      sysBlocks(`Antworte NUR als JSON:\n{"kapitel":[{"titel":"Hauptthema","lernziel":"Nach diesem Kapitel kannst du …(ein Satz)","themen":["Lernthema 1","Lernthema 2"]}]}\nRegeln:\n- Themennamen max. 4 Wörter.\n- Insgesamt HÖCHSTENS 28 Themen über alle Kapitel zusammen.\n- Jedes Konzept gehört in GENAU EIN Kapitel – wiederhole kein Thema sinngemäß in einem anderen Kapitel (z.B. "Bayes" oder "Mindeststichprobenumfang" nicht zweimal).\n- Erstelle KEIN separates Klausur-/Prüfungs- oder reines "Anwendungen"-Kapitel, das Konzepte aus früheren Kapiteln wiederholt – Klausur- und Praxisbezug gehört in das jeweilige Fachkapitel.`),
       1400
     );
     const m2 = p2Raw.match(/\{[\s\S]*\}/);
