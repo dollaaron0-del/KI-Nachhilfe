@@ -387,6 +387,15 @@ app.use(helmet({
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '10mb' }));
 
+// Fängt fehlerhafte JSON-Bodies ab (z.B. Client sendet "subject_id":, ohne Wert),
+// damit ein Parse-Fehler sauber als 400 zurückkommt statt als ungefangener Stacktrace.
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Ungültiger JSON-Body' });
+  }
+  next(err);
+});
+
 // Rate limiting for Claude API calls
 const claudeLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -1422,7 +1431,9 @@ app.post('/api/local/vision', authMiddleware, async (req, res) => {
     const r = await fetch('http://localhost:11434/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_VISION_MODEL, messages, stream: false, keep_alive: -1 }),
+      // num_ctx hochgesetzt: der 4096-Default reicht für Bild-Tokens + Prompt nicht
+      // (führte zu "exceeds available context size 4096"-400ern). 16384 wie bei /api/local.
+      body: JSON.stringify({ model: OLLAMA_VISION_MODEL, messages, stream: false, keep_alive: -1, options: { num_ctx: 16384 } }),
     });
     if (!r.ok) throw new Error(`Ollama vision ${r.status}: ${await r.text()}`);
     const data = await r.json();
