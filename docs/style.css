@@ -378,7 +378,15 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
   cursor: pointer; color: var(--text2); transition: all .15s;
   -webkit-tap-highlight-color: transparent;
 }
-.diff-btn.active, .diff-btn-a.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.diff-btn.active, .diff-btn-a.active {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700;
+  /* Deutlich auffälliger: Glow-Ring + leicht herausgehoben, damit die aktuell
+     gewählte Stufe auf einen Blick erkennbar ist (kein versehentliches Üben auf
+     der falschen Schwierigkeit). */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent), 0 3px 10px rgba(88,86,214,0.40);
+  transform: translateY(-1px) scale(1.06);
+}
+.diff-btn.active::before, .diff-btn-a.active::before { content: '✓ '; font-weight: 800; }
 .diff-btn:disabled, .diff-btn-a:disabled {
   opacity: 0.38; cursor: not-allowed; pointer-events: none;
 }
@@ -914,7 +922,12 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 
 .rechnen-diff-sel {
   padding: 5px 10px; border-radius: 8px; font-size: 13px;
-  border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
+  /* Auffällig in Accent gehalten, damit die aktive Rechen-Stufe klar lesbar ist
+     (Dropdown-Wert ist sonst zu leicht zu übersehen). */
+  border: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--accent); font-weight: 700;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
   -webkit-appearance: none;
 }
 .rechnen-spinner { font-size: 13px; color: var(--text2); font-style: italic; }
@@ -2000,6 +2013,30 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
   font-weight: 700;
   opacity: 1;
 }
+/* Toggle für die ausgeblendeten Grundstufen (Einsteiger, Grundlagen) –
+   gleiche Spalten-Optik wie ein .ms-step, aber gestrichelt/sekundär. */
+.ms-toggle {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  flex-shrink: 0; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.15s;
+}
+.ms-toggle:active { opacity: 0.6; }
+.ms-toggle-dot {
+  position: relative;
+  width: 40px; height: 40px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; color: var(--text2);
+  background: rgba(128,128,128,0.10);
+  border: 1.5px dashed var(--border);
+  transition: border-color 0.15s, color 0.15s;
+}
+.ms-toggle:hover .ms-toggle-dot { border-color: var(--accent); color: var(--accent); }
+.ms-toggle-badge {
+  position: absolute; bottom: -3px; right: -5px;
+  background: var(--accent); color: #fff; font-size: 9px; font-weight: 800;
+  line-height: 14px; padding: 0 4px; border-radius: 8px;
+}
+.ms-toggle .ms-label { font-size: 11px; color: var(--text2); }
 .ms-line {
   flex: 1;
   height: 3px;

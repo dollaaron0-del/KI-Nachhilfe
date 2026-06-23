@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '209';
+const APP_VERSION = '210';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -5138,7 +5138,19 @@ function renderMilestone() {
   const selIdx   = selectedDiffIdx;
   const fracs    = m.fracs || [];
 
-  const stepsHtml = MILESTONE_LEVELS.map((l, i) => {
+  // Grundstufen (Einsteiger, Grundlagen) standardmäßig ausgeblendet. Sie werden
+  // gezeigt, wenn der Nutzer sie per Button einblendet ODER die aktuell aktive
+  // Stufe eine davon ist (sonst stünde der aktive Marker auf einer versteckten
+  // Stufe). Im erzwungenen Fall gibt es keinen Einklapp-Button.
+  const activeStepIdx = selIdx !== null ? selIdx : autoIdx;
+  const forcedOpen    = activeStepIdx < MS_BASIC_COUNT;
+  const showBasics    = msShowBasics || forcedOpen;
+
+  const visibleLevels = MILESTONE_LEVELS
+    .map((l, i) => ({ l, i }))
+    .filter(({ i }) => showBasics || i >= MS_BASIC_COUNT);
+
+  const stepHtml = ({ l, i }, last) => {
     const frac     = fracs[i] || 0;
     const complete = frac >= 1;                 // ganze Stufe durchgelernt → Kreis voll
     const deg      = Math.round(frac * 360);    // Füllung im Uhrzeigersinn
@@ -5151,8 +5163,26 @@ function renderMilestone() {
     return `<div class="${cls}" data-diffidx="${i}" style="--ms-frac:${deg}deg">
       <div class="ms-dot"><span class="ms-dot-emoji">${complete ? '✓' : l.emoji}</span></div>
       <div class="ms-label">${l.name}</div>
-    </div>${i < MILESTONE_LEVELS.length - 1 ? `<div class="${lineClass}"></div>` : ''}`;
-  }).join('');
+    </div>${last ? '' : `<div class="${lineClass}"></div>`}`;
+  };
+
+  // Toggle-Button: eingeklappt → Grundstufen einblenden; vom Nutzer ausgeklappt →
+  // wieder einblenden. Im erzwungenen Fall (aktive Stufe ist Grundstufe) kein Toggle.
+  let toggleHtml = '';
+  if (!showBasics) {
+    toggleHtml = `<div class="ms-toggle" id="ms-toggle" title="Grundstufen (Einsteiger, Grundlagen) anzeigen">
+        <div class="ms-toggle-dot">🌱<span class="ms-toggle-badge">+${MS_BASIC_COUNT}</span></div>
+        <div class="ms-label">Grundstufen</div>
+      </div><div class="ms-line"></div>`;
+  } else if (!forcedOpen) {
+    toggleHtml = `<div class="ms-toggle" id="ms-toggle" title="Grundstufen ausblenden">
+        <div class="ms-toggle-dot">‹</div>
+        <div class="ms-label">weniger</div>
+      </div><div class="ms-line"></div>`;
+  }
+
+  const stepsHtml = toggleHtml +
+    visibleLevels.map((v, pos) => stepHtml(v, pos === visibleLevels.length - 1)).join('');
 
   const activeDiffName = selIdx !== null ? MILESTONE_LEVELS[selIdx].name : (m.diff ? m.name : 'Einsteiger');
   const infoTxt = selIdx !== null
@@ -5180,6 +5210,11 @@ function renderMilestone() {
       renderMilestone();
       loadLernpfad();
     });
+  });
+  banner.querySelector('#ms-toggle')?.addEventListener('click', () => {
+    msShowBasics = !msShowBasics;
+    try { localStorage.setItem('ms_show_basics', msShowBasics ? '1' : '0'); } catch (_) {}
+    renderMilestone();
   });
   banner.querySelector('.ms-reset-btn')?.addEventListener('click', e => {
     e.stopPropagation();
@@ -5709,6 +5744,13 @@ let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text' — gesteuert nur, welcher Eingabebereich sichtbar ist
 let lernenHasInk    = false;     // true sobald auf die Zeichenfläche geschrieben wurde (für kombinierte Prüfung)
 let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual override
+// Standardmäßig zeigt der Lernpfad nur die oberen drei Stufen (Lernender,
+// Fortgeschritten, Experte). Die zwei Grundstufen (Einsteiger, Grundlagen)
+// blendet ein Extra-Button ein – für alle, die ein Thema noch gar nicht kennen.
+// Auswahl wird gemerkt; ist die aktive Stufe eine Grundstufe, werden sie ohnehin
+// gezeigt (sonst stünde der aktive Marker auf einer versteckten Stufe).
+const MS_BASIC_COUNT = 2;
+let msShowBasics = (() => { try { return localStorage.getItem('ms_show_basics') === '1'; } catch { return false; } })();
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
 let lernenLastEval    = null;         // letzte KI-Auswertung derselben Aufgabe (konsistente Re-Prüfung)

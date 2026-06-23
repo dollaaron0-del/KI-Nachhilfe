@@ -807,11 +807,16 @@ const KB_KIND_LABEL = { definition: 'Definition', formel: 'Formel', konzept: 'Ko
 async function rankChunks(subjectId, query, k = 6) {
   const kb = (await pool.query('SELECT status FROM subject_kb WHERE subject_id=$1', [subjectId])).rows[0];
   if (!kb || kb.status !== 'ready') return null;
-  const qvec = await embedText(query);
+  // Query-Embedding (Ollama) und Chunk-Fetch (DB) hängen nicht voneinander ab →
+  // parallel statt sequenziell, spart die ~100ms Embedding-Zeit vor jeder Antwort.
+  const [qvec, chunkRes] = await Promise.all([
+    embedText(query),
+    pool.query(
+      'SELECT kind, topic, heading, content, source_ref, embedding FROM doc_chunks WHERE subject_id=$1 AND embedding IS NOT NULL', [subjectId]
+    ),
+  ]);
   if (!qvec) return null;
-  const { rows } = await pool.query(
-    'SELECT kind, topic, heading, content, source_ref, embedding FROM doc_chunks WHERE subject_id=$1 AND embedding IS NOT NULL', [subjectId]
-  );
+  const { rows } = chunkRes;
   if (!rows.length) return null;
   return rows
     .map(r => ({ ...r, score: cosineSim(qvec, r.embedding) }))
@@ -821,9 +826,13 @@ async function rankChunks(subjectId, query, k = 6) {
 
 // Fertiger Kontext-String (Themen-Überblick + Top-k chunks). null → Keyword-Fallback.
 async function retrieveContext(subjectId, query, k = 6) {
-  const ranked = await rankChunks(subjectId, query, k);
+  // Ranking (Embedding + Cosine) und Overview-Query sind unabhängig → parallel.
+  const [ranked, overviewRes] = await Promise.all([
+    rankChunks(subjectId, query, k),
+    pool.query('SELECT overview FROM subject_kb WHERE subject_id=$1', [subjectId]),
+  ]);
   if (!ranked || !ranked.length) return null;
-  const overview = (await pool.query('SELECT overview FROM subject_kb WHERE subject_id=$1', [subjectId])).rows[0]?.overview;
+  const overview = overviewRes.rows[0]?.overview;
   const body = ranked.map(r =>
     `[${KB_KIND_LABEL[r.kind] || 'Info'}${r.topic ? ' · ' + r.topic : ''}] ${r.heading || ''}\n${r.content}`
   ).join('\n\n---\n\n');
@@ -1139,9 +1148,13 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
     // Limit messages to last 12 to control costs
     const trimmedMessages = messages.slice(-12);
 
-    // Phase 3: Chat darf auf das günstige Haiku, WENN der Client es anfragt (kb_chat)
-    // UND die Wissensbasis sauberen Kontext geliefert hat. Sonst bleibt es bei Sonnet.
-    const chatModel = (req.body.kb_chat && kbHit) ? 'claude-haiku-4-5-20251001' : (model || 'claude-sonnet-4-6');
+    // Hebel 1: Sobald die Wissensbasis sauberen Kontext geliefert hat (kbHit), reicht
+    // das schnelle, günstige Haiku (≈3x schneller bei TTFB + Durchsatz) – der saubere
+    // Kontext trägt die Antwort, nicht das Modellwissen. Früher zusätzlich hinter dem
+    // Admin-Toggle (kb_chat) versteckt; jetzt automatisch bei JEDEM KB-Treffer. Ohne
+    // KB-Kontext (Vision, KB nicht bereit, Allgemeinfrage) bleibt es bei Sonnet bzw.
+    // einem explizit angefragten Modell, wo Modellwissen die Qualität bestimmt.
+    const chatModel = kbHit ? 'claude-haiku-4-5-20251001' : (model || 'claude-sonnet-4-6');
     const params = {
       model: chatModel,
       max_tokens: Math.min(max_tokens || 2000, 4096),
