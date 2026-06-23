@@ -1202,8 +1202,14 @@ const OLLAMA_URL          = 'http://localhost:11434/v1/chat/completions';
 // budget on CPU hardware and only wasted time before falling back to Haiku, so
 // /api/local + /api/local/stream go straight to Claude Haiku — fast & reliable
 // for live use. Set USE_OLLAMA=true to re-enable the free local model (e.g. on
-// GPU hardware). Vision (/api/local/vision) is unaffected and still uses Ollama.
+// GPU hardware).
 const USE_OLLAMA = process.env.USE_OLLAMA === 'true';
+// Vision toggle, same story: llava:7b on a CPU-only VM made the "Aufgabe prüfen"
+// check take minutes (1400 Token Bildanalyse @ CPU) and read handwriting/math
+// unreliably. Default OFF → /api/local/vision goes to Claude Haiku (vision-fähig,
+// Sekunden statt Minuten, Cent-Bruchteile pro Bild, läuft ins Tagesbudget).
+// Set USE_OLLAMA_VISION=true to re-enable local llava (e.g. on GPU hardware).
+const USE_OLLAMA_VISION = process.env.USE_OLLAMA_VISION === 'true';
 
 function ollamaMsgs(system, messages) {
   const sysText = Array.isArray(system)
@@ -1419,9 +1425,40 @@ app.post('/api/local/stream', claudeLimit, authMiddleware, async (req, res) => {
 });
 
 app.post('/api/local/vision', authMiddleware, async (req, res) => {
-  const { base64, text, system, max_tokens = 1500 } = req.body;
+  const { base64, text, system, max_tokens = 1500, media_type = 'image/png', feature } = req.body;
   if (!base64 || !text) return res.status(400).json({ error: 'base64 und text erforderlich' });
   const sysText = Array.isArray(system) ? system.map(b => b.text || '').join('\n') : (system || '');
+
+  // Default: Claude-Haiku-Vision (schnell + zuverlässig). llava nur, wenn explizit
+  // per USE_OLLAMA_VISION reaktiviert (z.B. auf GPU-Hardware).
+  if (!USE_OLLAMA_VISION) {
+    // Kostenpflichtig → gleiche Budget-Obergrenze wie die übrigen Cloud-Routen.
+    const limitMsg = await usageLimitError(req.user.id);
+    if (limitMsg) return res.status(429).json({ error: limitMsg });
+    try {
+      const params = {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type, data: base64 } },
+            { type: 'text', text },
+          ],
+        }],
+      };
+      if (sysText) params.system = sysText;
+      const r = await callClaude(params);
+      const out = r.content?.[0]?.text;
+      if (typeof out !== 'string') throw new Error('Haiku vision returned unexpected response shape');
+      recordUsage(new Date().toISOString().slice(0, 10), 'claude-haiku-4-5-20251001', r.usage || {}, req.user.id, feature || 'vision').catch(() => {});
+      return res.json({ content: [{ text: out }] });
+    } catch (e) {
+      console.error('Haiku vision error:', e.message);
+      return res.status(503).json({ error: e.message });
+    }
+  }
+
   // Use Ollama native /api/chat format — more reliable for vision models than /v1/
   const messages = [
     ...(sysText ? [{ role: 'system', content: sysText }] : []),

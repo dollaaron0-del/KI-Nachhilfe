@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '210';
+const APP_VERSION = '212';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6074,9 +6074,11 @@ async function loadTopicContent(topic, forceFresh = false) {
     );
     // Stale guard: discard if user opened a different topic while AI was running
     if (currentExplainerTopic !== topic) { stopProg(); return; }
-    let data = null;
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { data = parseJsonLoose(m[0]); } catch { data = null; } }
+    // Robustes Parsing wie in den übrigen JSON-Pfaden: Code-Fences, literale
+    // Zeilenumbrüche in Strings UND am 2500-Token-Limit abgeschnittenes JSON
+    // werden gerettet (parseJsonResponse → salvageTruncatedJson). Das frühere
+    // reine parseJsonLoose scheiterte hier sporadisch → "Keine Erklärung erhalten".
+    const data = parseJsonResponse(raw);
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
     if (data.aufgabe) rememberTask(scope, data.aufgabe);   // in Historie → künftige Aufgaben vermeiden Wiederholung
