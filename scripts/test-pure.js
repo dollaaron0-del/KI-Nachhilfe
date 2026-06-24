@@ -40,6 +40,7 @@ const FN_DECLS = [
   'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'numericCheck', 'applyNumericVerdict',
   'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff', 'repairOrphanedProgress',
+  'scanDirectiveBlock',
   'md', 'renderTable',
 ];
 const CONST_DECLS = ['isTopicUid', 'formatScanDiff'];
@@ -62,6 +63,7 @@ const factory = new Function('self', 'katex', `
     normTopic, jaccardTokens, parseNum, evalExpr, numEqual, numericCheck, applyNumericVerdict, isTopicUid,
     newTopicUid, topicId, topicKey, resolveKey,
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff, repairOrphanedProgress,
+    scanDirectiveBlock,
     md, renderTable,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
@@ -188,6 +190,15 @@ group('repairOrphanedProgress — verwaisten Fortschritt zurück-verknüpfen (v2
   M._setMeta({});
   eq(M.repairOrphanedProgress().healed, 0, 'fremdes Thema (kein Match ≥0.4) wird NICHT geheilt');
   ok(M._getLearned().includes('t_int::mittel'), 'fremder Fortschritt bleibt unangetastet');
+});
+
+group('scanDirectiveBlock — destillierte Vorgaben als verbindlicher Scan-Block (v215)', () => {
+  eq(M.scanDirectiveBlock(''), '', 'leer → kein Block');
+  eq(M.scanDirectiveBlock('   '), '', 'nur Whitespace → kein Block');
+  const b = M.scanDirectiveBlock('WEGLASSEN: Thema A, Thema B\nSCHWERPUNKT: Thema C\nUMFANG: —');
+  ok(b.includes('WEGLASSEN: Thema A, Thema B'), 'übernimmt die Vorgaben wörtlich');
+  ok(/VORRANG vor Vollständigkeit/i.test(b), 'macht Vorrang vor Vollständigkeit explizit');
+  ok(/Lasse unter WEGLASSEN genannte Themen WEG/i.test(b), 'verbietet weggelassene Themen explizit');
 });
 
 group('dedupeTopicUids — Selbstheilung kollabierter IDs', () => {

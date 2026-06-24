@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '214';
+const APP_VERSION = '215';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -714,6 +714,38 @@ function persInstrText() {
   return customPrompt
     ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN (berücksichtigen!) ---\n' + customPrompt + '\n--- ENDE ---'
     : '';
+}
+
+// Vorstufe für den Themen-Scan (v215): die freien "Persönlichen Anweisungen" zu einer
+// klaren Liste themen-auswahl-relevanter Vorgaben destillieren (Weglassen / Schwerpunkt /
+// Umfang). Vager Fließtext wird so zu harten Regeln, die der Scan tatsächlich befolgen
+// kann. Liefert den Vorgaben-Text oder '' (nichts Auswahl-Relevantes / kein Prompt).
+async function distillScanDirectives() {
+  const txt = (customPrompt || '').trim();
+  if (!txt) return '';
+  try {
+    const raw = await claudeLocal(
+      [{ role: 'user', content: txt }],
+      [{ type: 'text', text: `Du extrahierst aus den persönlichen Anweisungen eines Studenten NUR die Aussagen, die die AUSWAHL der Lernthemen betreffen: welche Themen/Kapitel weggelassen werden sollen, welche besonders wichtig oder klausurrelevant sind, welcher Stoffumfang gilt. Ignoriere alles andere (Bewertungsstil, Taschenrechner, reine Formalia).
+Antworte als kompakte Stichpunktliste auf Deutsch, exakt in diesen drei Zeilen:
+WEGLASSEN: <Themen/Bereiche, die NICHT vorkommen sollen – oder —>
+SCHWERPUNKT: <Themen, die unbedingt rein müssen / betont werden – oder —>
+UMFANG: <Einschränkungen wie bestimmte Kapitel/Bereiche – oder —>
+Wenn KEINE themen-auswahl-relevante Aussage existiert, antworte exakt mit: KEINE` }],
+      300
+    );
+    const out = (raw || '').trim();
+    return (!out || /^KEINE\b/i.test(out)) ? '' : out;
+  } catch { return ''; }
+}
+
+// Aus den destillierten Vorgaben einen verbindlichen Prompt-Block bauen (oder '').
+// Eigene reine Funktion → testbar. Macht klar, dass diese Vorgaben VORRANG vor der
+// Vollständigkeit haben, damit "weglassen"-Wünsche nicht von "decke alles ab" überstimmt werden.
+function scanDirectiveBlock(directives) {
+  const d = (directives || '').trim();
+  if (!d) return '';
+  return `\n\nVERBINDLICHE VORGABEN DES STUDENTEN (aus seinen Anweisungen abgeleitet) – diese haben VORRANG vor Vollständigkeit:\n${d}\nBefolge sie strikt: Lasse unter WEGLASSEN genannte Themen WEG, auch wenn sie in den Unterlagen vorkommen. Nimm die unter SCHWERPUNKT genannten unbedingt auf und stelle sie voran.`;
 }
 
 function sysBlocks(extra = '', opts = {}) {
@@ -6993,13 +7025,19 @@ async function scanModuleStructure(btn) {
   btn.disabled = true;
   const prevNames = pathTopics();   // für den ID-Abgleich (Rename-Erkennung) festhalten
   try {
+    // Vorstufe: die persönlichen Anweisungen zu verbindlichen Auswahl-Vorgaben destillieren,
+    // damit "diese Themen weglassen / das ist klausurrelevant" tatsächlich in die Liste einfließt.
+    btn.textContent = 'Vorgaben lesen…';
+    const directives  = await distillScanDirectives();
+    const directiveBlk = scanDirectiveBlock(directives);
+
     // Phase 1: Fetch short snippet from EVERY document → identify Hauptthemen across ALL docs
     btn.textContent = 'Überblick lädt…';
     const overview = await buildDocOverview();
     const overviewText = overview || docsForPrompt(25000);
 
     const p1Raw = await claudeLocal(
-      [{ role: 'user', content: `Hier sind kurze Auszüge aus ALLEN Dokumenten dieser Lernsammlung:\n\n${overviewText}\n\nIdentifiziere 6–8 übergeordnete Hauptthemen, die insgesamt in diesen Dokumenten behandelt werden. Decke die GESAMTE Breite aller Dokumente ab – nicht nur die ersten.` }],
+      [{ role: 'user', content: `Hier sind kurze Auszüge aus ALLEN Dokumenten dieser Lernsammlung:\n\n${overviewText}\n\nIdentifiziere 6–8 übergeordnete Hauptthemen, die insgesamt in diesen Dokumenten behandelt werden. Decke die GESAMTE Breite aller Dokumente ab – nicht nur die ersten.${directiveBlk}` }],
       [{ type: 'text', text: 'Du bist ein Lernstruktur-Experte. Analysiere Dokumentübersichten und erkenne übergeordnete Themengebiete.\nAntworte NUR als JSON-Array mit 6–8 Strings:\n["Hauptthema 1","Hauptthema 2",...]' + persInstrText() }],
       600
     );
@@ -7013,7 +7051,7 @@ async function scanModuleStructure(btn) {
     // sonst bis zu 40 Themen trotz "max 30" (widersprüchlich) → echtes Gesamt-Budget.
     btn.textContent = 'Lernthemen…';
     const p2Raw = await claudeLocal(
-      [{ role: 'user', content: `Strukturiere den Lernstoff in diese Hauptthemen:\n${hauptthemen.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n\nErstelle pro Hauptthema ca. 3–4 konkrete Lernthemen (max. 4 Wörter), die in den Unterlagen behandelt werden – insgesamt HÖCHSTENS 28. Didaktische Reihenfolge: Grundlagen zuerst.` }],
+      [{ role: 'user', content: `Strukturiere den Lernstoff in diese Hauptthemen:\n${hauptthemen.map((h, i) => `${i + 1}. ${h}`).join('\n')}\n\nErstelle pro Hauptthema ca. 3–4 konkrete Lernthemen (max. 4 Wörter), die in den Unterlagen behandelt werden – insgesamt HÖCHSTENS 28. Didaktische Reihenfolge: Grundlagen zuerst.${directiveBlk}` }],
       sysBlocks(`Antworte NUR als JSON:\n{"kapitel":[{"titel":"Hauptthema","lernziel":"Nach diesem Kapitel kannst du …(ein Satz)","themen":["Lernthema 1","Lernthema 2"]}]}\nRegeln:\n- Themennamen max. 4 Wörter.\n- Insgesamt HÖCHSTENS 28 Themen über alle Kapitel zusammen.\n- Jedes Konzept gehört in GENAU EIN Kapitel – wiederhole kein Thema sinngemäß in einem anderen Kapitel (z.B. "Bayes" oder "Mindeststichprobenumfang" nicht zweimal).\n- Erstelle KEIN separates Klausur-/Prüfungs- oder reines "Anwendungen"-Kapitel, das Konzepte aus früheren Kapiteln wiederholt – Klausur- und Praxisbezug gehört in das jeweilige Fachkapitel.`),
       1400
     );
@@ -7045,6 +7083,8 @@ async function scanModuleStructure(btn) {
     // Re-Scan: zusätzlich anzeigen, was sich gegenüber der alten Struktur geändert hat (#7).
     const diffNote = prevNames.length ? ` (${formatScanDiff(scanDiff(prevNames, newNames))})` : '';
     toast(`🗺️ ${hauptthemen.length} Hauptthemen · ${scannedTopics.length} Lernthemen erkannt!${diffNote}`, 'success');
+    // Transparenz: zeigen, welche Auswahl-Vorgaben aus den Anweisungen abgeleitet und befolgt wurden.
+    if (directives) setTimeout(() => toast('📌 Aus deinen Anweisungen befolgt:<br>' + esc(directives).replace(/\n/g, '<br>'), 'info', 9000), 600);
   } catch (e) {
     toast('Fehler beim Erkennen: ' + e.message, 'error');
   }
