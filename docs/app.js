@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '228';
+const APP_VERSION = '229';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -566,6 +566,17 @@ function parseJsonResponse(raw) {
   // schließende "}") – längsten gültigen Präfix retten, offene Strings/Klammern
   // schließen. Rettet z.B. eine Blitz-Frage, deren "explanation" abgeschnitten ist.
   return salvageTruncatedJson(raw) || null;
+}
+
+// True, wenn sich das Roh-JSON NUR per Salvage retten ließ (kein sauber schließendes
+// Objekt) – Indiz, dass max_tokens den Inhalt abgeschnitten hat und hintere Felder/
+// Texte fehlen. Genutzt, um abgehackte Erklärungen NICHT dauerhaft zu cachen.
+function jsonWasTruncated(raw) {
+  const ob = String(raw || '').match(/\{[\s\S]*\}/);
+  if (!ob) return true;
+  try { JSON.parse(ob[0]); return false; } catch {}
+  try { JSON.parse(repairJson(ob[0])); return false; } catch {}
+  return true;
 }
 
 // Versucht, ein abgeschnittenes JSON-Objekt zu reparieren: kürzt vom Ende her,
@@ -6442,20 +6453,22 @@ async function loadTopicContent(topic, forceFresh = false) {
     const raw = await claudeLocalKb(
       [{ role: 'user', content: `Behandle ${subjectClause} auf dem vorgegebenen Niveau.` }],
       `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!${taskAvoidBlock(scope)}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
-      2500,
+      4096,
       kbQ
     );
     // Stale guard: discard if user opened a different topic while AI was running
     if (currentExplainerTopic !== topic) { stopProg(); return; }
     // Robustes Parsing wie in den übrigen JSON-Pfaden: Code-Fences, literale
-    // Zeilenumbrüche in Strings UND am 2500-Token-Limit abgeschnittenes JSON
-    // werden gerettet (parseJsonResponse → salvageTruncatedJson). Das frühere
-    // reine parseJsonLoose scheiterte hier sporadisch → "Keine Erklärung erhalten".
+    // Zeilenumbrüche in Strings UND am Token-Limit abgeschnittenes JSON werden
+    // gerettet (parseJsonResponse → salvageTruncatedJson). Das frühere reine
+    // parseJsonLoose scheiterte hier sporadisch → "Keine Erklärung erhalten".
     const data = parseJsonResponse(raw);
     if (!data) throw new Error('Keine Erklärung erhalten');
     lernenTopicData = data;
     if (data.aufgabe) rememberTask(scope, data.aufgabe);   // in Historie → künftige Aufgaben vermeiden Wiederholung
-    localforage.setItem(lernenCacheKey(), data).catch(() => {});
+    // Abgehackte Erklärung (Token-Limit) NICHT dauerhaft cachen – sonst bleibt sie
+    // für immer kaputt. Beim nächsten Öffnen wird dann frisch (vollständig) geladen.
+    if (!jsonWasTruncated(raw)) localforage.setItem(lernenCacheKey(), data).catch(() => {});
     stopProg();
     renderTopicContent(topic, data);
     armLernenPrefetch(); // Hebel 4: Musterlösung erst bei Aktivität vorbereiten
