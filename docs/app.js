@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '218';
+const APP_VERSION = '219';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -5976,6 +5976,7 @@ let lernenLastX     = 0, lernenLastY = 0;
 let lernenLastMidX  = 0, lernenLastMidY = 0; // letzter Kurven-Mittelpunkt (Glättung)
 let lernenPtBuf     = [];           // gepufferte Punkte, einmal pro Frame gezeichnet (rAF)
 let lernenRaf       = 0;            // laufende requestAnimationFrame-ID (0 = keine)
+let lernenJumpSkips = 0;            // aufeinanderfolgend verworfene Ausreißer-Samples (Handballen-Sprung)
 let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
 let lernenStylusId  = null; // touch.identifier des aktuell zeichnenden Stifts (null = keiner)
@@ -6477,6 +6478,7 @@ function lernenBegin(canvas, clientX, clientY) {
   lernenLastX = p.x; lernenLastY = p.y;
   lernenLastMidX = p.x; lernenLastMidY = p.y;     // Glättung: Startpunkt = erster Mittelpunkt
   lernenPtBuf = [];
+  lernenJumpSkips = 0;
   if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
   lastInkTs = Date.now();
   isDrawingLernen = true;
@@ -6515,6 +6517,16 @@ function flushLernenBuf() {
   }
   const buf = lernenPtBuf; lernenPtBuf = [];
   for (const pt of buf) {
+    // Handballen-Phantom-Schutz (analog zum Rechnen-Canvas, flushCanvasBuf): ein
+    // Sample, das weiter als CANVAS_MAX_STEP vom Anker springt, wird verworfen,
+    // ohne den Anker zu bewegen; nach CANVAS_MAX_SKIPS in Folge zwangs-resynct,
+    // damit ein echter schneller Zug nicht dauerhaft abreißt.
+    const dx = pt.x - lernenLastX, dy = pt.y - lernenLastY;
+    if (lernenJumpSkips < CANVAS_MAX_SKIPS && dx * dx + dy * dy > CANVAS_MAX_STEP * CANVAS_MAX_STEP) {
+      lernenJumpSkips++;
+      continue;
+    }
+    lernenJumpSkips = 0;
     const midX = (lernenLastX + pt.x) / 2, midY = (lernenLastY + pt.y) / 2;
     lernenCtx.beginPath();
     lernenCtx.moveTo(lernenLastMidX, lernenLastMidY);
