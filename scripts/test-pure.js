@@ -42,9 +42,9 @@ const FN_DECLS = [
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff', 'repairOrphanedProgress',
   'scanDirectiveBlock',
   'md', 'renderTable',
-  'inkBoundingBox',
+  'inkBoundingBox', 'enhanceInkContrast',
 ];
-const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD', 'INK_CELL', 'INK_MIN_PIXELS'];
+const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD', 'INK_CELL', 'INK_MIN_PIXELS', 'INK_WHITE_CUTOFF', 'INK_GAMMA'];
 
 const assembled = [
   ...CONST_DECLS.map(extractConst),
@@ -66,7 +66,7 @@ const factory = new Function('self', 'katex', `
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff, repairOrphanedProgress,
     scanDirectiveBlock,
     md, renderTable,
-    inkBoundingBox,
+    inkBoundingBox, enhanceInkContrast,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
@@ -539,6 +539,16 @@ group('inkBoundingBox — Despeckle gegen Phantom-Pixel (#4)', () => {
   // Zwei echte, weit getrennte Blöcke → beide bleiben, Box umspannt beide.
   const two = M.inkBoundingBox(mk([...block(24, 24, 20, 20), ...block(120, 120, 20, 20)]), CW, CH);
   ok(two.minX === 24 && two.maxX === 139, 'zwei echte Blöcke → Box umspannt beide');
+});
+
+group('enhanceInkContrast — Lesbarkeit dünner Striche (#5)', () => {
+  const px = (r, g, b, a = 255) => { const d = new Uint8ClampedArray([r, g, b, a]); M.enhanceInkContrast(d); return d; };
+  eq(px(255, 255, 255)[0], 255, 'reines Weiß bleibt weiß');
+  const near = px(250, 250, 250);
+  ok(near[0] === 255 && near[1] === 255 && near[2] === 255, 'nahezu Weiß (≥cutoff) → reines Weiß (Halo weg)');
+  ok(px(200, 200, 200)[0] < 180, 'blasses Grau wird deutlich dunkler');
+  ok(px(0, 0, 0)[0] <= 2, 'tiefes Schwarz bleibt schwarz');
+  eq(px(120, 120, 120, 177)[3], 177, 'Alpha-Kanal bleibt unverändert');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────

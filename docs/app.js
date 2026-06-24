@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '222';
+const APP_VERSION = '223';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3806,6 +3806,50 @@ function inkBoundingBox(data, CW, CH) {
   };
 }
 
+// Kontrast-/Lesbarkeits-Anhebung für flachgerechnete Handschrift (#5). Dünne,
+// blasse Bleistift-/Stiftstriche verblassen beim Flatten auf Weiß und beim
+// Herunterskalieren zu hellem Grau und werden für die Vision-API schwer lesbar.
+// Pro Pixel: nahezu weiße (Luminanz ≥ INK_WHITE_CUTOFF) auf reines Weiß ziehen
+// (schwache Anti-Aliasing-Halos verschwinden); sonst die „Tintigkeit" (255−Kanal)
+// per Gamma>1 verstärken, sodass blasse Striche dunkler/satter werden. Hue bleibt
+// grob erhalten (Highlighter bleibt farbig, nur kräftiger). Mutiert data in place.
+const INK_WHITE_CUTOFF = 246;
+const INK_GAMMA = 2.2;
+function enhanceInkContrast(data) {
+  const inv = 1 / INK_GAMMA;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (0.299 * r + 0.587 * g + 0.114 * b >= INK_WHITE_CUTOFF) {
+      data[i] = data[i + 1] = data[i + 2] = 255;
+      continue;
+    }
+    data[i]     = 255 - Math.round(255 * Math.pow((255 - r) / 255, inv));
+    data[i + 1] = 255 - Math.round(255 * Math.pow((255 - g) / 255, inv));
+    data[i + 2] = 255 - Math.round(255 * Math.pow((255 - b) / 255, inv));
+  }
+}
+
+// Gemeinsamer Vision-Zuschnitt der Handschrift (Rechnen + Lernen): den
+// beschriebenen (despeckelten) Bereich auf weißen Grund flachrechnen, auf
+// INK_MAX_EDGE herunterskalieren, kontrastverstärken (#5) und als PNG-Base64
+// (ohne data:-Präfix) liefern. Crop-Rand ist INK_CROP_MARGIN.
+const INK_CROP_MARGIN = 32;
+const INK_MAX_EDGE = 1024;
+function inkCropToBase64(srcCanvas, sx, sy, sw, sh) {
+  const scale = Math.min(1, INK_MAX_EDGE / Math.max(sw, sh));
+  const flat = document.createElement('canvas');
+  flat.width  = Math.max(1, Math.round(sw * scale));
+  flat.height = Math.max(1, Math.round(sh * scale));
+  const fc = flat.getContext('2d');
+  fc.fillStyle = '#ffffff';
+  fc.fillRect(0, 0, flat.width, flat.height);
+  fc.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, flat.width, flat.height);
+  const img = fc.getImageData(0, 0, flat.width, flat.height);
+  enhanceInkContrast(img.data);
+  fc.putImageData(img, 0, 0);
+  return flat.toDataURL('image/png').split(',')[1];
+}
+
 function applyCtxStyle() {
   if (!mathCtx) return;
   mathCtx.lineCap  = 'round';
@@ -4443,32 +4487,23 @@ async function checkHandwriting() {
   const writtenNote = writtenText
     ? `\n\n**Im Schreibbereich getippter Text des Schülers (Teil der Lösung, gleichwertig zur Zeichnung berücksichtigen):**\n${writtenText}`
     : '';
-  // (C) Auf den beschriebenen Bereich zuschneiden statt den ganzen 2000px-Canvas
-  // (meist überwiegend weiß) zu senden, plus Rand. (B) Anschließend auf eine
-  // maximale Kantenlänge herunterskalieren. Beides senkt die Vision-Tokens stark.
-  const MARGIN = 32, MAX_EDGE = 1024;
-  let sx = 0, sy = 0, sw = CW, sh = CH;
+  // (C) Auf den (despeckelten, #4) beschriebenen Bereich + Rand zuschneiden statt
+  // den ganzen 2000px-Canvas zu senden, (B) herunterskalieren und (#5) kontrast-
+  // verstärken (gemeinsamer Helper). Nur getippter Text → winziges Platzhalterbild.
+  let base64;
   if (hasInk) {
-    sx = Math.max(0, minX - MARGIN);
-    sy = Math.max(0, minY - MARGIN);
-    sw = Math.min(CW, maxX + MARGIN) - sx;
-    sh = Math.min(CH, maxY + MARGIN) - sy;
+    const sx = Math.max(0, minX - INK_CROP_MARGIN);
+    const sy = Math.max(0, minY - INK_CROP_MARGIN);
+    const sw = Math.min(CW, maxX + INK_CROP_MARGIN) - sx;
+    const sh = Math.min(CH, maxY + INK_CROP_MARGIN) - sy;
+    base64 = inkCropToBase64(canvas, sx, sy, sw, sh);
   } else {
-    // Nur getippter Text, keine Tinte → winziges Platzhalterbild genügt.
-    sw = Math.min(CW, 16); sh = Math.min(CH, 16);
+    const flat = document.createElement('canvas');
+    flat.width = 16; flat.height = 16;
+    const fc = flat.getContext('2d');
+    fc.fillStyle = '#ffffff'; fc.fillRect(0, 0, 16, 16);
+    base64 = flat.toDataURL('image/png').split(',')[1];
   }
-  const scale = Math.min(1, MAX_EDGE / Math.max(sw, sh));
-  // Transparente Bitmap auf weißen Grund flachrechnen, damit die Vision-API
-  // die Tinte auf Weiß sieht (statt auf transparentem/schwarzem Grund).
-  const flat = document.createElement('canvas');
-  flat.width  = Math.max(1, Math.round(sw * scale));
-  flat.height = Math.max(1, Math.round(sh * scale));
-  const fc = flat.getContext('2d');
-  fc.fillStyle = '#ffffff';
-  fc.fillRect(0, 0, flat.width, flat.height);
-  fc.drawImage(canvas, sx, sy, sw, sh, 0, 0, flat.width, flat.height);
-  const dataURL   = flat.toDataURL('image/png');
-  const base64   = dataURL.split(',')[1];
 
   // Bewertungsmaßstab an den gewählten Schwierigkeitsgrad koppeln: rechnerische
   // Fehler bleiben auf jedem Level Fehler, aber bei leichten Aufgaben wird das
@@ -6998,21 +7033,13 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     if (hasInk) {
       // Zeichnung vorhanden → Vision; getippten Text (falls vorhanden) zusätzlich mitschicken.
       const canvas = inkInfo.canvas;
-      // (C) Auf den beschriebenen Bereich + Rand zuschneiden, (B) auf max. Kantenlänge
-      // herunterskalieren – statt den ganzen, meist überwiegend weißen Canvas zu senden.
-      const MARGIN = 32, MAX_EDGE = 1024;
-      const sx = Math.max(0, inkInfo.minX - MARGIN);
-      const sy = Math.max(0, inkInfo.minY - MARGIN);
-      const sw = Math.min(inkInfo.CW, inkInfo.maxX + MARGIN) - sx;
-      const sh = Math.min(inkInfo.CH, inkInfo.maxY + MARGIN) - sy;
-      const scale = Math.min(1, MAX_EDGE / Math.max(sw, sh));
-      const flat = document.createElement('canvas');
-      flat.width  = Math.max(1, Math.round(sw * scale));
-      flat.height = Math.max(1, Math.round(sh * scale));
-      const fc = flat.getContext('2d');
-      fc.fillStyle = '#fff'; fc.fillRect(0, 0, flat.width, flat.height);
-      fc.drawImage(canvas, sx, sy, sw, sh, 0, 0, flat.width, flat.height);
-      const base64 = flat.toDataURL('image/png').split(',')[1];
+      // (C) Auf den (despeckelten, #4) beschriebenen Bereich + Rand zuschneiden,
+      // (B) herunterskalieren, (#5) kontrastverstärken – gemeinsamer Helper.
+      const sx = Math.max(0, inkInfo.minX - INK_CROP_MARGIN);
+      const sy = Math.max(0, inkInfo.minY - INK_CROP_MARGIN);
+      const sw = Math.min(inkInfo.CW, inkInfo.maxX + INK_CROP_MARGIN) - sx;
+      const sh = Math.min(inkInfo.CH, inkInfo.maxY + INK_CROP_MARGIN) - sy;
+      const base64 = inkCropToBase64(canvas, sx, sy, sw, sh);
       const textPart = answerText
         ? `\n\nZusätzlich getippte Antwort des Studenten: ${answerText}\nWerte Zeichnung UND getippten Text zusammen als eine einzige Antwort.`
         : '';
