@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '227';
+const APP_VERSION = '228';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6383,9 +6383,12 @@ function renderTopicContent(topic, data) {
     document.getElementById('lernen-step1-footer').classList.remove('hidden');
   }
 
+  // Die "Aufgabe"-Tab ist IMMER anwählbar: Fehlt eine Aufgabe (Modell ließ "aufgabe"
+  // weg oder das Erklärungs-JSON wurde am Token-Limit abgeschnitten), wird sie beim
+  // Öffnen on-demand erzeugt (openLernenTask) – statt den Tab tot/disabled zu lassen.
+  document.getElementById('lernen-tab-aufgabe').disabled = false;
   if (data.aufgabe && data.aufgabe.trim()) {
     document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(data.aufgabe));
-    document.getElementById('lernen-tab-aufgabe').disabled = false;
     document.getElementById('lernen-regen-btn').classList.remove('hidden');
   } else if (!isFresh) {
     // Thema ohne Übungsaufgabe: bei Wiederholung sofort abhakbar. Beim ERSTEN Mal
@@ -6480,11 +6483,14 @@ function retryLernenTopic() {
   loadTopicContent(topic);
 }
 
-async function regenLernenTask() {
+// initial=true: stille On-Demand-Erzeugung beim Öffnen der Aufgabe (kein Regen-Button,
+// keine Toasts). Liefert true/false zurück, damit openLernenTask reagieren kann.
+async function regenLernenTask(opts = {}) {
+  const initial = opts.initial === true;
   const topic = currentExplainerTopic;
-  if (!topic || !lernenTopicData) return;
+  if (!topic || !lernenTopicData) return false;
   const btn = document.getElementById('lernen-regen-btn');
-  btn.disabled = true; btn.textContent = '⏳';
+  if (!initial && btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
     const effLevel = selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx] : calculateMilestone();
     const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
@@ -6529,12 +6535,35 @@ async function regenLernenTask() {
       lernenLastResultHtml = '';
       lernenLoesung = null;        // alte Musterlösung verwerfen
       armLernenPrefetch();         // Hebel 4: erst bei Aktivität vorbereiten
-      toast('Neue Aufgabe generiert', 'success', 2000);
+      if (!initial) toast('Neue Aufgabe generiert', 'success', 2000);
+      return true;
     } else {
-      toast('Keine neue Aufgabe erhalten', 'warn');
+      if (!initial) toast('Keine neue Aufgabe erhalten', 'warn');
+      return false;
     }
-  } catch (e) { toast('Fehler: ' + e.message, 'error'); }
-  btn.disabled = false; btn.innerHTML = '🔄 Neue Aufgabe';
+  } catch (e) {
+    if (!initial) toast('Fehler: ' + e.message, 'error');
+    return false;
+  } finally {
+    if (!initial && btn) { btn.disabled = false; btn.innerHTML = '🔄 Neue Aufgabe'; }
+  }
+}
+
+// "Aufgabe"-Tab öffnen: ist noch keine Aufgabe vorhanden, jetzt eine erzeugen, damit
+// der Tab nie wirkungslos bleibt (Bugfix: "auf Aufgabe klicken passiert nichts").
+async function openLernenTask() {
+  if (!lernenTopicData) { lernenSwitchStep(2); return; }
+  lernenSwitchStep(2);
+  if (lernenTopicData.aufgabe && lernenTopicData.aufgabe.trim()) return;
+  const bar = document.getElementById('lernen-task-bar');
+  if (bar) bar.innerHTML = '<span class="lernen-task-generating">⏳ Aufgabe wird erstellt…</span>';
+  const ok = await regenLernenTask({ initial: true });
+  if (ok) {
+    document.getElementById('lernen-regen-btn')?.classList.remove('hidden');
+  } else if (bar) {
+    bar.innerHTML = '⚠️ Aufgabe konnte nicht erstellt werden. ' +
+      '<button class="btn-secondary btn-sm" onclick="openLernenTask()">🔄 Erneut versuchen</button>';
+  }
 }
 
 function retryLernenSameTask() {
@@ -7495,7 +7524,7 @@ document.getElementById('elaborate-go')?.addEventListener('click', finishElabora
 
 // Lernen topic view controls
 document.getElementById('lernen-back-btn')?.addEventListener('click', closeLernenTopic);
-document.getElementById('lernen-to-task-btn')?.addEventListener('click', () => lernenSwitchStep(2));
+document.getElementById('lernen-to-task-btn')?.addEventListener('click', openLernenTask);
 document.getElementById('lernen-check-btn')?.addEventListener('click', checkLernenSolution);
 document.getElementById('lernen-done-btn')?.addEventListener('click', markTopicDone);
 document.getElementById('lernen-regen-btn')?.addEventListener('click', regenLernenTask);
@@ -7508,7 +7537,9 @@ document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   lernenStrokes = []; lernenCurStroke = null;
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
-  if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);
+  if (t.disabled) return;
+  const step = +t.dataset.lstep;
+  if (step === 2) openLernenTask(); else lernenSwitchStep(step);
 }));
 document.querySelectorAll('[data-ltool]').forEach(b => b.addEventListener('click', () => {
   lernenTool = b.dataset.ltool;
