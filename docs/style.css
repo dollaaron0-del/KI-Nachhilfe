@@ -1823,6 +1823,7 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 .lernen-result-bar--ok      { background: rgba(52,199,89,0.08); }
 .lernen-result-bar--partial { background: rgba(255,149,0,0.08); }
 .lernen-result-bar--fail    { background: rgba(255,59,48,0.08); }
+.lernen-result-bar--core    { background: rgba(52,199,89,0.08); }
 .lernen-result-bar--loading { background: rgba(88,86,214,0.06); }
 .lernen-result-verdict {
   font-weight: 700; font-size: 14px; line-height: 1.4;
@@ -1830,6 +1831,15 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 .lernen-result-verdict--ok      { color: var(--green); }
 .lernen-result-verdict--partial { color: #ff9500; }
 .lernen-result-verdict--fail    { color: var(--text2); }
+.lernen-result-verdict--core    { color: var(--green); }
+/* Dezenter "trotzdem weiter"-Ausweg: nie im Korrektur-Loop gefangen. */
+.lernen-skip-link {
+  display: block; margin: 10px 0 2px; padding: 4px 0;
+  background: none; border: none; cursor: pointer;
+  color: var(--text2); font-size: 12.5px; text-decoration: underline;
+  text-underline-offset: 2px; align-self: flex-start;
+}
+.lernen-skip-link:hover { color: var(--text); }
 .lernen-result-details {
   border: 1.5px solid var(--border); border-radius: 10px;
   padding: 8px 12px; margin: 6px 0;

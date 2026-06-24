@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '226';
+const APP_VERSION = '227';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -316,6 +316,7 @@ let currentExplainerTopic = null;
 let currentUnit          = null;   // aktuelle Lerneinheit (1 Thema ODER zusammengesetzt, s. pathUnits)
 let rechnenDiff     = 'mittel';
 let rechnenLastFeedback = '';   // letztes Prüf-Feedback derselben Aufgabe (konsistente Re-Prüfung)
+let rechnenAttempts = 0;        // wie oft dieselbe Aufgabe schon geprüft wurde → Eskalations-Bremse beim Re-Check
 let rechnenLastCheckSig = '';   // Signatur (Striche+Text+Aufgabe) der zuletzt geprüften Lösung → Re-Check ohne Änderung spart den API-Call
 let rechnenNextTask = null;     // Prefetch: { promise, diff, forSession } – nächste Aufgabe vorab geladen
 let rechnenLoesung  = null;     // Prefetch: { aufgabe, promise, text } – Musterlösung vorab generiert
@@ -3563,6 +3564,7 @@ function injectSolveButtons(tasksPart) {
 function sendToRechnen(text) {
   currentAufgabe = text;
   rechnenLastFeedback = '';
+  rechnenAttempts = 0;
   rechnenLastCheckSig = '';
   savedCanvasData = null;
   const input = document.getElementById('rechnen-task-input');
@@ -4416,6 +4418,7 @@ async function generateMathAufgabe() {
     currentAufgabe  = aufgabe.trim();
     rememberTask(rechnenScope(), currentAufgabe);   // in Historie aufnehmen → nächste Aufgabe vermeidet sie
     rechnenLastFeedback = '';
+    rechnenAttempts = 0;
     rechnenLastCheckSig = '';
     savedCanvasData = null;
     clearCanvas();   // setzt strokes/redoStrokes/baseImage zurück
@@ -4550,8 +4553,16 @@ async function checkHandwriting() {
 
   // Re-Prüfung: vorheriges Feedback mitschicken, damit die KI konsistent bleibt
   // und nicht bei jeder Runde neue/widersprüchliche Fehler "entdeckt".
+  // Eskalations-Bremse: Ab dem 2. Nachbessern (außer im strengen Prüfungs-/Experten-
+  // Modus, wo Klausurschärfe gewollt ist) zählt nur noch, ob der ursprünglich
+  // benannte Kernfehler behoben ist – nicht, ob alles pixelgenau perfekt ist. Das
+  // verhindert den Frust-Loop "verstanden & korrigiert, aber der Bot will mehr".
+  const rechnenLenient = !['pruefungsnah', 'experte'].includes(rechnenDiff);
+  const coreFocusNote = (rechnenLastFeedback && rechnenLenient)
+    ? `\n\nKERNFEHLER-FOKUS (das ist mindestens der 2. Versuch): Prüfe vor allem, ob der zuvor benannte Hauptfehler jetzt behoben ist. Ist der Kernfehler korrigiert und das Ergebnis stimmig, beginne dein Urteil klar mit "✅ Kernfehler behoben" und akzeptiere die Lösung – auch wenn der Weg knapp ist oder kleine formale Unschönheiten bleiben. Eröffne KEINE neuen Nebenschauplätze wegen Kleinigkeiten und verlange NICHT, dass die Musterlösung Wort für Wort reproduziert wird.`
+    : '';
   const reCheckNote = rechnenLastFeedback
-    ? `\n\n**WICHTIG – das ist eine erneute Prüfung derselben Aufgabe.** Du hast diese Lösung vorher schon einmal bewertet. Dein vorheriges Feedback war:\n"""\n${rechnenLastFeedback}\n"""\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – führe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, es sei denn, die Lösung wurde dort tatsächlich verändert und ist jetzt falsch. Bestätige ausdrücklich, welche der zuvor genannten Fehler nun korrigiert sind.`
+    ? `\n\n**WICHTIG – das ist eine erneute Prüfung derselben Aufgabe.** Du hast diese Lösung vorher schon einmal bewertet. Dein vorheriges Feedback war:\n"""\n${rechnenLastFeedback}\n"""\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – führe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, es sei denn, die Lösung wurde dort tatsächlich verändert und ist jetzt falsch. Bestätige ausdrücklich, welche der zuvor genannten Fehler nun korrigiert sind.${coreFocusNote}`
     : '';
 
   const checkPrompt = `Ein Schüler hat eine Aufgabe gelöst. Die Lösung kann in ZWEI Bereichen stehen:
@@ -4604,6 +4615,7 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
     const full = loesung ? `${feedback}\n\n## Musterlösung\n${loesung}` : feedback;
     checkDone(); stopStatus();
     rechnenLastFeedback = full;
+    rechnenAttempts++;           // Zähler für die Eskalations-Bremse beim nächsten Re-Check
     rechnenLastCheckSig = sig;   // (A) Stand merken, damit ein unveränderter Re-Check gratis ist
     document.getElementById('rechnen-feedback-content').innerHTML = safeHtml(md(full));
     document.getElementById('rechnen-sheet-loading').classList.add('hidden');
@@ -6990,8 +7002,16 @@ async function checkLernenSolution() {
 
     // Re-Prüfung: vorherige Auswertung mitgeben, damit die KI konsistent bleibt
     // und nicht bei jeder Runde neue/widersprüchliche Fehler "entdeckt".
+    // Eskalations-Bremse: Bei nicht-strengen Niveaus (einsteiger/leicht/mittel) zählt
+    // ab dem 2. Versuch nur noch, ob der ursprünglich angemahnte Kernfehler behoben ist
+    // – nicht Perfektion. Verhindert den Frust-Loop. Schwer/Prüfungsnah bleiben streng
+    // (dort fängt der manuelle "trotzdem weiter"-Ausweg im UI den Nutzer auf).
+    const lernenLenient = !['schwer', 'pruefungsnah'].includes(lernenCurrentDiff);
+    const coreFocusNote = (lernenLastEval && lernenLenient)
+      ? `\n\nKERNFEHLER-FOKUS (mind. 2. Versuch): Konzentriere dich darauf, ob der/die zuvor angemahnte(n) Hauptfehler jetzt behoben ist/sind. Hat der Student den Kernfehler korrigiert und sitzt die inhaltliche Kernidee, erkenne das deutlich an – eröffne KEINE neuen Nebenschauplätze wegen Kleinigkeiten und werte reine Schönheits-/Formulierungsmängel NICHT als erneutes "falsch".`
+      : '';
     const reCheckNote = lernenLastEval
-      ? `\n\nWICHTIG – ERNEUTE PRÜFUNG DERSELBEN AUFGABE. Deine vorherige Auswertung war:\nscore: ${lernenLastEval.score}\nfeedback: ${lernenLastEval.feedback || ''}\neinschaetzung: ${lernenLastEval.einschaetzung || ''}\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – bringe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, außer der Student hat sie verändert und sie sind jetzt falsch. Erkenne ausdrücklich an, welche zuvor genannten Fehler nun korrigiert sind. Der score darf bei einer korrigierten Antwort NICHT sinken.`
+      ? `\n\nWICHTIG – ERNEUTE PRÜFUNG DERSELBEN AUFGABE. Deine vorherige Auswertung war:\nscore: ${lernenLastEval.score}\nfeedback: ${lernenLastEval.feedback || ''}\neinschaetzung: ${lernenLastEval.einschaetzung || ''}\nBleibe konsistent: Beziehe dich auf genau diese Punkte. Was du vorher als richtig akzeptiert hast, bleibt richtig – bringe KEINE neuen Kritikpunkte zu Aspekten ein, die du vorher nicht beanstandet hast, außer der Student hat sie verändert und sie sind jetzt falsch. Erkenne ausdrücklich an, welche zuvor genannten Fehler nun korrigiert sind. Der score darf bei einer korrigierten Antwort NICHT sinken.${coreFocusNote}`
       : '';
 
     // Wenn die Musterlösung bereits vorliegt: dem Modell als verbindlichen Maßstab
@@ -7101,13 +7121,25 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
     lernenAttempts++;
     lernenLastEval = { score: ev.score, feedback: ev.feedback, einschaetzung: ev.einschaetzung, transkription: ev.transkription || '' };
     const understood = ev.understood === true && ev.score >= 2;
+    // Stufen-Verdikt: Beim 2.+ Versuch mit solidem Teil-Ergebnis (score 1) auf nicht-
+    // strengen Niveaus gilt "Kernidee sitzt – reicht zum Weitermachen". Schaltet den
+    // Abschließen-Button frei, ohne Perfektion zu verlangen.
+    const coreGotIt = !understood && ev.score === 1 && lernenAttempts >= 2 && lernenLenient;
     if (ev.score >= 2) comboUp(); else comboReset();
-    const scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
-    const scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '💪' : '🔁';
+    let scoreClass = ev.score >= 2 ? 'ok' : ev.score === 1 ? 'partial' : 'fail';
+    let scoreIcon  = ev.score >= 2 ? '✅' : ev.score === 1 ? '💪' : '🔁';
+    if (coreGotIt) { scoreClass = 'core'; scoreIcon = '👍'; }
 
     if (resultBar) {
       resultBar.className = `lernen-result-bar lernen-result-bar--${scoreClass}`;
       let html = `<div class="lernen-result-verdict lernen-result-verdict--${scoreClass}">${scoreIcon} ${esc(ev.feedback || '')}</div>`;
+
+      // Stufen-Verdikt: "Kernidee sitzt" – ermutigen statt im Loop festhalten.
+      if (coreGotIt) {
+        html += `<div class="lernen-result-prose"><div class="lernen-result-text">` +
+          `Du hast den Kernfehler korrigiert – die Idee sitzt. Das reicht zum Weitermachen; ` +
+          `die letzten Feinheiten siehst du in der Musterlösung.</div></div>`;
+      }
 
       // So wurde die Handschrift gelesen – einklappbar, damit der Student Lesefehler
       // (z.B. b)-Rechnung unter a) oder [unleserlich]) sofort erkennt und melden kann.
@@ -7156,9 +7188,15 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
           }
         }
         html += `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">` +
-          `<button class="btn-primary btn-sm" onclick="regenLernenTask()">→ Neue Aufgabe zum Thema</button>` +
+          (coreGotIt ? `<button class="btn-primary btn-sm" onclick="markTopicDone()">✓ Verstanden – abschließen</button>` : '') +
+          `<button class="${coreGotIt ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="regenLernenTask()">→ Neue Aufgabe zum Thema</button>` +
           `<button class="btn-secondary btn-sm" onclick="retryLernenSameTask()">🔁 Gleiche Aufgabe</button>` +
           `</div>`;
+        // Manueller Ausweg – IMMER verfügbar (auch bei score 0): wer den Stoff verstanden
+        // hat, ist nie gefangen, bis der Bot zufrieden ist. Bewusst dezent als Link.
+        if (!coreGotIt) {
+          html += `<button class="lernen-skip-link" onclick="markTopicDone()">Ich hab's verstanden – trotzdem weiter →</button>`;
+        }
       } else {
         if (ev.loesung) {
           html += `<div class="lernen-result-prose">` +
@@ -7179,10 +7217,11 @@ ${LERN_GRADE_STD[lernenCurrentDiff] || LERN_GRADE_STD.einsteiger}${reCheckNote}$
       lernenLastResultHtml  = html;
       lernenLastResultClass = resultBar.className;
     }
-    if (understood) {
+    if (understood || coreGotIt) {
       document.getElementById('lernen-done-btn').classList.remove('hidden');
-      if (lernenAttempts > 1) toast(`🎯 Beim ${lernenAttempts}. Versuch geschafft!`, 'success', 3500);
     }
+    if (understood && lernenAttempts > 1) toast(`🎯 Beim ${lernenAttempts}. Versuch geschafft!`, 'success', 3500);
+    else if (coreGotIt) toast('Kernidee sitzt 👍 – du kannst abschließen oder weiter üben.', 'success', 3500);
   } catch (e) {
     toast('Fehler beim Prüfen: ' + e.message, 'error');
     if (resultBar) { resultBar.className = 'lernen-result-bar hidden'; resultBar.innerHTML = ''; }
