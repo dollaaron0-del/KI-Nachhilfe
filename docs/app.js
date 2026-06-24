@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '216';
+const APP_VERSION = '217';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6195,7 +6195,6 @@ AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.`;
 function renderTopicContent(topic, data) {
   document.getElementById('lernen-erkl-loading').style.display = 'none';
   const fmtMd   = s => safeHtml(md(s || ''));
-  const fmtPre  = s => esc(s || '').replace(/\n/g, '<br>'); // keep for monospace rechnung
   const section = (icon, label, cls, inner) =>
     `<div class="explainer-section${cls ? ' ' + cls : ''}">` +
       `<div class="explainer-label"><span class="explainer-licon">${icon}</span>${label}</div>` +
@@ -6208,7 +6207,7 @@ function renderTopicContent(topic, data) {
                    html += section('🔍', 'Vertiefung',         'explainer-section--deep', `<div class="explainer-body">${fmtMd(data.vertiefung)}</div>`);
   if (data.beispiel) html += section('📋', 'Konkretes Beispiel', '',                  `<div class="explainer-body">${fmtMd(data.beispiel)}</div>`);
   if (data.rechnung && data.rechnung.trim())
-                   html += section('📐', 'Rechenbeispiel',     '',                    `<div class="explainer-rechnung">${fmtPre(data.rechnung)}</div>`);
+                   html += section('📐', 'Rechenbeispiel',     '',                    `<div class="explainer-rechnung">${fmtMd(data.rechnung)}</div>`);
   const body = document.getElementById('lernen-erkl-body');
   body.innerHTML = html;
   body.classList.remove('hidden');
