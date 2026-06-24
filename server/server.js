@@ -1933,6 +1933,39 @@ app.post('/api/subjects/:id/structure', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Themen-Namen-Embeddings (für das semantische Re-Scan-Matching im Client). Liefert
+// pro angefragtem (normalisiertem) Namen einen Vektor. Persistenter Cache in
+// topic_vectors → nur fehlende Namen werden tatsächlich (teuer) embedded. Fehlt ein
+// Embedding (Ollama down), bleibt der Name im Ergebnis weg → Client fällt auf
+// Token-Matching zurück.
+app.post('/api/subjects/:id/embed', authMiddleware, async (req, res) => {
+  const { names } = req.body;
+  if (!Array.isArray(names) || !names.length) return res.status(400).json({ error: 'names array erforderlich' });
+  if (names.length > 200) return res.status(400).json({ error: 'höchstens 200 Namen pro Anfrage' });
+  const sid = req.params.id;
+  try {
+    const uniq = [...new Set(names.map(n => String(n || '').trim()).filter(Boolean))];
+    const { rows } = await pool.query(
+      'SELECT norm_name, embedding FROM topic_vectors WHERE subject_id=$1 AND norm_name = ANY($2)',
+      [sid, uniq]
+    );
+    const out = {};
+    rows.forEach(r => { if (Array.isArray(r.embedding)) out[r.norm_name] = r.embedding; });
+    const miss = uniq.filter(n => !out[n]);
+    for (const n of miss) {                         // sequenziell: Ollama serialisiert ohnehin auf der CPU
+      const v = await embedText(n);
+      if (!v) continue;
+      out[n] = v;
+      await pool.query(
+        `INSERT INTO topic_vectors (subject_id, norm_name, embedding, updated_at) VALUES ($1,$2,$3,now())
+         ON CONFLICT (subject_id, norm_name) DO UPDATE SET embedding=$3, updated_at=now()`,
+        [sid, n, JSON.stringify(v)]
+      );
+    }
+    res.json({ vectors: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SAVED AUFGABEN
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2194,6 +2227,16 @@ async function initTables() {
       status      TEXT DEFAULT 'pending',
       kb_version  INTEGER DEFAULT 1,
       updated_at  TIMESTAMPTZ DEFAULT now()
+    );
+    -- Persistenter Cache für Themen-Namen-Embeddings (semantisches Re-Scan-Matching).
+    -- Embedding ist auf der CPU-VM teuer (~3s/Name) → einmal berechnen, wiederverwenden.
+    -- Überlebt Re-Scans (Alt-Namen bleiben für den Fortschritt-Abgleich nutzbar).
+    CREATE TABLE IF NOT EXISTS topic_vectors (
+      subject_id TEXT NOT NULL,
+      norm_name  TEXT NOT NULL,
+      embedding  JSONB,
+      updated_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (subject_id, norm_name)
     );
   `);
 }

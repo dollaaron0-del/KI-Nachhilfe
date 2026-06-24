@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '215';
+const APP_VERSION = '216';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -1517,20 +1517,29 @@ async function openSubject(subj) {
   const rawMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
   topicMeta = {};
   for (const [k, v] of Object.entries(rawMeta)) topicMeta[normFullKey(k)] = v;
-  // Einmal-Reparatur (v214): durch frühere Re-Scans verwaisten Fortschritt mit der
-  // neuen 0.4/Containment-Logik auf die aktuellen Themen zurück-verknüpfen, damit
-  // schon gelernte (damals umbenannte) Themen wieder als abgehakt erscheinen.
-  const repair = repairOrphanedProgress();
-  if (repair.healed) {
-    localforage.setItem(`lt_${subj.id}`, learnedTopics).catch(() => {});
-    saveTopicMeta();
-    repair.added.forEach(t => api(`/api/subjects/${subj.id}/learned-topics`, {
-      method: 'POST', body: JSON.stringify({ topic: t }),
-    }).catch(() => {}));
-    repair.removed.forEach(t => api(`/api/subjects/${subj.id}/learned-topics/${encodeURIComponent(t)}`, {
-      method: 'DELETE',
-    }).catch(() => {}));
-    toast(`✅ ${repair.healed} bereits gelernte${repair.healed === 1 ? 's Thema' : ' Themen'} wieder als erledigt verknüpft.`, 'success', 4500);
+  // Reparatur (v214/v216): durch Re-Scans verwaisten Fortschritt auf die aktuellen
+  // Themen zurück-verknüpfen, damit schon gelernte (umbenannte) Themen wieder als
+  // abgehakt erscheinen. Embedding-Matching (semantisch) ist auf der CPU-VM langsam →
+  // nicht-blockierend: das Fach öffnet sofort, das Heilen ploppt danach nach + re-rendert.
+  // Nur, wenn es überhaupt Waisen gibt (sonst kein teurer Embedding-Aufruf).
+  if (orphanOldNames().length) {
+    (async () => {
+      const sim = await embedSimFn([...orphanOldNames(), ...pathTopics()]);
+      if (sessionId !== subj.id) return;                 // Nutzer hat inzwischen gewechselt → nichts anfassen
+      const repair = repairOrphanedProgress(sim);
+      if (!repair.healed) return;
+      localforage.setItem(`lt_${subj.id}`, learnedTopics).catch(() => {});
+      saveTopicMeta();
+      repair.added.forEach(t => api(`/api/subjects/${subj.id}/learned-topics`, {
+        method: 'POST', body: JSON.stringify({ topic: t }),
+      }).catch(() => {}));
+      repair.removed.forEach(t => api(`/api/subjects/${subj.id}/learned-topics/${encodeURIComponent(t)}`, {
+        method: 'DELETE',
+      }).catch(() => {}));
+      renderMilestone();
+      loadLernpfad();
+      toast(`✅ ${repair.healed} bereits gelernte${repair.healed === 1 ? 's Thema' : ' Themen'} wieder als erledigt verknüpft.`, 'success', 4500);
+    })().catch(() => {});
   }
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
@@ -3325,7 +3334,9 @@ async function scanTopics() {
     scannedTopics = dedupeTopics(parseJsonLoose(m[0])).slice(0, 40);
     if (!scannedTopics.length) throw new Error('Keine Themen gefunden');
     // IDs gegen die vorherigen Themen abgleichen (Rename ⇒ ID bleibt ⇒ Fortschritt bleibt).
-    reconcileTopicUids(prevTopics, scannedTopics);
+    // Semantischer Abgleich via Embeddings (robust gegen Umformulierung); null → Token-Fallback.
+    const sim = prevTopics.length ? await embedSimFn([...prevTopics, ...scannedTopics]) : null;
+    reconcileTopicUids(prevTopics, scannedTopics, sim);
     persistTopicUids(sessionId);
     localforage.setItem(`st_${sessionId}`, scannedTopics).catch(() => {});
     api(`/api/subjects/${sessionId}/topics`, {
@@ -5017,12 +5028,70 @@ function jaccardTokens(a, b) {
   return inter / (A.size + B.size - inter);
 }
 
+// Cosine-Ähnlichkeit zweier Embedding-Vektoren (∈ [-1,1], hier praktisch [0,1]).
+function cosineVec(a, b) {
+  let d = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return (na && nb) ? d / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+// Schwelle für semantisches (Embedding-)Matching beim Re-Scan-Fortschritt-Abgleich.
+// Empirisch an realen Themen-Umbenennungen kalibriert: echte Umbenennungen liegen bei
+// 0.76–0.89, Same-Domain-Rauschen/gestrichene Themen meist < 0.7 (Cosine, nomic-embed).
+const EMBED_MATCH_THRESHOLD = 0.75;
+
+// Baut eine synchrone Ähnlichkeits-Funktion sim(normA, normB)→cosine auf Embedding-Basis.
+// Holt die (persistent gecachten) Vektoren der übergebenen Namen vom Server und liefert
+// dann einen reinen Vergleicher. null, wenn Embeddings nicht verfügbar sind (kein Fach
+// offen / Ollama down / unvollständig) → der Aufrufer nutzt dann das Token-Matching.
+// Bewusst hier getrennt vom synchronen reconcile/repair, damit die (langsame) Embedding-
+// Beschaffung im async Aufrufer passiert und die reinen Funktionen testbar bleiben.
+async function embedSimFn(names) {
+  if (typeof api !== 'function' || !sessionId) return null;
+  const norm = [...new Set(names.map(normTopic).filter(Boolean))];
+  if (norm.length < 2) return null;
+  let vecs;
+  try {
+    ({ vectors: vecs } = await api(`/api/subjects/${sessionId}/embed`, {
+      method: 'POST', body: JSON.stringify({ names: norm }),
+    }));
+  } catch { return null; }
+  if (!vecs) return null;
+  for (const n of norm) if (!Array.isArray(vecs[n])) return null;  // unvollständig → konsistent Token-Fallback
+  return (a, b) => {
+    const va = vecs[a], vb = vecs[b];
+    return (va && vb) ? cosineVec(va, vb) : 0;
+  };
+}
+
+// Normalisierte Namen der Themen, deren Fortschritt aktuell verwaist ist (keine Live-ID
+// löst auf sie auf) – nur diese müssen vor repairOrphanedProgress (+ die aktuellen Themen)
+// embedded werden. Sync & billig; hält die teure Embedding-Menge minimal.
+function orphanOldNames() {
+  const names = pathTopics();
+  if (!names.length || !learnedTopics.length) return [];
+  const liveUids = new Set(names.map(topicId));
+  const uidToName = {};
+  for (const [norm, uid] of Object.entries(topicUids)) if (norm && !uidToName[uid]) uidToName[uid] = norm;
+  const out = new Set();
+  for (const k of learnedTopics) {
+    const head = resolveKey(k).split('::')[0];
+    if (!liveUids.has(head) && uidToName[head]) out.add(uidToName[head]);
+  }
+  return [...out];
+}
+
 // Re-Scan-Abgleich: für jeden neuen Namen die ID des passenden alten Themas
-// nachtragen (exakt/normalisiert → Ähnlichkeit ≥ 0.6 → sonst neue ID). Alte
-// Map-Einträge bleiben erhalten, damit bestehender Fortschritt referenzierbar bleibt.
-function reconcileTopicUids(prevNames, newNames) {
+// nachtragen (exakt/normalisiert → Ähnlichkeit → sonst neue ID). Alte Map-Einträge
+// bleiben erhalten, damit bestehender Fortschritt referenzierbar bleibt.
+// sim (optional): semantische Ähnlichkeits-Funktion (Embedding-Cosine) aus embedSimFn.
+// Liegt sie vor, wird semantisch gematcht (Schwelle 0.75) – robust gegen Umformulierung;
+// sonst Token-Jaccard + Containment (Schwelle 0.4) als Fallback (auch im Test-Harness).
+function reconcileTopicUids(prevNames, newNames, sim) {
   const prevNorm = prevNames.map(normTopic);
   const newNorm  = newNames.map(normTopic);
+  const useEmb = typeof sim === 'function';
+  const threshold = useEmb ? EMBED_MATCH_THRESHOLD : 0.4;
   const used = new Set();
   newNorm.forEach(k => { if (topicUids[k]) used.add(topicUids[k]); });
   const avail = prevNorm.filter(k => topicUids[k] && !newNorm.includes(k));
@@ -5031,32 +5100,39 @@ function reconcileTopicUids(prevNames, newNames) {
     let best = null, score = 0;
     for (const o of avail) {
       if (used.has(topicUids[o])) continue;
-      // Token-Jaccard; Containment-Bonus: enthält ein Name den anderen als Teilstring
-      // (z.B. "Lichtreaktion" ⊂ "Die Lichtreaktion der Photosynthese"), ist es fast
-      // sicher dasselbe Thema → als starker Treffer werten, auch ohne Token-Overlap.
-      let s = jaccardTokens(k, o);
-      if (k.includes(o) || o.includes(k)) s = Math.max(s, 0.75);
+      let s;
+      if (useEmb) {
+        s = sim(k, o);                                    // semantische Nähe (Cosine)
+      } else {
+        // Token-Jaccard; Containment-Bonus: enthält ein Name den anderen als Teilstring
+        // (z.B. "Lichtreaktion" ⊂ "Die Lichtreaktion der Photosynthese"), ist es fast
+        // sicher dasselbe Thema → als starker Treffer werten, auch ohne Token-Overlap.
+        s = jaccardTokens(k, o);
+        if (k.includes(o) || o.includes(k)) s = Math.max(s, 0.75);
+      }
       if (s > score) { score = s; best = o; }
     }
-    // Schwelle bewusst niedrig (0.4): umbenannte/umformulierte Themen sollen ihren
-    // Fortschritt häufiger behalten. Risiko falscher Merges ist gering, da pro alter
-    // ID nur ein neuer Name andocken kann (used-Set) und der Diff-Toast es sichtbar macht.
-    if (best && score >= 0.4) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
+    // Pro alter ID kann nur ein neuer Name andocken (used-Set), der Diff-Toast macht
+    // Merges sichtbar → Risiko falscher Zuordnungen ist gering.
+    if (best && score >= threshold) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
     else topicUids[k] = newTopicUid();
   });
 }
 
-// Einmal-Reparatur (v214): Fortschritt, der durch frühere Re-Scans mit der alten,
-// strengeren Match-Schwelle (0.6) auf eine inzwischen verwaiste ID gefallen ist, mit
-// der neuen 0.4/Containment-Logik auf das passende aktuelle Thema zurück-verknüpfen.
-// So erscheinen schon gelernte, aber damals umbenannte Themen wieder als abgehakt –
-// ohne Neu-Lernen. Idempotent: nach dem Heilen referenziert kein Fortschritt mehr eine
-// verwaiste ID, ein erneuter Lauf findet nichts. Mutiert learnedTopics/topicMeta und
-// liefert { healed, removed (alte Keys für Server-DELETE), added (neue Keys für POST) }.
-function repairOrphanedProgress() {
+// Reparatur (v214): Fortschritt, der durch einen Re-Scan auf eine inzwischen verwaiste
+// ID gefallen ist, auf das passende aktuelle Thema zurück-verknüpfen. So erscheinen schon
+// gelernte, aber umbenannte Themen wieder als abgehakt – ohne Neu-Lernen. Idempotent:
+// nach dem Heilen referenziert kein Fortschritt mehr eine verwaiste ID, ein erneuter Lauf
+// findet nichts. Mutiert learnedTopics/topicMeta und liefert { healed, removed (alte Keys
+// für Server-DELETE), added (neue Keys für POST) }.
+// sim (optional): semantische Ähnlichkeit (Embedding-Cosine, Schwelle 0.75); fehlt sie,
+// Token-Jaccard + Containment (Schwelle 0.4) als Fallback (auch im Test-Harness).
+function repairOrphanedProgress(sim) {
   const result = { healed: 0, removed: [], added: [] };
   const names = pathTopics();
   if (!names.length || !learnedTopics.length) return result;
+  const useEmb = typeof sim === 'function';
+  const threshold = useEmb ? EMBED_MATCH_THRESHOLD : 0.4;
 
   const liveUids = new Set(names.map(topicId));
   // uid → alter normalisierter Name (Reverse-Lookup; topicUids behält Alt-Einträge).
@@ -5072,23 +5148,34 @@ function repairOrphanedProgress() {
   }
   if (!orphans.size) return result;
 
-  // Jede verwaiste ID auf das ähnlichste aktuelle Thema mappen (≥0.4 oder Teilstring),
-  // jede Ziel-ID höchstens einmal beanspruchen (wie reconcile's used-Set).
-  const remap = {};
-  const claimed = new Set();
+  // Für jede verwaiste ID das ähnlichste aktuelle Thema + Score bestimmen …
+  const cands = [];
   for (const ou of orphans) {
     const oldNorm = uidToName[ou];
     if (!oldNorm) continue;
     let best = null, score = 0;
     for (const nm of names) {
       const lu = topicId(nm);
-      if (claimed.has(lu)) continue;
       const nn = normTopic(nm);
-      let s = jaccardTokens(oldNorm, nn);
-      if (oldNorm.includes(nn) || nn.includes(oldNorm)) s = Math.max(s, 0.75);
+      let s;
+      if (useEmb) {
+        s = sim(oldNorm, nn);
+      } else {
+        s = jaccardTokens(oldNorm, nn);
+        if (oldNorm.includes(nn) || nn.includes(oldNorm)) s = Math.max(s, 0.75);
+      }
       if (s > score) { score = s; best = lu; }
     }
-    if (best && score >= 0.4) { remap[ou] = best; claimed.add(best); }
+    if (best && score >= threshold) cands.push({ ou, best, score });
+  }
+  // … dann greedy nach Score absteigend zuordnen: die sichersten Treffer beanspruchen
+  // ihr Ziel zuerst, jede Ziel-ID höchstens einmal (wie reconcile's used-Set).
+  cands.sort((a, b) => b.score - a.score);
+  const remap = {};
+  const claimed = new Set();
+  for (const c of cands) {
+    if (claimed.has(c.best)) continue;
+    remap[c.ou] = c.best; claimed.add(c.best);
   }
   if (!Object.keys(remap).length) return result;
 
@@ -7066,7 +7153,10 @@ async function scanModuleStructure(btn) {
     moduleStructure = dedupeStructure({ kapitel });
     const newNames = moduleStructure.kapitel.flatMap(k => k.themen);
     // IDs gegen die alten Themen abgleichen: Rename ⇒ ID bleibt ⇒ Fortschritt bleibt.
-    reconcileTopicUids(prevNames, newNames);
+    // Semantischer Abgleich via Embeddings (robust gegen Umformulierung); null → Token-Fallback.
+    btn.textContent = 'Fortschritt abgleichen…';
+    const sim = prevNames.length ? await embedSimFn([...prevNames, ...newNames]) : null;
+    reconcileTopicUids(prevNames, newNames, sim);
     moduleStructure.ids = topicUids;
     // Flache Liste = ALLE Strukturthemen (kein 30er-Cut): der Lernpfad zählt sie
     // ohnehin vollständig, Session-Planer/Aufgaben sollen deckungsgleich sein (#7b).

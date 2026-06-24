@@ -43,7 +43,7 @@ const FN_DECLS = [
   'scanDirectiveBlock',
   'md', 'renderTable',
 ];
-const CONST_DECLS = ['isTopicUid', 'formatScanDiff'];
+const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD'];
 
 const assembled = [
   ...CONST_DECLS.map(extractConst),
@@ -150,6 +150,27 @@ group('reconcileTopicUids — Erhalt über Re-Scan (#7)', () => {
   eq(M.topicId('Lineare Regression Analyse'), 't_reg', 'Containment erbt UID trotz Jaccard <0.4');
 });
 
+group('reconcileTopicUids — semantisches (Embedding-)Matching (v216)', () => {
+  // Fake-sim simuliert die Embedding-Cosine-Funktion: Token-Jaccard wäre hier 0 (kein
+  // gemeinsames Token, kein Teilstring) → Token-Matching würde den Fortschritt verlieren.
+  const sim = (a, b) => {
+    const m = {
+      'binomialverteilung definition|wahrscheinlichkeitsberechnung binomial': 0.86,
+    };
+    return m[`${a}|${b}`] ?? m[`${b}|${a}`] ?? 0.1;
+  };
+  // Über Schwelle (0.86 ≥ 0.75): erbt UID trotz 0 Token-Overlap.
+  M._setUids({ 'binomialverteilung definition': 't_bv' });
+  M.reconcileTopicUids(['Binomialverteilung Definition'], ['Wahrscheinlichkeitsberechnung Binomial'], sim);
+  eq(M.topicId('Wahrscheinlichkeitsberechnung Binomial'), 't_bv', 'Cosine ≥0.75 erbt UID (semantisch)');
+
+  // Unter Schwelle (0.1 < 0.75): echtes neues Thema → frische UID, kein False-Merge.
+  M._setUids({ 'binomialverteilung definition': 't_bv' });
+  M.reconcileTopicUids(['Binomialverteilung Definition'], ['Lineare Optimierung'], sim);
+  const fresh = M.topicId('Lineare Optimierung');
+  ok(M.isTopicUid(fresh) && fresh !== 't_bv', 'Cosine <0.75 → neue UID (kein semantischer False-Merge)');
+});
+
 group('repairOrphanedProgress — verwaisten Fortschritt zurück-verknüpfen (v214)', () => {
   // Zustand NACH einem alten Re-Scan (Schwelle 0.6): zwei Themen wurden umbenannt und
   // bekamen eine NEUE Live-UID, der Fortschritt hängt aber noch an der ALTEN (verwaisten)
@@ -190,6 +211,50 @@ group('repairOrphanedProgress — verwaisten Fortschritt zurück-verknüpfen (v2
   M._setMeta({});
   eq(M.repairOrphanedProgress().healed, 0, 'fremdes Thema (kein Match ≥0.4) wird NICHT geheilt');
   ok(M._getLearned().includes('t_int::mittel'), 'fremder Fortschritt bleibt unangetastet');
+});
+
+group('repairOrphanedProgress — semantisches Heilen + Score-Greedy (v216)', () => {
+  // Verwaister Fortschritt, dessen alter Name token-fremd zum aktuellen Thema ist
+  // (Jaccard 0, kein Teilstring) → nur Embedding-Cosine kann ihn heilen.
+  const sim = (a, b) => {
+    const m = {
+      'normalverteilung standardnormalverteilung|normalverteilung eigenschaften': 0.84,
+    };
+    return m[`${a}|${b}`] ?? m[`${b}|${a}`] ?? 0.1;
+  };
+  M._setUids({
+    'normalverteilung standardnormalverteilung': 't_aaa',   // verwaist
+    'normalverteilung eigenschaften': 't_bbb',              // aktuell
+  });
+  M._setPath(['Normalverteilung Eigenschaften']);
+  M._setLearned(['t_aaa::mittel']);
+  M._setMeta({ 't_aaa::mittel': { ts: 1 } });
+  const r = M.repairOrphanedProgress(sim);
+  eq(r.healed, 1, 'semantischer Treffer (Cosine 0.84) wird geheilt');
+  ok(M._getLearned().includes('t_bbb::mittel'), 'Fortschritt auf Live-UID umgehängt');
+  ok(M._getMeta()['t_bbb::mittel'], 'topicMeta semantisch mit umgehängt');
+
+  // Score-Greedy: zwei Waisen wollen dasselbe Ziel → der höhere Cosine gewinnt,
+  // der schwächere bleibt verwaist (kein erzwungener Zweitbest-Merge).
+  const sim2 = (a, b) => {
+    const m = {
+      'binomialverteilung definition|wahrscheinlichkeitsberechnung binomial': 0.86, // stark
+      'binomialkoeffizienten berechnen|wahrscheinlichkeitsberechnung binomial': 0.80, // schwächer
+    };
+    return m[`${a}|${b}`] ?? m[`${b}|${a}`] ?? 0.1;
+  };
+  M._setUids({
+    'binomialverteilung definition': 't_ccc',
+    'binomialkoeffizienten berechnen': 't_ddd',
+    'wahrscheinlichkeitsberechnung binomial': 't_eee',
+  });
+  M._setPath(['Wahrscheinlichkeitsberechnung Binomial']);
+  M._setLearned(['t_ccc::mittel', 't_ddd::mittel']);
+  M._setMeta({});
+  const r2 = M.repairOrphanedProgress(sim2);
+  eq(r2.healed, 1, 'nur die stärkere Waise beansprucht das Ziel');
+  ok(M._getLearned().includes('t_eee::mittel'), 'stärkere Waise (0.86) gewinnt das Ziel');
+  ok(M._getLearned().includes('t_ddd::mittel'), 'schwächere Waise bleibt verwaist (kein Zweitbest-Merge)');
 });
 
 group('scanDirectiveBlock — destillierte Vorgaben als verbindlicher Scan-Block (v215)', () => {

@@ -98,6 +98,15 @@ INSERT INTO settings (key, value) VALUES ('daily_limit_eur', '1.00') ON CONFLICT
 -- Track whether 90% notification was already sent today
 ALTER TABLE daily_usage ADD COLUMN IF NOT EXISTS notified_90pct BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Persistenter Cache für Themen-Namen-Embeddings (semantisches Re-Scan-Matching)
+CREATE TABLE IF NOT EXISTS topic_vectors (
+  subject_id TEXT NOT NULL,
+  norm_name  TEXT NOT NULL,
+  embedding  JSONB,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (subject_id, norm_name)
+);
+
 -- Grant all permissions to app user (safe to run repeatedly)
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO nachhilfe_user;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO nachhilfe_user;
