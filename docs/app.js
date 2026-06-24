@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '220';
+const APP_VERSION = '221';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -665,17 +665,53 @@ async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) 
 }
 
 // ── PDF Extraction ─────────────────────────────────────────────────────────
+// Eine Seite gilt als Bild-/Scan-Seite, wenn ihre Textebene weniger als
+// PDF_OCR_MIN_CHARS Nicht-Whitespace-Zeichen liefert → dann wird sie gerendert
+// und per Vision-OCR gelesen. Die Render-Auflösung zielt auf PDF_OCR_TARGET_EDGE
+// (längste Kante in px), gedeckelt durch PDF_OCR_MAX_SCALE (Speicher/Token).
+const PDF_OCR_MIN_CHARS   = 20;
+const PDF_OCR_TARGET_EDGE = 2000;
+const PDF_OCR_MAX_SCALE   = 3;
+const PDF_OCR_SYS = 'Du bist eine präzise OCR-Engine für deutschsprachige Studien- und Schulunterlagen. Du gibst den Text einer Dokumentseite exakt und vollständig wieder.';
+const PDF_OCR_PROMPT = `Transkribiere den GESAMTEN Inhalt dieser Dokumentseite als reinen Text – exakt so, wie er dasteht. Gib NUR den Inhalt zurück: keine Einleitung, keine Kommentare, keine Code-Fences. Behalte Überschriften, Absätze, Aufzählungen und Tabellenzeilen in sinnvoller Lesereihenfolge bei. Formeln in Klartext bzw. LaTeX. Rein bildliche Abbildungen (Fotos, Grafiken ohne Text) NICHT beschreiben. Ist die Seite leer, antworte mit gar nichts.`;
+
+// Eine PDF-Seite ohne verwertbare Textebene als Bild rendern und per Vision-OCR
+// transkribieren – so werden gescannte/abfotografierte PDFs trotzdem erfasst.
+async function ocrPdfPage(page) {
+  const base     = page.getViewport({ scale: 1 });
+  const scale    = Math.min(PDF_OCR_MAX_SCALE, PDF_OCR_TARGET_EDGE / Math.max(base.width, base.height));
+  const viewport = page.getViewport({ scale });
+  const canvas   = document.createElement('canvas');
+  canvas.width   = Math.max(1, Math.round(viewport.width));
+  canvas.height  = Math.max(1, Math.round(viewport.height));
+  const ctx      = canvas.getContext('2d');
+  ctx.fillStyle  = '#ffffff';   // weißer Grund, falls die Seite transparente Bereiche hat
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const base64 = canvas.toDataURL('image/png').split(',')[1];
+  const txt    = await claudeLocalVision(base64, PDF_OCR_PROMPT, [{ type: 'text', text: PDF_OCR_SYS }], 2000);
+  return (txt || '').trim();
+}
+
 async function extractPDF(file, onProgress) {
   const ab  = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
   let text  = `\n\n=== ${file.name} ===\n`;
+  let ocrPages = 0;
   for (let i = 1; i <= pdf.numPages; i++) {
     const page    = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += content.items.map(it => it.str).join(' ') + '\n';
+    let pageText  = content.items.map(it => it.str).join(' ').trim();
+    // Bild-/Scan-Seite: kaum extrahierbarer Text → Seite per Vision-OCR lesen.
+    if (pageText.replace(/\s/g, '').length < PDF_OCR_MIN_CHARS) {
+      if (onProgress) onProgress(i - 1, pdf.numPages, 'ocr');
+      const ocr = await ocrPdfPage(page).catch(() => '');
+      if (ocr.length > pageText.length) { pageText = ocr; ocrPages++; }
+    }
+    text += pageText + '\n';
     if (onProgress) onProgress(i, pdf.numPages);
   }
-  return { text: text.trim(), pages: pdf.numPages, name: file.name };
+  return { text: text.trim(), pages: pdf.numPages, name: file.name, ocrPages };
 }
 
 // ── System prompt builder ──────────────────────────────────────────────────
@@ -1898,15 +1934,19 @@ async function handleUpload(files) {
     let added = ''; const newFiles = [];
     const failedExtract = [];  // PDFs that could not be read at all
     const failedServer  = [];  // stored locally but the server rejected the save
+    let ocrTotal = 0;          // Seiten, die per Vision-OCR statt Textebene gelesen wurden
     for (let i = 0; i < files.length; i++) {
       const fileLabel = files.length > 1 ? `${files[i].name} (${i + 1}/${files.length})` : files[i].name;
       label.textContent = `Verarbeite ${fileLabel}…`;
       bar.style.width = '0%'; pct.textContent = '0%';
-      let text, pages, name;
+      let text, pages, name, ocrPages = 0;
       try {
-        ({ text, pages, name } = await extractPDF(files[i], (done, total) => {
+        ({ text, pages, name, ocrPages } = await extractPDF(files[i], (done, total, phase) => {
           const p = Math.round((done / total) * 100);
           bar.style.width = p + '%'; pct.textContent = p + '%';
+          label.textContent = phase === 'ocr'
+            ? `Verarbeite ${fileLabel}… (Texterkennung Seite ${done + 1})`
+            : `Verarbeite ${fileLabel}…`;
         }));
       } catch {
         // One unreadable PDF must not discard the others in the batch.
@@ -1914,6 +1954,7 @@ async function handleUpload(files) {
         continue;
       }
       added += '\n\n' + text;
+      ocrTotal += ocrPages;
       const uploadedAt = new Date().toISOString();
       newFiles.push({ name, pages, uploadedAt });
       // Save snippet to localforage docmeta for doc-type filtering
@@ -1968,17 +2009,18 @@ async function handleUpload(files) {
     }
 
     const okNames = newFiles.map(f => f.name).join(', ');
+    const ocrNote = ocrTotal ? ` (${ocrTotal} ${ocrTotal === 1 ? 'Seite' : 'Seiten'} per Texterkennung gelesen)` : '';
     if (failedServer.length || failedExtract.length) {
       // Some files only made it into local storage (or not at all): say so
       // clearly instead of a misleading success message.
-      const parts = [`✓ ${okNames} gespeichert`];
+      const parts = [`✓ ${okNames} gespeichert${ocrNote}`];
       if (failedServer.length)  parts.push(`⚠️ nicht auf Server gesichert: ${failedServer.join(', ')} (nur auf diesem Gerät, keine Karteikarten/RAG)`);
       if (failedExtract.length) parts.push(`⚠️ nicht lesbar: ${failedExtract.join(', ')}`);
       status.textContent = parts.join(' · ');
       status.className = 'sheet-status error';
       status.classList.remove('hidden');
     } else {
-      status.textContent = `✓ ${okNames} hochgeladen · Karteikarten werden generiert…`;
+      status.textContent = `✓ ${okNames} hochgeladen${ocrNote} · Karteikarten werden generiert…`;
       status.className = 'sheet-status success';
       status.classList.remove('hidden');
       setTimeout(hideUploadSheet, 2000);
