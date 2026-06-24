@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '229';
+const APP_VERSION = '231';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -816,6 +816,11 @@ Nutze KEIN Allgemeinwissen, keine Lehrbücher und keine Informationen aus dem In
 Wenn eine Frage mit den vorhandenen Unterlagen nicht beantwortet werden kann, sage klar: "Das steht so nicht in deinen Unterlagen – lade bitte das entsprechende Dokument hoch."
 Halte dich bei Erklärungen an die Formulierungen und Definitionen aus den Unterlagen, da der Dozent diese Art der Darstellung in Prüfungen erwartet.
 
+RECHNERISCHE WAHRHEIT (bei Aufgaben mit konkretem Ergebnis):
+• Eine Rechnung hat genau EIN richtiges Endergebnis. Verschiedene Lösungswege müssen alle zu genau diesem Ergebnis führen.
+• Führen zwei Wege zu unterschiedlichen Ergebnissen, ist mindestens einer falsch. Behaupte NIEMALS, beide seien richtig – das wäre ein Fehler, kein Entgegenkommen.
+• Wirst du gefragt, ob mehrere Wege/Ergebnisse stimmen: Rechne das Ergebnis Schritt für Schritt NEU nach, lege dich auf das eine korrekte Ergebnis fest und zeige konkret, an welcher Stelle sich der falsche Weg verrechnet hat. Gefälligkeit ("beide stimmen", "kommt aufs Gleiche raus") ist hier verboten.
+
 DEINE LEHRPHILOSOPHIE:
 • Verständnis vor Auswendiglernen: Erkläre immer das WARUM und den Hintergrund eines Konzepts
 • Konkrete Beispiele: Verankere abstrakte Theorie immer in realen, greifbaren Alltagssituationen
@@ -1486,6 +1491,11 @@ document.getElementById('demo-sheet')?.addEventListener('click', e => {
 
 // ══ OPEN SUBJECT ═══════════════════════════════════════════════════════════
 
+// v231: Nach dieser Ruhezeit wird der Chat beim Öffnen frisch gestartet. Verhindert,
+// dass eine alte Sitzung samt selbst-generiertem (evtl. verrechnetem) Kontext als
+// Anker in neue Antworten zurückfließt. 12h = neuer Lern-Tag startet sauber.
+const CHAT_IDLE_RESET_MS = 12 * 60 * 60 * 1000;
+
 async function openSubject(subj) {
   sessionId = subj.id;
   const [savedMeta, serverMsgs, quizRows, serverDocs] = await Promise.all([
@@ -1495,7 +1505,18 @@ async function openSubject(subj) {
     api(`/api/subjects/${subj.id}/documents`).catch(() => []),
   ]);
   sessionMeta = savedMeta || { ...subj, files: [], chatHistory: [], quizStats: { questions: [] }, currentQuestion: null };
-  if (serverMsgs.length) sessionMeta.chatHistory = serverMsgs;
+  // created_at dient NUR der Alters-Prüfung und wird NICHT in die chatHistory
+  // übernommen (die Claude-API erwartet reine {role,content}-Objekte). Ist die letzte
+  // Nachricht zu alt, serverseitig löschen → Reset gilt geräteübergreifend.
+  if (serverMsgs.length) {
+    const lastAt = new Date(serverMsgs[serverMsgs.length - 1].created_at || 0).getTime();
+    if (lastAt && Date.now() - lastAt > CHAT_IDLE_RESET_MS) {
+      DB.clearMessages(subj.id).catch(() => {});
+      sessionMeta.chatHistory = [];
+    } else {
+      sessionMeta.chatHistory = serverMsgs.map(({ role, content }) => ({ role, content }));
+    }
+  }
   if (quizRows.length) {
     sessionMeta.quizStats.questions = quizRows.map(r => ({
       score: r.score, topic: '', blitz: false,
@@ -2172,17 +2193,36 @@ async function sendChat() {
   chatInput.focus();
 }
 
+// v231: Erkennt rechen-/reasoning-lastige Inhalte (mehrschrittige Mathematik), bei
+// denen sich die vorige Antwort verrechnet haben kann. Spiegelt die Server-Heuristik
+// (looksComputational in server.js). Wird genutzt, um beim "Anders erklären" NICHT
+// die kontaminierte Historie anzuhängen, sondern frisch zu lösen.
+const COMPUTE_RE = /\b(rechne|berechn|errechne|ausrechn|löse|lös |bestimme|ergebnis|gleichung|ableit|leite ab|integr|stammfunktion|nullstell|grenzwert|wahrscheinlich|prozent|zinsen?|matrix|matrizen|vektor|determinant|vereinfache|umstell|umform|faktorisier|ausklammer|kürze|bruch|wurzel|logarithm|potenz|exponent|quadratisch|herleit|beweise?|sinus|cosinus|tangens|mittelwert|standardabweich|formel\b|rechenweg|lösungsweg)/i;
+function looksComputational(text) {
+  const s = typeof text === 'string' ? text : '';
+  if (COMPUTE_RE.test(s)) return true;
+  if (/\d\s*[+\-*/×·:^=]\s*[\d(a-zA-Z]/.test(s)) return true; // "12 * 3", "x = 5 + 2"
+  return false;
+}
+
 async function rephraseReply(originalReply) {
-  const rephrasePrompt = [
-    ...sessionMeta.chatHistory,
-    { role: 'user', content: 'Erkläre dasselbe Thema nochmal komplett anders – andere Analogie, anderes Beispiel, anderen Einstieg. Ziel: mir einen neuen Zugang ermöglichen.' },
-  ];
+  // RAG-Query = die ursprüngliche Frage des Studenten (semantisch näher am Stoff als
+  // die Synthese-Anweisung); Fallback auf die zu paraphrasierende Antwort selbst.
+  const lastUser = [...(sessionMeta.chatHistory || [])].reverse().find(m => m.role === 'user');
+  const ragQuery = (typeof lastUser?.content === 'string' && lastUser.content) || originalReply || '';
+  // v231: Bei Rechnungen die Historie NICHT mitschicken. Sie enthält die vorige (evtl.
+  // verrechnete) Antwort und verleitet das Modell, seine eigene Zahl zu wiederholen oder
+  // zwei widersprüchliche Ergebnisse nebeneinanderzustellen. Stattdessen die Originalfrage
+  // unabhängig und KB-gegroundet NEU lösen – ohne Anker an der alten Antwort.
+  const compute = looksComputational(ragQuery) || looksComputational(originalReply);
+  const rephrasePrompt = compute
+    ? [{ role: 'user', content: `${ragQuery}\n\nLöse diese Aufgabe Schritt für Schritt komplett NEU und unabhängig – ignoriere frühere Lösungsversuche vollständig. Rechne jeden Schritt sorgfältig nach. Es gibt genau EIN korrektes Endergebnis; lege dich darauf fest und nenne nur dieses (keine zwei nebeneinander). Wähle bewusst einen anderen, anschaulichen Erklär-Zugang.` }]
+    : [
+        ...sessionMeta.chatHistory,
+        { role: 'user', content: 'Erkläre dasselbe Thema nochmal komplett anders – andere Analogie, anderes Beispiel, anderen Einstieg. Ziel: mir einen neuen Zugang ermöglichen.' },
+      ];
   const typ = addTyping(chatMessages);
   try {
-    // RAG-Query = die ursprüngliche Frage des Studenten (semantisch näher am Stoff als
-    // die Synthese-Anweisung); Fallback auf die zu paraphrasierende Antwort selbst.
-    const lastUser = [...(sessionMeta.chatHistory || [])].reverse().find(m => m.role === 'user');
-    const ragQuery = (typeof lastUser?.content === 'string' && lastUser.content) || originalReply || '';
     const rephrase = await claudeLocalKb(rephrasePrompt, '', 1000, ragQuery);
     typ.remove();
     addMsg(chatMessages, 'assistant', rephrase, () => rephraseReply(rephrase));
@@ -3102,7 +3142,7 @@ async function compressHistory(history) {
 
   try {
     const summary = await claudeLocal(
-      [{ role: 'user', content: `Fasse dieses Gespräch in max. 150 Wörtern zusammen. Wichtige Fakten, Erklärungen und offene Fragen beibehalten:\n\n${convText}` }],
+      [{ role: 'user', content: `Fasse dieses Gespräch in max. 150 Wörtern zusammen. Behalte Themen, Konzept-Erklärungen und offene Fragen bei. WICHTIG: Übernimm KEINE konkreten Rechenergebnisse/Zahlenwerte als Fakt – halte nur fest, WELCHE Aufgabe gerechnet wurde, nicht das Ergebnis. So zementiert sich kein eventueller Rechenfehler im Kontext.\n\n${convText}` }],
       [{ type: 'text', text: 'Du fasst Lernunterhaltungen prägnant zusammen.' }],
       400,
     );

@@ -636,7 +636,7 @@ app.delete('/api/subjects/:id', async (req, res) => {
 app.get('/api/subjects/:id/messages', async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT role,content FROM messages WHERE subject_id=$1 ORDER BY created_at ASC',
+      'SELECT role,content,created_at FROM messages WHERE subject_id=$1 ORDER BY created_at ASC',
       [req.params.id]
     );
     res.json(rows);
@@ -1079,6 +1079,23 @@ app.get('/api/subjects/:id/kb/search', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // CLAUDE PROXY (hides API key)
 // ═══════════════════════════════════════════════════════════════════════════
+// Erkennt rechen-/reasoning-lastige Anfragen (mehrschrittige Mathematik), bei denen
+// die MODELLSTÄRKE über die Korrektheit entscheidet – nicht der KB-Kontext. Reine
+// Abruf-Fragen ("was ist X") trägt der Kontext, die dürfen zur Kostenersparnis auf
+// Haiku. Rechnungen NICHT: dort verrechnet sich das kleine Modell und liefert bei
+// zwei Anläufen zwei verschiedene Ergebnisse. Prüft den jüngeren Verlauf (nicht nur
+// die letzte Nachricht), damit auch "erkläre nochmal anders" zu einer Rechnung greift.
+const COMPUTE_RE = /\b(rechne|berechn|errechne|ausrechn|löse|lös |bestimme|ergebnis|gleichung|ableit|leite ab|integr|stammfunktion|nullstell|grenzwert|wahrscheinlich|prozent|zinsen?|matrix|matrizen|vektor|determinant|vereinfache|umstell|umform|faktorisier|ausklammer|kürze|bruch|wurzel|logarithm|potenz|exponent|quadratisch|herleit|beweise?|sinus|cosinus|tangens|mittelwert|standardabweich|formel\b|rechenweg|lösungsweg)/i;
+function looksComputational(messages) {
+  const recent = (messages || []).slice(-6)
+    .map(m => (typeof m.content === 'string' ? m.content : ''))
+    .join(' \n ');
+  if (COMPUTE_RE.test(recent)) return true;
+  // Zahl Operator Zahl/Variable (z.B. "12 * 3", "x = 5 + 2") → Rechnung
+  if (/\d\s*[+\-*/×·:^=]\s*[\d(a-zA-Z]/.test(recent)) return true;
+  return false;
+}
+
 app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
   const { messages, system, max_tokens, model } = req.body;
   if (!messages || !Array.isArray(messages)) {
@@ -1163,7 +1180,11 @@ app.post('/api/claude', claudeLimit, authMiddleware, async (req, res) => {
     // Admin-Toggle (kb_chat) versteckt; jetzt automatisch bei JEDEM KB-Treffer. Ohne
     // KB-Kontext (Vision, KB nicht bereit, Allgemeinfrage) bleibt es bei Sonnet bzw.
     // einem explizit angefragten Modell, wo Modellwissen die Qualität bestimmt.
-    const chatModel = kbHit ? 'claude-haiku-4-5-20251001' : (model || 'claude-sonnet-4-6');
+    // Downgrade auf Haiku NUR bei reinem Abruf. Rechen-/Reasoning-Fragen bleiben auf
+    // Sonnet (bzw. dem angefragten Modell), auch wenn KB-Kontext vorliegt.
+    const chatModel = (kbHit && !looksComputational(trimmedMessages))
+      ? 'claude-haiku-4-5-20251001'
+      : (model || 'claude-sonnet-4-6');
     const params = {
       model: chatModel,
       max_tokens: Math.min(max_tokens || 2000, 4096),
@@ -1278,24 +1299,31 @@ app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
       }
     } catch (e) { console.error('local KB inject skipped:', e.message); }
   }
-  const callHaiku = async () => {
-    const params = { model: 'claude-haiku-4-5-20251001', max_tokens: max_tokens || 2000, messages };
+  // Rechen-/Reasoning-Pfade (z.B. "Anders erklären", Musterlösung) auf Sonnet heben –
+  // dort entscheidet die Modellstärke über die Korrektheit. Reine Generierung/Abruf
+  // bleibt auf dem schnellen, günstigen Haiku.
+  const compute = looksComputational(messages);
+  const cloudModel = compute ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+  const callCloud = async () => {
+    const params = { model: cloudModel, max_tokens: max_tokens || 2000, messages };
     if (system) params.system = system;
     const r = await callClaude(params);
-    const haikuText = r.content?.[0]?.text;
-    if (typeof haikuText !== 'string') throw new Error('Haiku returned unexpected response shape');
-    return { text: haikuText, usage: r.usage || {} };
+    const cloudText = r.content?.[0]?.text;
+    if (typeof cloudText !== 'string') throw new Error('Cloud model returned unexpected response shape');
+    return { text: cloudText, usage: r.usage || {} };
   };
   try {
-    // Local model disabled → answer directly with Haiku (fast, reliable).
-    if (!USE_OLLAMA) {
-      // Haiku ist kostenpflichtig → gleiche Budget-Obergrenze wie /api/claude.
+    // Local model disabled ODER rechen-lastige Anfrage → direkt mit dem Cloud-Modell
+    // (Sonnet bei Rechnungen, Haiku sonst). Das schwache lokale Modell würde
+    // mehrschrittige Mathematik nur unzuverlässig lösen.
+    if (!USE_OLLAMA || compute) {
+      // Cloud-Aufruf ist kostenpflichtig → gleiche Budget-Obergrenze wie /api/claude.
       const limitMsg = await usageLimitError(req.user.id);
       if (limitMsg) return res.status(429).json({ error: limitMsg });
-      const { text: haikuText, usage } = await callHaiku();
+      const { text: cloudText, usage } = await callCloud();
       const todayH = new Date().toISOString().slice(0, 10);
-      recordUsage(todayH, 'claude-haiku-4-5-20251001', usage, req.user.id, feature).catch(() => {});
-      return res.json({ content: [{ text: haikuText }] });
+      recordUsage(todayH, cloudModel, usage, req.user.id, feature).catch(() => {});
+      return res.json({ content: [{ text: cloudText }] });
     }
     const text = await callOllama(ollamaMsgs(system, messages), max_tokens || 2000, !!json_mode);
     // When json_mode was requested, verify Ollama returned *valid* parseable JSON.
@@ -1318,24 +1346,24 @@ app.post('/api/local', claudeLimit, authMiddleware, async (req, res) => {
       let jsonOk = false;
       if (m) { try { JSON.parse(m[0]); jsonOk = true; } catch { try { JSON.parse(repair(m[0])); jsonOk = true; } catch {} } }
       if (!jsonOk) {
-        console.warn('Ollama returned invalid/no JSON in json_mode – falling back to Haiku');
-        const { text: haikuText, usage } = await callHaiku();
+        console.warn('Ollama returned invalid/no JSON in json_mode – falling back to cloud');
+        const { text: cloudText, usage } = await callCloud();
         const today2 = new Date().toISOString().slice(0, 10);
-        recordUsage(today2, 'claude-haiku-4-5-20251001', usage, req.user.id, feature).catch(() => {});
-        return res.json({ content: [{ text: haikuText }] });
+        recordUsage(today2, cloudModel, usage, req.user.id, feature).catch(() => {});
+        return res.json({ content: [{ text: cloudText }] });
       }
     }
     res.json({ content: [{ text }] });
   } catch (e) {
     console.error('Ollama error:', e.message);
     try {
-      const { text: haikuText, usage } = await callHaiku();
+      const { text: cloudText, usage } = await callCloud();
       const today3 = new Date().toISOString().slice(0, 10);
-      recordUsage(today3, 'claude-haiku-4-5-20251001', usage, req.user.id, feature).catch(() => {});
-      res.json({ content: [{ text: haikuText }] });
+      recordUsage(today3, cloudModel, usage, req.user.id, feature).catch(() => {});
+      res.json({ content: [{ text: cloudText }] });
     } catch (e2) {
-      console.error('Haiku fallback also failed:', e2.message);
-      res.status(500).json({ error: `Ollama: ${e.message} | Haiku: ${e2.message}` });
+      console.error('Cloud fallback also failed:', e2.message);
+      res.status(500).json({ error: `Ollama: ${e.message} | Cloud: ${e2.message}` });
     }
   }
 });
