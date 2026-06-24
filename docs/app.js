@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '224';
+const APP_VERSION = '225';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -4531,13 +4531,10 @@ async function checkHandwriting() {
     const sw = Math.min(CW, maxX + INK_CROP_MARGIN) - sx;
     const sh = Math.min(CH, maxY + INK_CROP_MARGIN) - sy;
     base64 = inkCropToBase64(canvas, sx, sy, sw, sh);
-  } else {
-    const flat = document.createElement('canvas');
-    flat.width = 16; flat.height = 16;
-    const fc = flat.getContext('2d');
-    fc.fillStyle = '#ffffff'; fc.fillRect(0, 0, 16, 16);
-    base64 = flat.toDataURL('image/png').split(',')[1];
   }
+  // Kein Zuschnitt/Platzhalterbild mehr bei reinem Text – die Modalität entscheidet
+  // unten über das Routing (Tinte → Vision, reiner Text → Text-Modell), konsistent
+  // zum Lernen-Tab (#7).
 
   // Bewertungsmaßstab an den gewählten Schwierigkeitsgrad koppeln: rechnerische
   // Fehler bleiben auf jedem Level Fehler, aber bei leichten Aufgaben wird das
@@ -4583,9 +4580,17 @@ Falls die Schrift schwer lesbar ist: gib trotzdem dein Bestes und erkläre was d
 (Die Musterlösung wird separat angezeigt – schreibe sie NICHT selbst.)`;
 
   try {
-    // Vision-Call bewertet nur die Schülerlösung – die Musterlösung kommt aus dem
-    // Prefetch (sofort) bzw. wird, falls keiner vorliegt, jetzt einmalig nachgeladen.
-    const feedbackP = claudeLocalVision(base64, checkPrompt, checkSysBlocks(), 1400);
+    // Bewertet nur die Schülerlösung – die Musterlösung kommt aus dem Prefetch
+    // (sofort) bzw. wird, falls keiner vorliegt, jetzt einmalig nachgeladen.
+    // Routing nach Modalität (konsistent zum Lernen-Tab, #7): mit Zeichnung →
+    // Vision; reiner Text → KB-grounded Text-Modell (statt ein leeres Bild an die
+    // Vision-KI zu schicken) – schneller, günstiger und im Fachstoff verankert.
+    const kbOpts = (kbReady && taskText)
+      ? { subject_id: sessionId, kb_query: `${currentAufgabe || taskText}\n${writtenText}`.slice(0, 500) }
+      : {};
+    const feedbackP = hasInk
+      ? claudeLocalVision(base64, checkPrompt, checkSysBlocks(), 1400)
+      : claudeLocal([{ role: 'user', content: checkPrompt }], checkSysBlocks(), 1400, kbOpts);
     let loesungP;
     if (rechnenLoesung && rechnenLoesung.aufgabe === taskText) {
       loesungP = rechnenLoesung.promise;
