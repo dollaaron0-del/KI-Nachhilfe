@@ -95,8 +95,14 @@ async function solve(modelId, task) {
 
 async function run() {
   const args = process.argv.slice(2);
-  const modelArg = (args[args.indexOf('--models') + 1] || 'haiku,sonnet').split(',').map(s => s.trim());
-  const runs = Math.max(1, parseInt(args[args.indexOf('--runs') + 1], 10) || 1);
+  // Wert eines Flags lesen – nur wenn das Flag wirklich vorkommt UND ein Wert folgt.
+  // (indexOf-Naiv: bei fehlendem --models lieferte +1 sonst args[0]="--runs" als Modell.)
+  const flagVal = (name, def) => {
+    const i = args.indexOf(name);
+    return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : def;
+  };
+  const modelArg = flagVal('--models', 'haiku,sonnet').split(',').map(s => s.trim());
+  const runs = Math.max(1, parseInt(flagVal('--runs', '1'), 10) || 1);
   const chosen = modelArg.filter(m => MODELS[m]);
   if (!chosen.length) { console.error('Unbekanntes Modell. Erlaubt: ' + Object.keys(MODELS).join(', ')); process.exit(1); }
 

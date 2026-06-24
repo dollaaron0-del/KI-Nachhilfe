@@ -2194,9 +2194,10 @@ async function sendChat() {
 }
 
 // v231: Erkennt rechen-/reasoning-lastige Inhalte (mehrschrittige Mathematik), bei
-// denen sich die vorige Antwort verrechnet haben kann. Spiegelt die Server-Heuristik
-// (looksComputational in server.js). Wird genutzt, um beim "Anders erklären" NICHT
-// die kontaminierte Historie anzuhängen, sondern frisch zu lösen.
+// denen sich die vorige Antwort verrechnet haben kann. Wird genutzt, um beim
+// "Anders erklären" NICHT die kontaminierte Historie anzuhängen, sondern frisch zu
+// lösen. (Kein Server-Pendant mehr – das Rechen-Modell-Routing wurde verworfen,
+// nachdem das Eval zeigte, dass Haiku saubere Aufgaben fehlerfrei rechnet.)
 const COMPUTE_RE = /\b(rechne|berechn|errechne|ausrechn|löse|lös |bestimme|ergebnis|gleichung|ableit|leite ab|integr|stammfunktion|nullstell|grenzwert|wahrscheinlich|prozent|zinsen?|matrix|matrizen|vektor|determinant|vereinfache|umstell|umform|faktorisier|ausklammer|kürze|bruch|wurzel|logarithm|potenz|exponent|quadratisch|herleit|beweise?|sinus|cosinus|tangens|mittelwert|standardabweich|formel\b|rechenweg|lösungsweg)/i;
 function looksComputational(text) {
   const s = typeof text === 'string' ? text : '';
