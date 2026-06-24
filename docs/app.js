@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '219';
+const APP_VERSION = '220';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3689,6 +3689,11 @@ const PEN_BASE = { fine: 1.0, medium: 2.0, thick: 4.5 };
 const CANVAS_MAX_STEP  = 150;
 const CANVAS_MAX_SKIPS = 2;
 
+// Ziffern-Lesehilfe für die Vision-Prüfung (deutsche Handschrift-Konventionen).
+// Wird sowohl im Rechnen-Prüf-Prompt (checkHandwriting) als auch im Lernen-Prüf-
+// Prompt (EVAL_SYS) eingesetzt, damit beide Pfade Ziffern gleich sorgfältig lesen.
+const ZIFFERN_LESEHILFE = `ZIFFERN SORGFÄLTIG LESEN (deutsche Handschrift): Die **1** wird mit einem deutlichen Aufstrich/Anstrich oben geschrieben (sieht der Spitze einer 7 ähnlich) und hat KEINEN waagerechten Balken; die **7** hat oben einen waagerechten Balken und oft einen durchgestrichenen Mittelstrich. Verwechsle 1 und 7 nicht. Achte ebenso auf 4↔9, 0↔6 und 3↔8. Wenn eine Rechnung nur dann aufgeht (das angeschriebene Zwischen-/Endergebnis nur dann stimmt), wenn eine unklare Ziffer anders gelesen wird, bevorzuge die rechnerisch konsistente Lesart – der Schüler hat sich beim Schreiben sehr wahrscheinlich nicht in der eigenen Rechnung verrechnet, sondern nur undeutlich geschrieben.`;
+
 function applyCtxStyle() {
   if (!mathCtx) return;
   mathCtx.lineCap  = 'round';
@@ -4384,7 +4389,7 @@ async function checkHandwriting() {
 2. als getippter Text im Schreibbereich (siehe unten).
 Berücksichtige BEIDE Bereiche gemeinsam als die vollständige Lösung des Schülers.
 
-ZIFFERN SORGFÄLTIG LESEN (deutsche Handschrift): Die **1** wird mit einem deutlichen Aufstrich/Anstrich oben geschrieben (sieht der Spitze einer 7 ähnlich) und hat KEINEN waagerechten Balken; die **7** hat oben einen waagerechten Balken und oft einen durchgestrichenen Mittelstrich. Verwechsle 1 und 7 nicht. Achte ebenso auf 4↔9, 0↔6 und 3↔8. Wenn eine Rechnung nur dann aufgeht (das angeschriebene Zwischen-/Endergebnis nur dann stimmt), wenn eine unklare Ziffer anders gelesen wird, bevorzuge die rechnerisch konsistente Lesart – der Schüler hat sich beim Schreiben sehr wahrscheinlich nicht in der eigenen Rechnung verrechnet, sondern nur undeutlich geschrieben.
+${ZIFFERN_LESEHILFE}
 
 ${toleranzNote}
 
@@ -6871,7 +6876,7 @@ TEILAUFGABEN MIT EIGENEM ZAHLERGEBNIS: Hat die Aufgabe mehrere Teilaufgaben (a/b
       ? `\n  "transkription": "Schreibe EXAKT ab, was in der Handschrift steht – nichts ergänzen, nichts raten, nichts aus einer anderen Teilaufgabe übernehmen. Bei Teilaufgaben je Absatz, beginnend mit der Bezeichnung fett (**a)** …), räumlich (Beschriftung bzw. Position von oben nach unten) der richtigen Teilaufgabe zugeordnet. Unsicher Lesbares als [unleserlich] markieren.",`
       : '';
     const transkriptionInstr = hasInk
-      ? `\nLESEN VOR BEWERTEN (Pflicht): Fülle ZUERST "transkription". Übernimm NIEMALS Rechnung/Notiz einer Teilaufgabe in eine andere – ordne jeden Handschrift-Block der Teilaufgabe zu, zu der er räumlich/per Beschriftung gehört. Was du nicht sicher lesen kannst, wird [unleserlich] markiert und NICHT als Fehler oder als fehlend gewertet (in der einschaetzung erwähnen, dass es unleserlich war). Bewerte ausschließlich, was in "transkription" steht.`
+      ? `\n${ZIFFERN_LESEHILFE}\nLESEN VOR BEWERTEN (Pflicht): Fülle ZUERST "transkription". Übernimm NIEMALS Rechnung/Notiz einer Teilaufgabe in eine andere – ordne jeden Handschrift-Block der Teilaufgabe zu, zu der er räumlich/per Beschriftung gehört. Was du nicht sicher lesen kannst, wird [unleserlich] markiert und NICHT als Fehler oder als fehlend gewertet (in der einschaetzung erwähnen, dass es unleserlich war). Bewerte ausschließlich, was in "transkription" steht.`
       : '';
 
     const EVAL_SYS = `Du MUSST ausschließlich ein JSON-Objekt zurückgeben – kein Text davor oder danach.
