@@ -42,9 +42,9 @@ const FN_DECLS = [
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff', 'repairOrphanedProgress',
   'scanDirectiveBlock',
   'md', 'renderTable',
-  'inkBoundingBox', 'enhanceInkContrast',
+  'inkBoundingBox', 'enhanceInkContrast', 'catmullRomPts',
 ];
-const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD', 'INK_CELL', 'INK_MIN_PIXELS', 'INK_WHITE_CUTOFF', 'INK_GAMMA'];
+const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD', 'INK_CELL', 'INK_MIN_PIXELS', 'INK_WHITE_CUTOFF', 'INK_GAMMA', 'SPLINE_SEG'];
 
 const assembled = [
   ...CONST_DECLS.map(extractConst),
@@ -66,7 +66,7 @@ const factory = new Function('self', 'katex', `
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff, repairOrphanedProgress,
     scanDirectiveBlock,
     md, renderTable,
-    inkBoundingBox, enhanceInkContrast,
+    inkBoundingBox, enhanceInkContrast, catmullRomPts,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
@@ -549,6 +549,32 @@ group('enhanceInkContrast — Lesbarkeit dünner Striche (#5)', () => {
   ok(px(200, 200, 200)[0] < 180, 'blasses Grau wird deutlich dunkler');
   ok(px(0, 0, 0)[0] <= 2, 'tiefes Schwarz bleibt schwarz');
   eq(px(120, 120, 120, 177)[3], 177, 'Alpha-Kanal bleibt unverändert');
+});
+
+group('catmullRomPts — Spline-Glättung der Striche (#6)', () => {
+  // < 3 Punkte → unveränderte Kopie (neue Referenz, gleiche Werte).
+  const tiny = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+  const tinyOut = M.catmullRomPts(tiny);
+  eq(tinyOut.length, 2, '<3 Punkte → unverändert (Länge)');
+  ok(tinyOut !== tiny && tinyOut[1].x === 10, '<3 Punkte → Kopie, Werte erhalten');
+
+  // Kollineare Punkte bleiben kollinear, werden aber dichter; Endpunkt exakt.
+  const line = M.catmullRomPts([{ x: 0, y: 0 }, { x: 80, y: 0 }, { x: 160, y: 0 }]);
+  ok(line.length > 3, 'lange Segmente werden unterteilt (dichter)');
+  ok(line.every(p => Math.abs(p.y) < 1e-6), 'kollinear bleibt kollinear (y≈0)');
+  approx(line[line.length - 1].x, 160, 'Endpunkt bleibt exakt erhalten');
+  approx(line[10].x, 80, 'verläuft durch den mittleren Stützpunkt');
+
+  // Dichte (langsame) Striche: kurze Segmente → keine zusätzliche Unterteilung.
+  const dense = M.catmullRomPts([{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 8, y: 0 }]);
+  eq(dense.length, 3, 'kurze Segmente bleiben unverändert (keine Aufblähung)');
+
+  // Druck p wird mitinterpoliert, wenn vorhanden – sonst gar nicht gesetzt.
+  const withP = M.catmullRomPts([{ x: 0, y: 0, p: 0.2 }, { x: 80, y: 0, p: 0.8 }, { x: 160, y: 0, p: 0.4 }]);
+  ok(withP.every(p => typeof p.p === 'number'), 'Druck bleibt an allen Punkten gesetzt');
+  ok(withP[5].p > 0.2 && withP[5].p < 0.8, 'Druck wird zwischen Stützpunkten interpoliert');
+  const noP = M.catmullRomPts([{ x: 0, y: 0 }, { x: 80, y: 0 }, { x: 160, y: 0 }]);
+  ok(noP.every(p => p.p === undefined), 'ohne Druck-Eingabe kein p-Feld');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────

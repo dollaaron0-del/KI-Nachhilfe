@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '223';
+const APP_VERSION = '224';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3690,18 +3690,20 @@ function drawStroke(ctx, s) {
       ctx.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Gleiche Kurven-Glättung wie beim Live-Zeichnen (quadratische Bézier durch die Mittelpunkte).
-    let lx = pts[0].x, ly = pts[0].y, lmx = pts[0].x, lmy = pts[0].y;
-    for (let i = 1; i < pts.length; i++) {
-      if (s.tool === 'pen')         ctx.lineWidth = Math.max(0.5, (pts[i].p || 0.5) * PEN_BASE[s.size] * 1.8);
+    // Catmull-Rom-geglättete, dichtere Punktfolge (#6) und darüber die gewohnte
+    // quadratische Bézier-Glättung durch die Mittelpunkte.
+    const sp = catmullRomPts(pts);
+    let lx = sp[0].x, ly = sp[0].y, lmx = sp[0].x, lmy = sp[0].y;
+    for (let i = 1; i < sp.length; i++) {
+      if (s.tool === 'pen')         ctx.lineWidth = Math.max(0.5, (sp[i].p || 0.5) * PEN_BASE[s.size] * 1.8);
       else if (s.tool === 'eraser') ctx.lineWidth = PEN_BASE[s.size] * 12;
       else                          ctx.lineWidth = PEN_BASE[s.size] * 10;
-      const mx = (lx + pts[i].x) / 2, my = (ly + pts[i].y) / 2;
+      const mx = (lx + sp[i].x) / 2, my = (ly + sp[i].y) / 2;
       ctx.beginPath();
       ctx.moveTo(lmx, lmy);
       ctx.quadraticCurveTo(lx, ly, mx, my);
       ctx.stroke();
-      lmx = mx; lmy = my; lx = pts[i].x; ly = pts[i].y;
+      lmx = mx; lmy = my; lx = sp[i].x; ly = sp[i].y;
     }
   }
   ctx.globalCompositeOperation = 'source-over';
@@ -3850,6 +3852,35 @@ function inkCropToBase64(srcCanvas, sx, sy, sw, sh) {
   return flat.toDataURL('image/png').split(',')[1];
 }
 
+// Catmull-Rom-Glättung der Striche (#6, touch-sicher – ändert die Eingabe NICHT,
+// nur das committete Rendering). iPad-/Pencil-Samples kommen pro Frame und bei
+// schnellen Zügen weit auseinander → die Polyline wirkt eckig. catmullRomPts
+// erzeugt aus den (phantom-gefilterten) Stützpunkten eine dichtere Folge, die
+// weich UND durch ALLE Stützpunkte verläuft: lange Segmente werden in Schritte
+// von höchstens SPLINE_SEG px unterteilt (gedeckelt), kurze (langsame, dichte
+// Züge) bleiben praktisch unverändert. Druck p wird linear mitinterpoliert.
+// Reine, testbare Funktion; <3 Punkte werden unverändert (Kopie) zurückgegeben.
+const SPLINE_SEG = 8;
+function catmullRomPts(pts) {
+  if (!pts || pts.length < 3) return pts ? pts.slice() : [];
+  const out = [pts[0]];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i], p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const dist  = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const steps = Math.max(1, Math.min(24, Math.round(dist / SPLINE_SEG)));
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps, t2 = t * t, t3 = t2 * t;
+      const x = 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+      const y = 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+      if (p1.p != null) out.push({ x, y, p: p2.p != null ? p1.p + (p2.p - p1.p) * t : p1.p });
+      else out.push({ x, y });
+    }
+  }
+  return out;
+}
+
 function applyCtxStyle() {
   if (!mathCtx) return;
   mathCtx.lineCap  = 'round';
@@ -3978,7 +4009,10 @@ function setupCanvasEvents() {
       strokes.push(currentStroke);
       currentStroke = null;
     }
-    if (activeTool === 'line') redrawCanvas();
+    // Committeten Strich geglättet (#6) neu rendern – ersetzt die inkrementell
+    // gezeichnete, eckige Live-Vorschau durch die Catmull-Rom-Version (auch das,
+    // was die Vision-Prüfung als Bitmap liest). Für 'line' ohnehin nötig.
+    redrawCanvas();
     mathCtx.globalAlpha = 1;
     mathCtx.globalCompositeOperation = 'source-over';
     applyCtxStyle();
@@ -6121,6 +6155,8 @@ let lernenLastMidX  = 0, lernenLastMidY = 0; // letzter Kurven-Mittelpunkt (Glä
 let lernenPtBuf     = [];           // gepufferte Punkte, einmal pro Frame gezeichnet (rAF)
 let lernenRaf       = 0;            // laufende requestAnimationFrame-ID (0 = keine)
 let lernenJumpSkips = 0;            // aufeinanderfolgend verworfene Ausreißer-Samples (Handballen-Sprung)
+let lernenStrokes   = [];           // committete Striche (für geglättetes Redraw, #6)
+let lernenCurStroke = null;         // gerade in Arbeit (phantom-gefilterte Stützpunkte)
 let lernenPenColor  = '#1c1c1e';
 let lernenTool      = 'pen';
 let lernenStylusId  = null; // touch.identifier des aktuell zeichnenden Stifts (null = keiner)
@@ -6233,6 +6269,7 @@ function openUnit(unit) {
   lernenLastCheckSig = '';
   lernenLastResultHtml = '';
   lernenHasInk    = false;
+  lernenStrokes   = []; lernenCurStroke = null;
   lernenCtx       = null;
   lernenStylusId  = null;
   isDrawingLernen = false;
@@ -6535,6 +6572,7 @@ async function regenLernenTask() {
         lernenCtx.clearRect(0, 0, document.getElementById('lernen-canvas-wrap').clientWidth, LERNEN_HEIGHT);
       }
       lernenHasInk = false;
+      lernenStrokes = []; lernenCurStroke = null;
       const ta = document.getElementById('lernen-text-answer');
       if (ta) ta.value = '';
       document.getElementById('lernen-done-btn').classList.add('hidden');
@@ -6563,6 +6601,7 @@ function retryLernenSameTask() {
   const ta = document.getElementById('lernen-text-answer');
   if (ta) ta.value = '';
   lernenHasInk = false;
+  lernenStrokes = []; lernenCurStroke = null;
   const rb = document.getElementById('lernen-result-bar');
   if (rb) { rb.innerHTML = ''; rb.className = 'lernen-result-bar hidden'; }
 }
@@ -6623,6 +6662,9 @@ function lernenBegin(canvas, clientX, clientY) {
   lernenLastMidX = p.x; lernenLastMidY = p.y;     // Glättung: Startpunkt = erster Mittelpunkt
   lernenPtBuf = [];
   lernenJumpSkips = 0;
+  // Verwaisten Strich sichern (verschlucktes touchend), dann neuen Strich beginnen.
+  if (lernenCurStroke && lernenCurStroke.pts.length > 1) lernenStrokes.push(lernenCurStroke);
+  lernenCurStroke = { tool: lernenTool, color: lernenPenColor, pts: [{ x: p.x, y: p.y }] };
   if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
   lastInkTs = Date.now();
   isDrawingLernen = true;
@@ -6640,6 +6682,10 @@ function lernenFinish() {
   if (!isDrawingLernen) return;
   if (lernenRaf) { cancelAnimationFrame(lernenRaf); lernenRaf = 0; }
   flushLernenBuf();                 // gepufferte Restpunkte sofort zeichnen
+  if (lernenCurStroke) {
+    if (lernenCurStroke.pts.length > 1) { lernenStrokes.push(lernenCurStroke); redrawLernen(); }
+    lernenCurStroke = null;         // Einzel-Tap (1 Punkt) verwerfen: nichts gezeichnet
+  }
   lastInkTs = Date.now();
   isDrawingLernen = false;
 }
@@ -6678,7 +6724,48 @@ function flushLernenBuf() {
     lernenCtx.stroke();
     lernenLastMidX = midX; lernenLastMidY = midY;
     lernenLastX = pt.x; lernenLastY = pt.y;
+    if (lernenCurStroke) lernenCurStroke.pts.push({ x: pt.x, y: pt.y });
   }
+}
+
+// Lernen-Canvas komplett aus den committeten Strichen neu zeichnen – jeder Strich
+// Catmull-Rom-geglättet (#6). Ersetzt die eckige inkrementelle Live-Vorschau (und
+// das, was die Vision-Prüfung als Bitmap liest). Lernen hält – anders als Rechnen –
+// kein Hintergrundbild, daher genügt clear + alle Striche.
+function redrawLernen() {
+  if (!lernenCtx) return;
+  const wrap = document.getElementById('lernen-canvas-wrap');
+  const w = wrap ? wrap.clientWidth : lernenCtx.canvas.width;
+  lernenCtx.globalCompositeOperation = 'source-over';
+  lernenCtx.clearRect(0, 0, w, LERNEN_HEIGHT);
+  let inked = false;
+  for (const s of lernenStrokes) { drawLernenStroke(s); if (s.tool !== 'eraser') inked = true; }
+  lernenCtx.globalCompositeOperation = 'source-over';
+  lernenHasInk = inked;
+}
+
+function drawLernenStroke(s) {
+  const pts = catmullRomPts(s.pts);
+  if (pts.length < 2) return;
+  lernenCtx.lineCap = 'round'; lernenCtx.lineJoin = 'round';
+  if (s.tool === 'eraser') {
+    lernenCtx.globalCompositeOperation = 'destination-out';
+    lernenCtx.lineWidth = 22;
+  } else {
+    lernenCtx.globalCompositeOperation = 'source-over';
+    lernenCtx.strokeStyle = s.color;
+    lernenCtx.lineWidth = 2.5;
+  }
+  let lx = pts[0].x, ly = pts[0].y, lmx = pts[0].x, lmy = pts[0].y;
+  for (let i = 1; i < pts.length; i++) {
+    const mx = (lx + pts[i].x) / 2, my = (ly + pts[i].y) / 2;
+    lernenCtx.beginPath();
+    lernenCtx.moveTo(lmx, lmy);
+    lernenCtx.quadraticCurveTo(lx, ly, mx, my);
+    lernenCtx.stroke();
+    lmx = mx; lmy = my; lx = pts[i].x; ly = pts[i].y;
+  }
+  lernenCtx.globalCompositeOperation = 'source-over';
 }
 
 // ── Touch (iPad): NUR der Apple Pencil (touchType==='stylus') zeichnet; ein Finger scrollt
@@ -7446,6 +7533,7 @@ document.getElementById('lernen-clear-btn')?.addEventListener('click', () => {
   lernenCtx.globalCompositeOperation = 'source-over';
   lernenCtx.clearRect(0, 0, wrap.clientWidth, LERNEN_HEIGHT);
   lernenHasInk = false;
+  lernenStrokes = []; lernenCurStroke = null;
 });
 document.querySelectorAll('.lernen-step-tab').forEach(t => t.addEventListener('click', () => {
   if (!t.disabled) lernenSwitchStep(+t.dataset.lstep);
