@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '221';
+const APP_VERSION = '222';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3736,6 +3736,76 @@ const CANVAS_MAX_SKIPS = 2;
 // Prompt (EVAL_SYS) eingesetzt, damit beide Pfade Ziffern gleich sorgfältig lesen.
 const ZIFFERN_LESEHILFE = `ZIFFERN SORGFÄLTIG LESEN (deutsche Handschrift): Die **1** wird mit einem deutlichen Aufstrich/Anstrich oben geschrieben (sieht der Spitze einer 7 ähnlich) und hat KEINEN waagerechten Balken; die **7** hat oben einen waagerechten Balken und oft einen durchgestrichenen Mittelstrich. Verwechsle 1 und 7 nicht. Achte ebenso auf 4↔9, 0↔6 und 3↔8. Wenn eine Rechnung nur dann aufgeht (das angeschriebene Zwischen-/Endergebnis nur dann stimmt), wenn eine unklare Ziffer anders gelesen wird, bevorzuge die rechnerisch konsistente Lesart – der Schüler hat sich beim Schreiben sehr wahrscheinlich nicht in der eigenen Rechnung verrechnet, sondern nur undeutlich geschrieben.`;
 
+// Despeckle-Bounding-Box der Tinte (Phantom-Pixel-Schutz, Roadmap #4): die rohe
+// Box aus „jedes Pixel mit Alpha>10" wird von einem einzelnen Handballen-/Phantom-
+// Tupfer weit aufgezogen → der Vision-Zuschnitt wird riesig und überwiegend weiß.
+// Stattdessen Tinte je INK_CELL-Gitterzelle zählen, Zellen per 8-Nachbarschaft zu
+// Komponenten gruppieren und Komponenten mit weniger als INK_MIN_PIXELS Tinte-Pixeln
+// (vereinzelte Tupfer) verwerfen. Überlebt nichts (alles Tupfer), wird auf die rohe
+// Box zurückgefallen, damit echter Inhalt nie wegfällt. Reine Funktion → testbar.
+const INK_CELL       = 24;
+const INK_MIN_PIXELS = 12;
+function inkBoundingBox(data, CW, CH) {
+  const cols = Math.ceil(CW / INK_CELL), rows = Math.ceil(CH / INK_CELL);
+  const cnt = new Int32Array(cols * rows);   // Tinte-Pixel je Gitterzelle
+  let any = false, rMinX = CW, rMinY = CH, rMaxX = 0, rMaxY = 0, h = 5381;
+  for (let y = 0; y < CH; y++) {
+    for (let x = 0; x < CW; x++) {
+      if (data[(y * CW + x) * 4 + 3] > 10) {
+        any = true;
+        cnt[((y / INK_CELL) | 0) * cols + ((x / INK_CELL) | 0)]++;
+        if (x < rMinX) rMinX = x; if (x > rMaxX) rMaxX = x;
+        if (y < rMinY) rMinY = y; if (y > rMaxY) rMaxY = y;
+        h = ((h << 5) + h + x * 31 + y) | 0;   // Inhalts-Hash (Änderungserkennung)
+      }
+    }
+  }
+  const hash = String(h >>> 0);
+  if (!any) return { ink: false, minX: CW, minY: CH, maxX: 0, maxY: 0, hash };
+
+  // Zusammenhängende Zell-Komponenten (8-Nachbarschaft, iterativer Flood-Fill).
+  const seen = new Uint8Array(cols * rows);
+  const stack = [];
+  let kept = false, kMinCx = cols, kMinCy = rows, kMaxCx = -1, kMaxCy = -1;
+  for (let c0 = 0; c0 < cnt.length; c0++) {
+    if (!cnt[c0] || seen[c0]) continue;
+    seen[c0] = 1; stack.length = 0; stack.push(c0);
+    const cells = []; let pixels = 0;
+    while (stack.length) {
+      const idx = stack.pop();
+      cells.push(idx); pixels += cnt[idx];
+      const cx = idx % cols, cy = (idx / cols) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        const ni = ny * cols + nx;
+        if (cnt[ni] && !seen[ni]) { seen[ni] = 1; stack.push(ni); }
+      }
+    }
+    if (pixels < INK_MIN_PIXELS) continue;   // vereinzelter Phantom-Tupfer → verwerfen
+    kept = true;
+    for (const idx of cells) {
+      const cx = idx % cols, cy = (idx / cols) | 0;
+      if (cx < kMinCx) kMinCx = cx; if (cx > kMaxCx) kMaxCx = cx;
+      if (cy < kMinCy) kMinCy = cy; if (cy > kMaxCy) kMaxCy = cy;
+    }
+  }
+  // Alles war Tupfer → rohe Box, damit echter Inhalt nie verloren geht.
+  if (!kept) return { ink: true, minX: rMinX, minY: rMinY, maxX: rMaxX, maxY: rMaxY, hash };
+  // Behaltene Zellen in Pixel umrechnen und mit der rohen Box verschneiden (das
+  // Raster ist gröber als die Pixel-Box; der Schnitt zieht sie auf den echten
+  // Tinte-Rand zusammen und schließt zugleich entfernte Tupfer aus).
+  return {
+    ink: true,
+    minX: Math.max(rMinX, kMinCx * INK_CELL),
+    minY: Math.max(rMinY, kMinCy * INK_CELL),
+    maxX: Math.min(rMaxX, (kMaxCx + 1) * INK_CELL - 1),
+    maxY: Math.min(rMaxY, (kMaxCy + 1) * INK_CELL - 1),
+    hash,
+  };
+}
+
 function applyCtxStyle() {
   if (!mathCtx) return;
   mathCtx.lineCap  = 'round';
@@ -4316,22 +4386,14 @@ async function checkHandwriting() {
   if (!mathCtx) return;
   const canvas = document.getElementById('math-canvas');
 
-  // Bitmap ist transparent (nur Tinte) – Tinte über den Alpha-Kanal erkennen.
-  // In einem Durchgang zugleich die Bounding-Box der Tinte bestimmen, damit das
-  // Bild später nur auf den beschriebenen Bereich zugeschnitten gesendet wird.
+  // Bitmap ist transparent (nur Tinte) – Tinte über den Alpha-Kanal erkennen und
+  // dabei die despeckelte Bounding-Box bestimmen (#4: vereinzelte Phantom-Tupfer
+  // blähen den Zuschnitt nicht mehr auf), damit das Bild nur auf den tatsächlich
+  // beschriebenen Bereich zugeschnitten gesendet wird.
   const CW = canvas.width, CH = canvas.height;
-  const px = mathCtx.getImageData(0, 0, CW, CH).data;
-  let hasInk = false;
-  let minX = CW, minY = CH, maxX = 0, maxY = 0;
-  for (let y = 0; y < CH; y++) {
-    for (let x = 0; x < CW; x++) {
-      if (px[(y * CW + x) * 4 + 3] > 10) {
-        hasInk = true;
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-      }
-    }
-  }
+  const bb = inkBoundingBox(mathCtx.getImageData(0, 0, CW, CH).data, CW, CH);
+  const hasInk = bb.ink;
+  const minX = bb.minX, minY = bb.minY, maxX = bb.maxX, maxY = bb.maxY;
   const hasTypedAnswer = (document.getElementById('rechnen-task-input')?.value.trim() || '').length > 0;
   if (!hasInk && !hasTypedAnswer) { toast('Bitte zuerst eine Lösung in den Zeichen- oder Schreibbereich eingeben.', 'warn'); return; }
 
@@ -6797,25 +6859,14 @@ function wrongPartSet(falscheTeile) {
 }
 
 // Liest die Lernen-Zeichenfläche EINMAL aus und liefert in einem Durchgang:
-// ob Tinte vorhanden ist, deren Bounding-Box (für den Zuschnitt) und einen
-// Inhalts-Hash (für "unverändert? → kein erneuter API-Call").
+// ob Tinte vorhanden ist, deren despeckelte Bounding-Box (für den Zuschnitt, #4)
+// und einen Inhalts-Hash (für "unverändert? → kein erneuter API-Call").
 function lernenInkInfo() {
   const canvas = document.getElementById('lernen-canvas');
   if (!canvas || !lernenCtx) return null;
   const CW = canvas.width, CH = canvas.height;
-  const px = lernenCtx.getImageData(0, 0, CW, CH).data;
-  let ink = false, minX = CW, minY = CH, maxX = 0, maxY = 0, h = 5381;
-  for (let y = 0; y < CH; y++) {
-    for (let x = 0; x < CW; x++) {
-      if (px[(y * CW + x) * 4 + 3] > 10) {
-        ink = true;
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        h = ((h << 5) + h + x * 31 + y) | 0;
-      }
-    }
-  }
-  return { canvas, CW, CH, ink, minX, minY, maxX, maxY, hash: String(h >>> 0) };
+  const bb = inkBoundingBox(lernenCtx.getImageData(0, 0, CW, CH).data, CW, CH);
+  return { canvas, CW, CH, ink: bb.ink, minX: bb.minX, minY: bb.minY, maxX: bb.maxX, maxY: bb.maxY, hash: bb.hash };
 }
 
 async function checkLernenSolution() {

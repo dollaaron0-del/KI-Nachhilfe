@@ -42,8 +42,9 @@ const FN_DECLS = [
   'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff', 'repairOrphanedProgress',
   'scanDirectiveBlock',
   'md', 'renderTable',
+  'inkBoundingBox',
 ];
-const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD'];
+const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD', 'INK_CELL', 'INK_MIN_PIXELS'];
 
 const assembled = [
   ...CONST_DECLS.map(extractConst),
@@ -65,6 +66,7 @@ const factory = new Function('self', 'katex', `
     dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff, repairOrphanedProgress,
     scanDirectiveBlock,
     md, renderTable,
+    inkBoundingBox,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
@@ -504,6 +506,39 @@ group('md — GFM-Tabellen', () => {
 
   // Kein Fehlalarm: normaler Text mit Pipe bleibt unverändert (keine Trennzeile).
   ok(!/<table/.test(M.md('a | b ohne Trennzeile')), 'Pipe ohne Separator → keine Tabelle');
+});
+
+group('inkBoundingBox — Despeckle gegen Phantom-Pixel (#4)', () => {
+  const CW = 200, CH = 200;
+  const mk = pts => {
+    const d = new Uint8ClampedArray(CW * CH * 4);
+    for (const [x, y] of pts) d[(y * CW + x) * 4 + 3] = 255;
+    return d;
+  };
+  const block = (x0, y0, w, h) => {
+    const pts = [];
+    for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) pts.push([x, y]);
+    return pts;
+  };
+
+  eq(M.inkBoundingBox(mk([]), CW, CH).ink, false, 'leeres Bild → ink:false');
+
+  const one = M.inkBoundingBox(mk(block(40, 40, 20, 20)), CW, CH);
+  ok(one.ink && one.minX === 40 && one.minY === 40 && one.maxX === 59 && one.maxY === 59,
+     'kompakter Block → enge Box');
+
+  // Block + ferner 1-Pixel-Phantom-Tupfer → Tupfer verworfen, Box reicht NICHT
+  // bis zum Tupfer (bei 180); sie ist auf der Tupfer-Seite zell-gerastert (≤71).
+  const ph = M.inkBoundingBox(mk([...block(40, 40, 20, 20), [180, 180]]), CW, CH);
+  ok(ph.maxX < 100 && ph.maxY < 100, 'Phantom-Tupfer zieht die Box NICHT auf');
+
+  // Nur ein winziger Tupfer (< INK_MIN_PIXELS) → Fallback auf rohe Box (kein Verlust).
+  const sp = M.inkBoundingBox(mk([[100, 100], [101, 100], [102, 100]]), CW, CH);
+  ok(sp.ink && sp.minX === 100 && sp.maxX === 102, 'einziger Tupfer → rohe Box (kein Verlust)');
+
+  // Zwei echte, weit getrennte Blöcke → beide bleiben, Box umspannt beide.
+  const two = M.inkBoundingBox(mk([...block(24, 24, 20, 20), ...block(120, 120, 20, 20)]), CW, CH);
+  ok(two.minX === 24 && two.maxX === 139, 'zwei echte Blöcke → Box umspannt beide');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────
