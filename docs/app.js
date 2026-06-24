@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '225';
+const APP_VERSION = '226';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -5527,6 +5527,10 @@ function calculateMilestone() {
   // gerade arbeitet). Erst wenn eine Stufe ganz voll ist, rückt sie eine weiter.
   let levelIdx = 0;
   while (levelIdx < MILESTONE_LEVELS.length - 1 && fracs[levelIdx] >= 1) levelIdx++;
+  // Der Lernstrahl startet bei Lernender: mit Vorwissen aus der Vorlesung steigt man
+  // dort ein. Die Grundstufen (Einsteiger, Grundlagen) werden nicht mehr angezeigt –
+  // ein höher gemeistertes Thema deckt sie ohnehin automatisch ab.
+  if (levelIdx < MS_BASIC_COUNT) levelIdx = MS_BASIC_COUNT;
   const level = MILESTONE_LEVELS[levelIdx];
 
   // Anzeige-% = Fortschritt auf dem AKTIVEN Niveau (manuell gewählt oder Auto).
@@ -5554,7 +5558,6 @@ function renderMilestone() {
     if (title) title.style.display = 'none';
     updateExamRecBanner();
     renderKlausurBridge(null);
-    renderLernTip();
     return;
   }
   const m = calculateMilestone();
@@ -5565,17 +5568,14 @@ function renderMilestone() {
   const selIdx   = selectedDiffIdx;
   const fracs    = m.fracs || [];
 
-  // Grundstufen (Einsteiger, Grundlagen) standardmäßig ausgeblendet. Sie werden
-  // gezeigt, wenn der Nutzer sie per Button einblendet ODER die aktuell aktive
-  // Stufe eine davon ist (sonst stünde der aktive Marker auf einer versteckten
-  // Stufe). Im erzwungenen Fall gibt es keinen Einklapp-Button.
-  const activeStepIdx = selIdx !== null ? selIdx : autoIdx;
-  const forcedOpen    = activeStepIdx < MS_BASIC_COUNT;
-  const showBasics    = msShowBasics || forcedOpen;
-
+  // Der Lernstrahl zeigt nur die drei relevanten Stufen: Lernender, Fortgeschritten,
+  // Experte. Die Grundstufen (Einsteiger, Grundlagen) gehören didaktisch in die
+  // Vorlesung – hier steigt man mit Vorwissen direkt auf Lernender ein. Die Auto-
+  // Stufe (calculateMilestone) ist auf min. Lernender geklemmt, sodass der aktive
+  // Marker nie auf einer ausgeblendeten Grundstufe landet.
   const visibleLevels = MILESTONE_LEVELS
     .map((l, i) => ({ l, i }))
-    .filter(({ i }) => showBasics || i >= MS_BASIC_COUNT);
+    .filter(({ i }) => i >= MS_BASIC_COUNT);
 
   const stepHtml = ({ l, i }, last) => {
     const frac     = fracs[i] || 0;
@@ -5593,22 +5593,7 @@ function renderMilestone() {
     </div>${last ? '' : `<div class="${lineClass}"></div>`}`;
   };
 
-  // Toggle-Button: eingeklappt → Grundstufen einblenden; vom Nutzer ausgeklappt →
-  // wieder einblenden. Im erzwungenen Fall (aktive Stufe ist Grundstufe) kein Toggle.
-  let toggleHtml = '';
-  if (!showBasics) {
-    toggleHtml = `<div class="ms-toggle" id="ms-toggle" title="Grundstufen (Einsteiger, Grundlagen) anzeigen">
-        <div class="ms-toggle-dot">🌱<span class="ms-toggle-badge">+${MS_BASIC_COUNT}</span></div>
-        <div class="ms-label">Grundstufen</div>
-      </div><div class="ms-line"></div>`;
-  } else if (!forcedOpen) {
-    toggleHtml = `<div class="ms-toggle" id="ms-toggle" title="Grundstufen ausblenden">
-        <div class="ms-toggle-dot">‹</div>
-        <div class="ms-label">weniger</div>
-      </div><div class="ms-line"></div>`;
-  }
-
-  const stepsHtml = toggleHtml +
+  const stepsHtml =
     visibleLevels.map((v, pos) => stepHtml(v, pos === visibleLevels.length - 1)).join('');
 
   const activeDiffName = selIdx !== null ? MILESTONE_LEVELS[selIdx].name : (m.diff ? m.name : 'Einsteiger');
@@ -5638,11 +5623,6 @@ function renderMilestone() {
       loadLernpfad();
     });
   });
-  banner.querySelector('#ms-toggle')?.addEventListener('click', () => {
-    msShowBasics = !msShowBasics;
-    try { localStorage.setItem('ms_show_basics', msShowBasics ? '1' : '0'); } catch (_) {}
-    renderMilestone();
-  });
   banner.querySelector('.ms-reset-btn')?.addEventListener('click', e => {
     e.stopPropagation();
     selectedDiffIdx = null;
@@ -5651,69 +5631,19 @@ function renderMilestone() {
   });
   updateExamRecBanner(m);
   renderKlausurBridge(m);
-  renderLernTip();
 }
 
-// Einmalige Hinweis-Karte: beste Vorbereitungs-Strategie (nicht bei Einsteiger
-// anfangen, kalibrieren, bis Prüfungsnah hocharbeiten, dann Probeklausur). Per
-// localStorage dauerhaft ausblendbar – nervt nach dem Wegklicken nicht mehr.
-function renderLernTip() {
-  const el = document.getElementById('lern-tip-card');
-  if (!el) return;
-  let off = false;
-  try { off = localStorage.getItem('lerntip_v1') === 'off'; } catch (_) {}
-  if (off || !scannedTopics.length) { el.classList.add('hidden'); return; }
-  el.classList.remove('hidden');
-  if (el.dataset.rendered) return;   // Inhalt nur einmal aufbauen
-  el.dataset.rendered = '1';
-  el.innerHTML = `
-    <button class="lern-tip-close" title="Ausblenden" aria-label="Ausblenden">×</button>
-    <div class="lern-tip-head">💡 So bereitest du dich am besten vor</div>
-    <ol class="lern-tip-list">
-      <li><b>Nicht bei Einsteiger anfangen.</b> Mit Vorwissen aus der Vorlesung startest du auf <b>Lernender</b> – ein auf höherer Stufe gemeistertes Thema zählt automatisch für die niedrigeren.</li>
-      <li><b>Kurz kalibrieren:</b> Öffne ein Thema auf Lernender/Fortgeschritten. Zu leicht → Stufe hoch; verloren → eine Stufe runter (geht pro Thema).</li>
-      <li><b>Hocharbeiten bis Prüfungsnah</b> – dort werden mehrere Themen zu einer Klausuraufgabe. Genau das prüft die Klausur.</li>
-      <li><b>Zum Schluss:</b> Probeklausur schreiben und die <b>🔄 fällig</b> markierten Themen auffrischen.</li>
-    </ol>`;
-  el.querySelector('.lern-tip-close').addEventListener('click', () => {
-    try { localStorage.setItem('lerntip_v1', 'off'); } catch (_) {}
-    el.classList.add('hidden');
-  });
-}
-
-// Klausur-Brücke: macht die Probeklausur dort sichtbar, wo gelernt wird, und rahmt
-// den Lernpfad als Weg dorthin. Die Botschaft skaliert mit dem Fortschritt, damit
-// klar ist: jede Lernaufgabe zahlt auf die Klausur ein (die genau diese Themen testet).
-// Probeklausur-Anschluss: sitzt als Footer IM Milestone-Block (kein eigenes
-// Banner mehr) – der Fortschritt steht schon darüber, hier nur noch die Brücke
-// zur Probeklausur. Botschaft skaliert mit dem Fortschritt.
+// Probeklausur-Anschluss: dezenter Button am Ende des Lernstrahls – kein Banner,
+// keine eskalierende Botschaft mehr. Erst Lernender→Experte hocharbeiten, danach
+// hier die Probeklausur starten. Die Schwierigkeit folgt dem aktiven Lern-Niveau
+// (manuell gewählte Stufe hat Vorrang vor der Auto-Stufe).
 function renderKlausurBridge(m) {
   const el = document.getElementById('ms-klausur-foot');
   if (!el) return;
   if (!m || !scannedTopics.length) { el.innerHTML = ''; return; }
-  const ready    = m.overallPct;
-  // Manuell gewählte Stufe hat Vorrang vor dem Auto-Level: wer den Pfad auf "Schwer"
-  // stellt, soll die Probeklausur auch auf Schwer bekommen – nicht auf der Auto-Stufe.
-  const recDiff  = (selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx].diff : m.diff) || 'mittel';
-  let head, sub, cta, auto;
-  if (ready >= 60) {
-    head = '🎯 Bereit für eine Probeklausur';
-    sub  = `Teste dich jetzt unter Klausurbedingungen – das zeigt dir, wo du wirklich stehst.`;
-    cta  = 'Probeklausur starten →'; auto = true;
-  } else if (ready >= 25) {
-    head = '📝 Auf dem Weg zur Probeklausur';
-    sub  = `Eine Probeklausur testet genau diese Themen – mach jederzeit eine, um deine Lücken zu sehen.`;
-    cta  = 'Probeklausur ansehen →'; auto = false;
-  } else {
-    head = '📝 Dein Ziel: die Probeklausur';
-    sub  = `Jede Aufgabe hier zahlt auf die Probeklausur ein – sie zieht ihre Fragen aus genau diesen Themen.`;
-    cta  = 'Probeklausur ansehen →'; auto = false;
-  }
-  el.innerHTML = `
-    <div class="kb-head">${head}</div>
-    <div class="kb-sub">${sub}</div>
-    <button class="btn-primary btn-sm kb-cta">${cta}</button>`;
-  el.querySelector('.kb-cta').addEventListener('click', () => startKlausurFromLernen(recDiff, auto));
+  const recDiff = (selectedDiffIdx !== null ? MILESTONE_LEVELS[selectedDiffIdx].diff : m.diff) || 'mittel';
+  el.innerHTML = `<button class="btn-secondary btn-sm kb-cta">📋 Probeklausur</button>`;
+  el.querySelector('.kb-cta').addEventListener('click', () => startKlausurFromLernen(recDiff, false));
 }
 
 // Wechselt zum Klausur-Tab, richtet die Schwierigkeit am Lern-Niveau aus und
@@ -6174,13 +6104,11 @@ let lernenQaMsgs    = [];
 let lernenAnswerMode = 'canvas'; // 'canvas' | 'text' — gesteuert nur, welcher Eingabebereich sichtbar ist
 let lernenHasInk    = false;     // true sobald auf die Zeichenfläche geschrieben wurde (für kombinierte Prüfung)
 let selectedDiffIdx   = null; // null = auto from progress, 0-4 = manual override
-// Standardmäßig zeigt der Lernpfad nur die oberen drei Stufen (Lernender,
-// Fortgeschritten, Experte). Die zwei Grundstufen (Einsteiger, Grundlagen)
-// blendet ein Extra-Button ein – für alle, die ein Thema noch gar nicht kennen.
-// Auswahl wird gemerkt; ist die aktive Stufe eine Grundstufe, werden sie ohnehin
-// gezeigt (sonst stünde der aktive Marker auf einer versteckten Stufe).
+// Der Lernpfad zeigt nur die oberen drei Stufen (Lernender, Fortgeschritten,
+// Experte). Die zwei Grundstufen (Einsteiger, Grundlagen) sind ausgeblendet – man
+// steigt mit Vorwissen aus der Vorlesung auf Lernender ein, ein höher gemeistertes
+// Thema deckt die Grundstufen automatisch ab.
 const MS_BASIC_COUNT = 2;
-let msShowBasics = (() => { try { return localStorage.getItem('ms_show_basics') === '1'; } catch { return false; } })();
 let lernenCurrentDiff = 'einsteiger'; // diff key active when topic was opened
 let lernenAttempts    = 0;            // reset per task, shown in success toast
 let lernenLastEval    = null;         // letzte KI-Auswertung derselben Aufgabe (konsistente Re-Prüfung)
