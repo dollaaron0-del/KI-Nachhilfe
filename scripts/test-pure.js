@@ -39,7 +39,7 @@ function extractConst(name) {
 const FN_DECLS = [
   'normTopic', 'jaccardTokens', 'parseNum', 'evalExpr', 'numEqual', 'numericCheck', 'applyNumericVerdict',
   'newTopicUid', 'topicId', 'topicKey', 'resolveKey',
-  'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff',
+  'dedupeTopicUids', 'reconcileTopicUids', 'ensureTopicUids', 'scanDiff', 'repairOrphanedProgress',
   'md', 'renderTable',
 ];
 const CONST_DECLS = ['isTopicUid', 'formatScanDiff'];
@@ -53,17 +53,23 @@ const assembled = [
 // pathTopics) bereitstellt — genau die, auf die die extrahierten Funktionen zugreifen.
 const factory = new Function('self', 'katex', `
   let topicUids = {};
+  let learnedTopics = [];
+  let topicMeta = {};
   let __path = [];
   function pathTopics() { return __path; }
   ${assembled}
   return {
     normTopic, jaccardTokens, parseNum, evalExpr, numEqual, numericCheck, applyNumericVerdict, isTopicUid,
     newTopicUid, topicId, topicKey, resolveKey,
-    dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff,
+    dedupeTopicUids, reconcileTopicUids, ensureTopicUids, scanDiff, formatScanDiff, repairOrphanedProgress,
     md, renderTable,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
+    _setLearned: l => { learnedTopics = l; },
+    _getLearned: () => learnedTopics,
+    _setMeta: m => { topicMeta = m; },
+    _getMeta: () => topicMeta,
   };
 `);
 // katex-Stub: markiert, dass eine Formel an KaTeX ging (display-Flag im Marker).
@@ -140,6 +146,48 @@ group('reconcileTopicUids — Erhalt über Re-Scan (#7)', () => {
   M._setUids({ regression: 't_reg' });
   M.reconcileTopicUids(['Regression'], ['Lineare Regression Analyse']);  // Jaccard 1/3 <0.4, aber enthält "regression"
   eq(M.topicId('Lineare Regression Analyse'), 't_reg', 'Containment erbt UID trotz Jaccard <0.4');
+});
+
+group('repairOrphanedProgress — verwaisten Fortschritt zurück-verknüpfen (v214)', () => {
+  // Zustand NACH einem alten Re-Scan (Schwelle 0.6): zwei Themen wurden umbenannt und
+  // bekamen eine NEUE Live-UID, der Fortschritt hängt aber noch an der ALTEN (verwaisten)
+  // UID. Ein drittes Thema ist unverändert (Fortschritt auf Live-UID), ein viertes neu.
+  M._setUids({
+    'bayes theorem': 't_aa1',                  // alt (verwaist)
+    'bayes theorem im detail': 't_bb2',        // aktuell (live) – Containment
+    'hypothesentest fehler': 't_cc3',          // alt (verwaist)
+    'fehler hypothesentest alpha beta': 't_dd4', // aktuell (live) – Jaccard 0.5
+    'zufallsvariable': 't_ee5',                // unverändert (live)
+    'bootstrap verfahren': 't_ff6',            // brandneu (live)
+  });
+  M._setPath(['Das Bayes-Theorem im Detail', 'Fehler Hypothesentest Alpha Beta', 'Zufallsvariable', 'Bootstrap Verfahren']);
+  M._setLearned(['t_aa1::pruefungsnah', 't_cc3::pruefungsnah', 't_ee5::pruefungsnah']);
+  M._setMeta({ 't_aa1::pruefungsnah': { ts: 1, attempts: 2 }, 't_cc3::pruefungsnah': { ts: 2, attempts: 1 } });
+
+  const r = M.repairOrphanedProgress();
+  eq(r.healed, 2, '2 verwaiste Themen geheilt');
+
+  const learned = M._getLearned();
+  ok(learned.includes('t_bb2::pruefungsnah'), 'Bayes-Fortschritt auf Live-UID umgehängt (Containment)');
+  ok(learned.includes('t_dd4::pruefungsnah'), 'Hypothesentest-Fortschritt auf Live-UID umgehängt (Jaccard 0.5)');
+  ok(learned.includes('t_ee5::pruefungsnah'), 'unveränderter Live-Fortschritt bleibt');
+  ok(!learned.some(k => k.startsWith('t_aa1') || k.startsWith('t_cc3')), 'verwaiste UIDs sind raus');
+  ok(M._getMeta()['t_bb2::pruefungsnah'] && M._getMeta()['t_dd4::pruefungsnah'], 'topicMeta mit umgehängt');
+
+  // Server-Sync: alte Keys zum Löschen, neue zum Posten gemeldet.
+  ok(r.removed.includes('t_aa1::pruefungsnah') && r.removed.includes('t_cc3::pruefungsnah'), 'removed = verwaiste Keys');
+  ok(r.added.includes('t_bb2::pruefungsnah')   && r.added.includes('t_dd4::pruefungsnah'),   'added = neue Live-Keys');
+
+  // Idempotent: zweiter Lauf findet keine Waisen mehr.
+  eq(M.repairOrphanedProgress().healed, 0, 'zweiter Lauf heilt nichts mehr');
+
+  // Kein False-Heal: ein wirklich fremder Fortschritt (kein ähnliches Live-Thema) bleibt verwaist.
+  M._setUids({ 'integralrechnung': 't_int', 'bootstrap verfahren': 't_ff6' });
+  M._setPath(['Bootstrap Verfahren']);
+  M._setLearned(['t_int::mittel']);
+  M._setMeta({});
+  eq(M.repairOrphanedProgress().healed, 0, 'fremdes Thema (kein Match ≥0.4) wird NICHT geheilt');
+  ok(M._getLearned().includes('t_int::mittel'), 'fremder Fortschritt bleibt unangetastet');
 });
 
 group('dedupeTopicUids — Selbstheilung kollabierter IDs', () => {

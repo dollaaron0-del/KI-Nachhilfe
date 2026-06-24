@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '213';
+const APP_VERSION = '214';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -1485,6 +1485,21 @@ async function openSubject(subj) {
   const rawMeta = (await localforage.getItem(`ltmeta_${subj.id}`).catch(() => null)) || {};
   topicMeta = {};
   for (const [k, v] of Object.entries(rawMeta)) topicMeta[normFullKey(k)] = v;
+  // Einmal-Reparatur (v214): durch frühere Re-Scans verwaisten Fortschritt mit der
+  // neuen 0.4/Containment-Logik auf die aktuellen Themen zurück-verknüpfen, damit
+  // schon gelernte (damals umbenannte) Themen wieder als abgehakt erscheinen.
+  const repair = repairOrphanedProgress();
+  if (repair.healed) {
+    localforage.setItem(`lt_${subj.id}`, learnedTopics).catch(() => {});
+    saveTopicMeta();
+    repair.added.forEach(t => api(`/api/subjects/${subj.id}/learned-topics`, {
+      method: 'POST', body: JSON.stringify({ topic: t }),
+    }).catch(() => {}));
+    repair.removed.forEach(t => api(`/api/subjects/${subj.id}/learned-topics/${encodeURIComponent(t)}`, {
+      method: 'DELETE',
+    }).catch(() => {}));
+    toast(`✅ ${repair.healed} bereits gelernte${repair.healed === 1 ? 's Thema' : ' Themen'} wieder als erledigt verknüpft.`, 'success', 4500);
+  }
   selTopic = null;
   currentAufgabe = ''; savedCanvasData = null; mathCtx = null; strokes = []; redoStrokes = []; currentStroke = null; baseImage = null;
   rechnenNextTask = null; rechnenLoesung = null; blitzNext = null; // Prefetches des vorigen Fachs verwerfen
@@ -4997,6 +5012,80 @@ function reconcileTopicUids(prevNames, newNames) {
     if (best && score >= 0.4) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
     else topicUids[k] = newTopicUid();
   });
+}
+
+// Einmal-Reparatur (v214): Fortschritt, der durch frühere Re-Scans mit der alten,
+// strengeren Match-Schwelle (0.6) auf eine inzwischen verwaiste ID gefallen ist, mit
+// der neuen 0.4/Containment-Logik auf das passende aktuelle Thema zurück-verknüpfen.
+// So erscheinen schon gelernte, aber damals umbenannte Themen wieder als abgehakt –
+// ohne Neu-Lernen. Idempotent: nach dem Heilen referenziert kein Fortschritt mehr eine
+// verwaiste ID, ein erneuter Lauf findet nichts. Mutiert learnedTopics/topicMeta und
+// liefert { healed, removed (alte Keys für Server-DELETE), added (neue Keys für POST) }.
+function repairOrphanedProgress() {
+  const result = { healed: 0, removed: [], added: [] };
+  const names = pathTopics();
+  if (!names.length || !learnedTopics.length) return result;
+
+  const liveUids = new Set(names.map(topicId));
+  // uid → alter normalisierter Name (Reverse-Lookup; topicUids behält Alt-Einträge).
+  const uidToName = {};
+  for (const [norm, uid] of Object.entries(topicUids)) {
+    if (norm && !uidToName[uid]) uidToName[uid] = norm;
+  }
+  // Verwaiste Fortschritts-IDs: kein aktuelles Thema löst auf sie auf.
+  const orphans = new Set();
+  for (const k of learnedTopics) {
+    const head = resolveKey(k).split('::')[0];
+    if (!liveUids.has(head)) orphans.add(head);
+  }
+  if (!orphans.size) return result;
+
+  // Jede verwaiste ID auf das ähnlichste aktuelle Thema mappen (≥0.4 oder Teilstring),
+  // jede Ziel-ID höchstens einmal beanspruchen (wie reconcile's used-Set).
+  const remap = {};
+  const claimed = new Set();
+  for (const ou of orphans) {
+    const oldNorm = uidToName[ou];
+    if (!oldNorm) continue;
+    let best = null, score = 0;
+    for (const nm of names) {
+      const lu = topicId(nm);
+      if (claimed.has(lu)) continue;
+      const nn = normTopic(nm);
+      let s = jaccardTokens(oldNorm, nn);
+      if (oldNorm.includes(nn) || nn.includes(oldNorm)) s = Math.max(s, 0.75);
+      if (s > score) { score = s; best = lu; }
+    }
+    if (best && score >= 0.4) { remap[ou] = best; claimed.add(best); }
+  }
+  if (!Object.keys(remap).length) return result;
+
+  // learnedTopics auf die Live-IDs umschreiben (+ dedupe); Server-Sync vormerken.
+  const rewrite = key => {
+    const r = resolveKey(key);
+    const i = r.lastIndexOf('::');
+    return (remap[r.slice(0, i)] || r.slice(0, i)) + '::' + r.slice(i + 2);
+  };
+  const seen = new Set();
+  const next = [];
+  for (const k of learnedTopics) {
+    const head = resolveKey(k).split('::')[0];
+    const nk = rewrite(k);
+    if (remap[head]) result.removed.push(k);   // verwaister Server-Eintrag → löschen
+    if (!seen.has(nk)) {
+      seen.add(nk); next.push(nk);
+      if (remap[head]) result.added.push(nk);   // neuer Live-Eintrag → posten
+    }
+  }
+  learnedTopics = next;
+
+  // topicMeta (Wiederholungs-Termine) ebenfalls umhängen.
+  const newMeta = {};
+  for (const [k, v] of Object.entries(topicMeta)) newMeta[rewrite(k)] = v;
+  topicMeta = newMeta;
+
+  result.healed = Object.keys(remap).length;
+  return result;
 }
 
 // Re-Scan-Diff (#7-Bonus): zählt anhand der stabilen IDs, wie viele Themen neu sind,
