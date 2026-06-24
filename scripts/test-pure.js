@@ -130,6 +130,16 @@ group('reconcileTopicUids — Erhalt über Re-Scan (#7)', () => {
   M._setUids({ 'lineare algebra grundlagen': 't_la' });
   M.reconcileTopicUids(['Lineare Algebra Grundlagen'], ['Lineare Algebra', 'Lineare Algebra Vertiefung']);
   ok(M.topicId('Lineare Algebra') !== M.topicId('Lineare Algebra Vertiefung'), 'zwei neue Themen → verschiedene UIDs');
+
+  // 5) Gesenkte Schwelle (0.4): Überlappung zwischen 0.4 und 0.6 erbt jetzt die UID.
+  M._setUids({ 'alpha delta': 't_ad' });
+  M.reconcileTopicUids(['Alpha Delta'], ['Alpha Beta Gamma Delta']);  // Jaccard 0.5, kein Teilstring
+  eq(M.topicId('Alpha Beta Gamma Delta'), 't_ad', 'Jaccard 0.5 (≥0.4) erbt UID');
+
+  // 6) Containment-Bonus: umformuliertes Thema mit wenig Token-Overlap, aber Teilstring.
+  M._setUids({ regression: 't_reg' });
+  M.reconcileTopicUids(['Regression'], ['Lineare Regression Analyse']);  // Jaccard 1/3 <0.4, aber enthält "regression"
+  eq(M.topicId('Lineare Regression Analyse'), 't_reg', 'Containment erbt UID trotz Jaccard <0.4');
 });
 
 group('dedupeTopicUids — Selbstheilung kollabierter IDs', () => {

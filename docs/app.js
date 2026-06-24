@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '212';
+const APP_VERSION = '213';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -705,6 +705,15 @@ async function buildDocOverview() {
     if (!Array.isArray(docs) || !docs.length) return null;
     return docs.map(d => `[Dokument: ${d.filename}]\n${d.snippet}`).join('\n\n---\n\n');
   } catch { return null; }
+}
+
+// Persönliche Anweisungen des Studenten als anhängbarer Prompt-Block (oder '',
+// wenn keine gesetzt sind). Damit fließen sie auch in Pfade ein, die nicht über
+// sysBlocks laufen – z.B. Phase 1 der Lernstruktur-Analyse (Hauptthemen-Wahl).
+function persInstrText() {
+  return customPrompt
+    ? '\n\n--- PERSÖNLICHE ANWEISUNGEN DES STUDENTEN (berücksichtigen!) ---\n' + customPrompt + '\n--- ENDE ---'
+    : '';
 }
 
 function sysBlocks(extra = '', opts = {}) {
@@ -4975,10 +4984,17 @@ function reconcileTopicUids(prevNames, newNames) {
     let best = null, score = 0;
     for (const o of avail) {
       if (used.has(topicUids[o])) continue;
-      const s = jaccardTokens(k, o);
+      // Token-Jaccard; Containment-Bonus: enthält ein Name den anderen als Teilstring
+      // (z.B. "Lichtreaktion" ⊂ "Die Lichtreaktion der Photosynthese"), ist es fast
+      // sicher dasselbe Thema → als starker Treffer werten, auch ohne Token-Overlap.
+      let s = jaccardTokens(k, o);
+      if (k.includes(o) || o.includes(k)) s = Math.max(s, 0.75);
       if (s > score) { score = s; best = o; }
     }
-    if (best && score >= 0.6) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
+    // Schwelle bewusst niedrig (0.4): umbenannte/umformulierte Themen sollen ihren
+    // Fortschritt häufiger behalten. Risiko falscher Merges ist gering, da pro alter
+    // ID nur ein neuer Name andocken kann (used-Set) und der Diff-Toast es sichtbar macht.
+    if (best && score >= 0.4) { topicUids[k] = topicUids[best]; used.add(topicUids[best]); }
     else topicUids[k] = newTopicUid();
   });
 }
@@ -6895,7 +6911,7 @@ async function scanModuleStructure(btn) {
 
     const p1Raw = await claudeLocal(
       [{ role: 'user', content: `Hier sind kurze Auszüge aus ALLEN Dokumenten dieser Lernsammlung:\n\n${overviewText}\n\nIdentifiziere 6–8 übergeordnete Hauptthemen, die insgesamt in diesen Dokumenten behandelt werden. Decke die GESAMTE Breite aller Dokumente ab – nicht nur die ersten.` }],
-      [{ type: 'text', text: 'Du bist ein Lernstruktur-Experte. Analysiere Dokumentübersichten und erkenne übergeordnete Themengebiete.\nAntworte NUR als JSON-Array mit 6–8 Strings:\n["Hauptthema 1","Hauptthema 2",...]' }],
+      [{ type: 'text', text: 'Du bist ein Lernstruktur-Experte. Analysiere Dokumentübersichten und erkenne übergeordnete Themengebiete.\nAntworte NUR als JSON-Array mit 6–8 Strings:\n["Hauptthema 1","Hauptthema 2",...]' + persInstrText() }],
       600
     );
     const m1 = p1Raw.match(/\[[\s\S]*?\]/);
