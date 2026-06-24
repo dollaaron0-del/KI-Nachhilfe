@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '217';
+const APP_VERSION = '218';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -334,6 +334,7 @@ let redoStrokes     = [];             // für Redo zurückgelegte Striche
 let currentStroke   = null;           // gerade in Arbeit
 let baseImage       = null;           // geladenes PNG (Vorsession) als Hintergrund-Ebene
 let canvasStylusId  = null;           // touch.identifier des aktuell zeichnenden Stifts (null = keiner)
+let canvasJumpSkips = 0;              // aufeinanderfolgend verworfene Ausreißer-Samples (Handballen-Sprung)
 let lastInkTs       = 0;              // Zeitstempel des letzten Schreib-Ereignisses – Tab-Klick-Schutz gegen Handflächen-Taps
 let fingerScrollId  = null;           // touch.identifier des Fingers, der gerade scrollt
 let fingerStartY    = 0;
@@ -3679,6 +3680,14 @@ function redrawCanvas() {
 }
 
 const PEN_BASE = { fine: 1.0, medium: 2.0, thick: 4.5 };
+// Handballen-Phantom-Schutz: iPadOS schnappt vereinzelt ein Apple-Pencil-Sample
+// zur Handfläche (großer Sprung, meist nach unten/rechts) → eine Linie, die der
+// Stift nie gezogen hat. Ein Sample, das weiter als CANVAS_MAX_STEP (CSS-px) vom
+// laufenden Anker springt, wird als Ausreißer verworfen. Damit ein echter
+// schneller Zug nicht dauerhaft abreißt, wird nach CANVAS_MAX_SKIPS verworfenen
+// Samples in Folge zwangsweise neu synchronisiert.
+const CANVAS_MAX_STEP  = 150;
+const CANVAS_MAX_SKIPS = 2;
 
 function applyCtxStyle() {
   if (!mathCtx) return;
@@ -3716,6 +3725,14 @@ function flushCanvasBuf() {
   }
   const buf = canvasPtBuf; canvasPtBuf = [];
   for (const pt of buf) {
+    // Ausreißer (Handballen-Sprung) verwerfen, ohne den Anker zu bewegen – der
+    // nächste echte Stift-Sample zeichnet dann wieder sauber vom Stift aus weiter.
+    const dx = pt.x - canvasLastX, dy = pt.y - canvasLastY;
+    if (canvasJumpSkips < CANVAS_MAX_SKIPS && dx * dx + dy * dy > CANVAS_MAX_STEP * CANVAS_MAX_STEP) {
+      canvasJumpSkips++;
+      continue;
+    }
+    canvasJumpSkips = 0;
     if (activeTool === 'pen') mathCtx.lineWidth = Math.max(0.5, pt.p * PEN_BASE[penSize] * 1.8);
     const midX = (canvasLastX + pt.x) / 2, midY = (canvasLastY + pt.y) / 2;
     mathCtx.beginPath();
@@ -3751,6 +3768,7 @@ function setupCanvasEvents() {
     canvasLastX = x; canvasLastY = y;
     canvasLastMidX = x; canvasLastMidY = y;          // Glättung: Startpunkt = erster Mittelpunkt
     canvasPtBuf = [];
+    canvasJumpSkips = 0;
     if (canvasRaf) { cancelAnimationFrame(canvasRaf); canvasRaf = 0; }
     currentStroke = { tool: activeTool, color: penColor, size: penSize, pts: [{ x, y, p }] };
     if (activeTool === 'line') return; // Vorschau läuft über redrawCanvas() im move
@@ -4365,6 +4383,8 @@ async function checkHandwriting() {
 1. handschriftlich/gezeichnet auf dem beigefügten Bild (Zeichenbereich),
 2. als getippter Text im Schreibbereich (siehe unten).
 Berücksichtige BEIDE Bereiche gemeinsam als die vollständige Lösung des Schülers.
+
+ZIFFERN SORGFÄLTIG LESEN (deutsche Handschrift): Die **1** wird mit einem deutlichen Aufstrich/Anstrich oben geschrieben (sieht der Spitze einer 7 ähnlich) und hat KEINEN waagerechten Balken; die **7** hat oben einen waagerechten Balken und oft einen durchgestrichenen Mittelstrich. Verwechsle 1 und 7 nicht. Achte ebenso auf 4↔9, 0↔6 und 3↔8. Wenn eine Rechnung nur dann aufgeht (das angeschriebene Zwischen-/Endergebnis nur dann stimmt), wenn eine unklare Ziffer anders gelesen wird, bevorzuge die rechnerisch konsistente Lesart – der Schüler hat sich beim Schreiben sehr wahrscheinlich nicht in der eigenen Rechnung verrechnet, sondern nur undeutlich geschrieben.
 
 ${toleranzNote}
 
