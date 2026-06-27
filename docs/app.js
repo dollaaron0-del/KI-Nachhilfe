@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '231';
+const APP_VERSION = '233';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6366,7 +6366,7 @@ function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
     ? ` Verknüpfe es dabei mit verwandten Themen desselben Kapitels: ${siblings.slice(0, 4).join(', ')}.`
     : '';
   const zielTxt = lernziel ? ` Messlatte ist das Kapitel-Lernziel: "${lernziel}".` : '';
-  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen. Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab.`;
+  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen. Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab. WENN ein späterer Teil (Interpretation, Diskussion, Begründung, ökonomische Einordnung, "Erläutere"/"Diskutiere") inhaltlich auf dem ZAHLENERGEBNIS eines früheren Rechen-Teils aufbaut, MUSS der Aufgabentext dieses Teils ausdrücklich den Bezug auf die selbst berechneten Werte verlangen – formuliere es unmissverständlich (z.B. "Interpretiere dein in Teil a) berechnetes Ergebnis …", "Begründe anhand deiner Werte aus a), warum …"). Es darf NICHT offen bleiben, ob eine allgemeine oder eine zahlengestützte Antwort erwartet wird; verlange den Zahlenbezug explizit.`;
   switch (effLevel.diff) {
     case 'leicht':
       return `Niveau: GRUNDLAGEN (Stufe 2 von 5).
@@ -6484,7 +6484,7 @@ async function loadTopicContent(topic, forceFresh = false) {
     ? `die folgenden zusammengehörenden Themen GEMEINSAM als EINE Lerneinheit: ${unit.themen.join(', ')}`
     : `das Thema "${topic}"`;
   const compositeNote = isComposite
-    ? `\n- Dies ist EINE zusammengesetzte Einheit: gib eine kompakte gemeinsame Einordnung (nicht jedes Thema einzeln durchdeklinieren) und in "aufgabe" GENAU EINE integrierte, mehrteilige Aufgabe, die die Themen verbindet.`
+    ? `\n- Dies ist EINE zusammengesetzte Einheit: gib eine kompakte gemeinsame Einordnung (nicht jedes Thema einzeln durchdeklinieren) und in "aufgabe" GENAU EINE integrierte, mehrteilige Aufgabe, die die Themen verbindet.\n- Baut ein Schreib-/Interpretationsteil auf dem Zahlenergebnis eines früheren Rechen-Teils auf, verlange im Aufgabentext ausdrücklich den Bezug auf die selbst berechneten Werte (z.B. "Interpretiere dein Ergebnis aus Teil a) …") – nicht offen lassen, ob allgemein oder zahlengestützt geantwortet werden soll.`
     : '';
   const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
   const kbQ = isComposite ? unit.themen.join(', ') : topic;
