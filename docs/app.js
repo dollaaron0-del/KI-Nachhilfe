@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '234';
+const APP_VERSION = '235';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6420,7 +6420,10 @@ function renderTopicContent(topic, data) {
       `<div class="explainer-label"><span class="explainer-licon">${icon}</span>${label}</div>` +
       inner +
     `</div>`;
-  let html = `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>`;
+  let html = `<div class="lernen-erkl-head">` +
+    `<h2 class="lernen-erkl-title">📖 ${esc(topic)}</h2>` +
+    `<button class="btn-reload-erkl" onclick="reloadLernenExplanation()" title="Erklärung frisch generieren – z.B. um neue Diagramme zu erhalten">🔄 Neu laden</button>` +
+    `</div>`;
   if (data.was)    html += section('💡', 'Was ist das?',       '',                    `<div class="explainer-body">${fmtMd(data.was)}</div>`);
   if (data.warum)  html += section('🎯', 'Warum wichtig?',     '',                    `<div class="explainer-body">${fmtMd(data.warum)}</div>`);
   if (data.vertiefung && data.vertiefung.trim())
@@ -6556,6 +6559,19 @@ function retryLernenTopic() {
   document.getElementById('lernen-step1-footer').classList.add('hidden');
   document.getElementById('lernen-done-btn').classList.add('hidden');
   loadTopicContent(topic);
+}
+
+// Erklärung bewusst frisch generieren (forceFresh → Cache umgehen). Nötig, weil
+// bereits gecachte Erklärungen ohne die neueren Inline-Diagramme vorliegen können.
+function reloadLernenExplanation() {
+  const topic = currentExplainerTopic;
+  if (!topic) return;
+  document.getElementById('lernen-erkl-loading').style.display = '';
+  document.getElementById('lernen-erkl-body').classList.add('hidden');
+  document.getElementById('lernen-step1-footer').classList.add('hidden');
+  document.getElementById('lernen-done-btn').classList.add('hidden');
+  document.getElementById('lernen-elaborate')?.classList.add('hidden');
+  loadTopicContent(topic, true);
 }
 
 // initial=true: stille On-Demand-Erzeugung beim Öffnen der Aufgabe (kein Regen-Button,
