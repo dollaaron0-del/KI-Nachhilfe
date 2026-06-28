@@ -846,6 +846,18 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 }
 [data-theme="dark"] .mermaid-wrap { background: #2c2c2e; }
 
+/* ── Inline-SVG-Diagramme (vom Modell gezeichnet: IS-LM, Angebot/Nachfrage …) ── */
+.svg-diagram {
+  width: 100%; margin: 10px 0;
+  background: #fff; border-radius: 12px;
+  padding: 16px; box-shadow: var(--shadow);
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  text-align: center;
+}
+.svg-diagram svg {
+  max-width: 100%; height: auto; display: inline-block;
+}
+
 /* ── Chat quick buttons (Diagramm / Mind-Map) ────────────────────────────── */
 .chat-quick-btns {
   display: flex; gap: 6px; flex-wrap: wrap;

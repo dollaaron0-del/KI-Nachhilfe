@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '233';
+const APP_VERSION = '234';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -3214,12 +3214,19 @@ function esc(s) {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// KaTeX emits SVG + inline styles; allow those while blocking actual XSS
+// KaTeX emits SVG + inline styles; allow those while blocking actual XSS.
+// Zusätzlich erlauben wir genug SVG-Vokabular für vom Modell gezeichnete
+// Koordinaten-Diagramme (IS-LM, Angebot/Nachfrage, Funktionsgraphen).
 const PURIFY_CFG = {
-  ADD_TAGS: ['svg','path','g','use','defs','clipPath','line','circle','rect','polygon','text','tspan','marker'],
+  ADD_TAGS: ['svg','path','g','use','defs','clipPath','line','circle','rect','polygon',
+             'polyline','ellipse','text','tspan','marker','title','linearGradient','stop'],
   ADD_ATTR: ['viewBox','xmlns','xmlns:xlink','xlink:href','href','d','points','transform',
-             'x','y','x1','y1','x2','y2','r','cx','cy','clip-path','marker-end',
-             'stroke','stroke-width','fill','fill-rule'],
+             'x','y','x1','y1','x2','y2','r','cx','cy','rx','ry','width','height',
+             'clip-path','marker-end','marker-start','stroke','stroke-width','stroke-dasharray',
+             'stroke-linecap','stroke-linejoin','fill','fill-rule','fill-opacity','stroke-opacity',
+             'opacity','font-size','font-family','font-weight','text-anchor','dominant-baseline',
+             'dx','dy','preserveAspectRatio','markerWidth','markerHeight','refX','refY','orient',
+             'offset','stop-color','stop-opacity','gradientUnits'],
   ALLOW_DATA_ATTR: false,
 };
 const safeHtml = html => DOMPurify.sanitize(html, PURIFY_CFG);
@@ -3242,6 +3249,16 @@ function md(text) {
   text = text.replace(/```mermaid\n?([\s\S]*?)```/g, (_, code) => {
     mermaidBlocks.push(code.trim());
     return `\x00MBL${mermaidBlocks.length - 1}\x00`;
+  });
+
+  // Extract inline SVG before escaping. Das Modell zeichnet Koordinaten-Diagramme
+  // (IS-LM, Angebot/Nachfrage, Funktionsgraphen) als rohes <svg>. Ohne Extraktion
+  // würde e() es zu Text escapen. Ein optionaler ```svg-Fence wird vorher entfernt.
+  const svgBlocks = [];
+  text = text.replace(/```svg\s*([\s\S]*?)```/gi, (_, code) => code);
+  text = text.replace(/<svg[\s\S]*?<\/svg>/gi, (m) => {
+    svgBlocks.push(m);
+    return `\x00SVG${svgBlocks.length - 1}\x00`;
   });
 
   // Extract math before HTML escaping. Reihenfolge: längste/eindeutigste zuerst.
@@ -3296,6 +3313,10 @@ function md(text) {
   mermaidBlocks.forEach((code, i) => {
     html = html.replace(`\x00MBL${i}\x00`,
       `<div class="mermaid-wrap"><div class="mermaid">${code}</div></div>`);
+  });
+
+  svgBlocks.forEach((code, i) => {
+    html = html.replace(`\x00SVG${i}\x00`, `<div class="svg-diagram">${code}</div>`);
   });
 
   tables.forEach((t, i) => {
@@ -6493,8 +6514,8 @@ async function loadTopicContent(topic, forceFresh = false) {
   try {
     const raw = await claudeLocalKb(
       [{ role: 'user', content: `Behandle ${subjectClause} auf dem vorgegebenen Niveau.` }],
-      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!${taskAvoidBlock(scope)}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
-      4096,
+      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!${taskAvoidBlock(scope)}\n- DIAGRAMM: Wird das Thema durch eine Skizze klarer (z.B. IS-LM-Modell, Angebot/Nachfrage, Funktionsgraphen, Phasen-/Kräftediagramme), füge ein einfaches, klar beschriftetes Inline-SVG DIREKT in das passende Feld ("was", "vertiefung" oder "beispiel") ein – mit beschrifteten Achsen, benannten Kurven und (falls relevant) Verschiebungspfeilen samt neuem Gleichgewicht. ABSOLUT WICHTIG: In ALLEN SVG-Attributen EINFACHE Anführungszeichen verwenden (z.B. <svg viewBox='0 0 300 260'>, <text x='10' y='20'>), NIEMALS doppelte – doppelte würden das JSON zerstören. Halte das SVG kompakt (viewBox ~300×260, dünne Striche, lesbare Schrift). Nur einsetzen, wenn es das Verständnis wirklich fördert – nicht erzwingen.\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
+      5120,
       kbQ
     );
     // Stale guard: discard if user opened a different topic while AI was running
