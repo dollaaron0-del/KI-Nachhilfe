@@ -837,14 +837,16 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 /* ── Mermaid diagrams ────────────────────────────────────────────────────── */
 .mermaid-wrap {
   width: 100%; margin: 10px 0;
-  background: var(--surface); border-radius: 12px;
+  /* Immer heller Hintergrund: Mermaid wird mit dem 'neutral' (Light-)Theme
+     gerendert – auf dunklem Grund wären Kantenbeschriftungen sonst kaum lesbar.
+     Konsistent mit .svg-diagram. */
+  background: #fff; border-radius: 12px;
   padding: 16px; box-shadow: var(--shadow);
   overflow-x: auto; -webkit-overflow-scrolling: touch;
 }
 .mermaid-wrap svg {
   max-width: 100%; height: auto; display: block; margin: 0 auto;
 }
-[data-theme="dark"] .mermaid-wrap { background: #2c2c2e; }
 
 /* ── Inline-SVG-Diagramme (vom Modell gezeichnet: IS-LM, Angebot/Nachfrage …) ── */
 .svg-diagram {
