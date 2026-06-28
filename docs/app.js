@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '242';
+const APP_VERSION = '243';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -2031,25 +2031,19 @@ async function handleUpload(files) {
         toast('Neues Dokument hinzugefügt. Themen neu erkennen? → Lernen-Tab → "Themen erkennen"', 'info', 5000);
       }
 
-      // KB-Index ist nach dem Upload VERALTET: die neuen Dokumente sind zwar
-      // serverseitig gespeichert, aber noch nicht eingebettet. Bliebe kbReady auf
-      // true, würde der schlanke KB-Pfad (claudeLocalKb mit omitDocs) gegen den
-      // alten Index suchen, das neue Material NICHT finden und für eine Aufgabe
-      // daraus eine LEERE/hängende Musterlösung bzw. Erklärung liefern. Darum:
-      // KB als nicht-bereit markieren → Generierung fällt sofort auf die vollen
-      // Inline-Unterlagen (frisches sessionTxt) zurück. Existierte schon eine KB,
-      // stoßen wir eine Neu-Indexierung an, die kbReady automatisch wieder auf
-      // true setzt, sobald die Einbettung steht (Fehlschlag bleibt unkritisch –
-      // der Inline-Fallback ist weiterhin vollständig).
+      // KB-Index ist nach dem Upload veraltet: die neuen Dokumente sind zwar
+      // serverseitig gespeichert, aber noch nicht eingebettet. Wir stoßen darum
+      // eine Neu-Indexierung an; startKbPolling() hält kbReady aktuell, sobald die
+      // Einbettung steht. kbReady wird NICHT global auf false gezwungen: das würde
+      // die ganze Session auf den teuren Voll-Inline-Pfad schalten (~90k Token /
+      // Erklärung, 25–30 s), bis die Indexierung durch ist. Der schlanke KB-Pfad
+      // bleibt nutzbar; für die kurze Indexierungs-Spanne nimmt er den (leicht
+      // veralteten) Index in Kauf – ein guter Tausch gegen den Dauer-Heavy-Pfad.
       const savedToServer = newFiles.some(f => !failedServer.includes(f.name));
-      if (savedToServer) {
-        const hadKb = kbReady;
-        kbReady = false;
-        if (hadKb) {
-          api(`/api/subjects/${sessionId}/kb/reindex`, { method: 'POST' })
-            .then(() => startKbPolling())
-            .catch(() => {});
-        }
+      if (savedToServer && kbReady) {
+        api(`/api/subjects/${sessionId}/kb/reindex`, { method: 'POST' })
+          .then(() => startKbPolling())
+          .catch(() => {});
       }
 
       await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
@@ -6581,7 +6575,16 @@ async function loadTopicContent(topic, forceFresh = false) {
     // gerettet (parseJsonResponse → salvageTruncatedJson). Das frühere reine
     // parseJsonLoose scheiterte hier sporadisch → "Keine Erklärung erhalten".
     const data = parseJsonResponse(raw);
-    if (!data) throw new Error('Keine Erklärung erhalten');
+    if (!data) {
+      // Diagnose: parseJsonResponse liefert nur dann null, wenn die (200-er)
+      // Modell-Antwort gar kein rettbares JSON enthielt (z.B. SVG/Mermaid mit
+      // doppelten Anführungszeichen, die das JSON zerschießen). Die Rohantwort
+      // gekürzt in die Konsole, damit so ein Fall künftig sofort sichtbar ist
+      // statt nur als nichtssagendes "Keine Erklärung erhalten".
+      console.error('[loadTopicContent] Erklärung nicht parsebar – Rohantwort (gekürzt):',
+        String(raw || '').slice(0, 2000) || '(leer)');
+      throw new Error('Keine Erklärung erhalten');
+    }
     lernenTopicData = data;
     if (data.aufgabe) rememberTask(scope, data.aufgabe);   // in Historie → künftige Aufgaben vermeiden Wiederholung
     // Abgehackte Erklärung (Token-Limit) NICHT dauerhaft cachen – sonst bleibt sie
