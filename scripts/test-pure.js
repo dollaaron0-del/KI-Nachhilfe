@@ -22,8 +22,24 @@ function extractFn(name) {
   let i = src.indexOf('{', m.index);
   if (i < 0) throw new Error(`Kein Body für ${name}`);
   let depth = 0;
+  // Klammern NUR im Code zählen – Kommentare und String-Literale (die '{' oder
+  // '}' enthalten dürfen, z. B. `// schließende "}"`) überspringen, sonst kappt
+  // der Matcher den Body zu früh oder zu spät.
+  let mode = 'code'; // code | line | block | sq | dq | tpl
   for (let j = i; j < src.length; j++) {
-    const c = src[j];
+    const c = src[j], n = src[j + 1];
+    if (mode === 'line')  { if (c === '\n') mode = 'code'; continue; }
+    if (mode === 'block') { if (c === '*' && n === '/') { mode = 'code'; j++; } continue; }
+    if (mode === 'sq' || mode === 'dq' || mode === 'tpl') {
+      if (c === '\\') { j++; continue; }
+      if ((mode === 'sq' && c === "'") || (mode === 'dq' && c === '"') || (mode === 'tpl' && c === '`')) mode = 'code';
+      continue;
+    }
+    if (c === '/' && n === '/') { mode = 'line'; j++; continue; }
+    if (c === '/' && n === '*') { mode = 'block'; j++; continue; }
+    if (c === "'") { mode = 'sq'; continue; }
+    if (c === '"') { mode = 'dq'; continue; }
+    if (c === '`') { mode = 'tpl'; continue; }
     if (c === '{') depth++;
     else if (c === '}') { depth--; if (depth === 0) return src.slice(m.index, j + 1); }
   }
@@ -43,6 +59,7 @@ const FN_DECLS = [
   'scanDirectiveBlock',
   'md', 'renderTable',
   'inkBoundingBox', 'enhanceInkContrast', 'catmullRomPts',
+  'repairJson', 'parseJsonLoose', 'parseJsonResponse', 'salvageTruncatedJson',
 ];
 const CONST_DECLS = ['isTopicUid', 'formatScanDiff', 'EMBED_MATCH_THRESHOLD', 'INK_CELL', 'INK_MIN_PIXELS', 'INK_WHITE_CUTOFF', 'INK_GAMMA', 'SPLINE_SEG'];
 
@@ -67,6 +84,7 @@ const factory = new Function('self', 'katex', `
     scanDirectiveBlock,
     md, renderTable,
     inkBoundingBox, enhanceInkContrast, catmullRomPts,
+    repairJson, parseJsonLoose, parseJsonResponse, salvageTruncatedJson,
     _setUids: m => { topicUids = m; },
     _getUids: () => topicUids,
     _setPath: p => { __path = p; },
@@ -575,6 +593,29 @@ group('catmullRomPts — Spline-Glättung der Striche (#6)', () => {
   ok(withP[5].p > 0.2 && withP[5].p < 0.8, 'Druck wird zwischen Stützpunkten interpoliert');
   const noP = M.catmullRomPts([{ x: 0, y: 0 }, { x: 80, y: 0 }, { x: 160, y: 0 }]);
   ok(noP.every(p => p.p === undefined), 'ohne Druck-Eingabe kein p-Feld');
+});
+
+group('parseJsonResponse — JS-String-Konkatenation & SVG-Erhalt (v238)', () => {
+  // Kernfall: Modell splittet einen langen Wert per JS-Konkatenation ("…" + "<svg…>").
+  // Ungültiges JSON → früher kappte salvage genau am '+' und das eingebettete SVG
+  // (plus Folgefelder) ging verloren. repairJson führt die Literale jetzt zusammen.
+  const concat = '{"was":"Erklärung Teil eins.\\n\\n" + "<svg viewBox=\'0 0 300 260\'><line x1=\'0\' y1=\'0\' x2=\'9\' y2=\'9\'/></svg>","warum":"weil wichtig","beispiel":"konkret"}';
+  const d = M.parseJsonResponse(concat);
+  ok(d && d.was && d.warum && d.beispiel, 'alle drei Felder überleben die Konkatenation');
+  ok(/<svg/.test(d.was || ''), 'eingebettetes SVG bleibt im Wert erhalten');
+  eq(d.warum, 'weil wichtig', 'Folgefeld nach dem SVG geht nicht verloren');
+
+  // Mehrfach-Konkatenation in einem Wert.
+  const triple = M.parseJsonResponse('{"x":"a" + "b" + "c"}');
+  eq(triple.x, 'abc', 'mehrere + zusammengeführt');
+
+  // Regression: sauberes JSON bleibt unangetastet.
+  eq(JSON.stringify(M.parseJsonResponse('{"a":"hi","b":2}')), '{"a":"hi","b":2}', 'sauberes JSON unverändert');
+  // Regression: ein escaptes Quote-Plus-Quote als String-INHALT wird NICHT
+  // fälschlich als Konkatenation gemerged (Lookbehind schützt das \\").
+  eq(M.parseJsonResponse('{"x":"sag \\" + \\" ende"}').x, 'sag " + " ende', 'escaptes \\" + \\" bleibt Inhalt');
+  // Newline-in-String (bestehender repairJson-Pfad) funktioniert weiter.
+  eq(M.parseJsonResponse('{"t":"zeile1\nzeile2"}').t, 'zeile1\nzeile2', 'literaler Zeilenumbruch im String gerettet');
 });
 
 // ── Ergebnis ──────────────────────────────────────────────────────────────────

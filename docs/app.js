@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '237';
+const APP_VERSION = '238';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -525,6 +525,13 @@ function claudeLocalKb(messages, prompt, maxTokens = 2000, query = '', opts = {}
 // Escape the most common local-model JSON breakage: literal newline/CR/tab
 // characters inside string values, which make JSON.parse throw.
 function repairJson(s) {
+  // Manche Modelle splitten lange Werte als JS-String-Konkatenation
+  // ("...text\n\n" + "<svg …>") – in JSON ungültig, JSON.parse stirbt am '+'
+  // und salvageTruncatedJson kappt den Wert genau davor (→ eingebettetes SVG/
+  // Diagramm + Folgefelder gehen verloren). Zwei per '+' verbundene String-
+  // Literale zu einem zusammenführen. Negativer Lookbehind schützt ein
+  // escaptes Quote (\") davor, fälschlich als Stringgrenze gewertet zu werden.
+  s = s.replace(/(?<!\\)"\s*\+\s*"/g, '');
   let inStr = false, esc = false, out = '';
   for (const c of s) {
     if (esc)        { out += c; esc = false; continue; }
