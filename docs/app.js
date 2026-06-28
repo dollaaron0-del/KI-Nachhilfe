@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '240';
+const APP_VERSION = '242';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -2029,6 +2029,27 @@ async function handleUpload(files) {
       // Keep existing topics/structure – user can re-scan manually if needed
       if (scannedTopics.length || moduleStructure) {
         toast('Neues Dokument hinzugefügt. Themen neu erkennen? → Lernen-Tab → "Themen erkennen"', 'info', 5000);
+      }
+
+      // KB-Index ist nach dem Upload VERALTET: die neuen Dokumente sind zwar
+      // serverseitig gespeichert, aber noch nicht eingebettet. Bliebe kbReady auf
+      // true, würde der schlanke KB-Pfad (claudeLocalKb mit omitDocs) gegen den
+      // alten Index suchen, das neue Material NICHT finden und für eine Aufgabe
+      // daraus eine LEERE/hängende Musterlösung bzw. Erklärung liefern. Darum:
+      // KB als nicht-bereit markieren → Generierung fällt sofort auf die vollen
+      // Inline-Unterlagen (frisches sessionTxt) zurück. Existierte schon eine KB,
+      // stoßen wir eine Neu-Indexierung an, die kbReady automatisch wieder auf
+      // true setzt, sobald die Einbettung steht (Fehlschlag bleibt unkritisch –
+      // der Inline-Fallback ist weiterhin vollständig).
+      const savedToServer = newFiles.some(f => !failedServer.includes(f.name));
+      if (savedToServer) {
+        const hadKb = kbReady;
+        kbReady = false;
+        if (hadKb) {
+          api(`/api/subjects/${sessionId}/kb/reindex`, { method: 'POST' })
+            .then(() => startKbPolling())
+            .catch(() => {});
+        }
       }
 
       await Promise.all([DB.setContent(sessionId, sessionTxt), DB.setMeta(sessionId, sessionMeta)]);
