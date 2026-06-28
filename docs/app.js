@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '243';
+const APP_VERSION = '244';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6576,13 +6576,26 @@ async function loadTopicContent(topic, forceFresh = false) {
     // parseJsonLoose scheiterte hier sporadisch → "Keine Erklärung erhalten".
     const data = parseJsonResponse(raw);
     if (!data) {
-      // Diagnose: parseJsonResponse liefert nur dann null, wenn die (200-er)
-      // Modell-Antwort gar kein rettbares JSON enthielt (z.B. SVG/Mermaid mit
-      // doppelten Anführungszeichen, die das JSON zerschießen). Die Rohantwort
-      // gekürzt in die Konsole, damit so ein Fall künftig sofort sichtbar ist
-      // statt nur als nichtssagendes "Keine Erklärung erhalten".
+      // parseJsonResponse liefert nur dann null, wenn die (200-er) Modell-Antwort
+      // gar kein rettbares JSON enthielt. Zwei Fälle:
+      // (a) Das Modell hat in KLARTEXT geantwortet statt JSON – meist eine
+      //     hilfreiche Begründung ("die Unterlagen zu diesem Thema sind nicht
+      //     lesbar, lade sie als echtes PDF hoch"). Diese Botschaft dem Nutzer
+      //     ZEIGEN, statt sie hinter "Keine Erklärung erhalten" zu verstecken.
+      // (b) JSON technisch zerschossen (z.B. SVG mit doppelten Anführungszeichen).
+      const prose = String(raw || '').replace(/```[a-z]*|```/gi, '').trim();
       console.error('[loadTopicContent] Erklärung nicht parsebar – Rohantwort (gekürzt):',
-        String(raw || '').slice(0, 2000) || '(leer)');
+        prose.slice(0, 2000) || '(leer)');
+      if (prose.length > 40 && !/[{}]/.test(prose.slice(0, 60))) {
+        // Sieht nach echtem Fließtext aus (kein abgehacktes JSON) → als Hinweis rendern.
+        stopProg();
+        document.getElementById('lernen-erkl-loading').style.display = 'none';
+        const b = document.getElementById('lernen-erkl-body');
+        b.innerHTML = `<div class="lernen-result-text" style="padding:16px">${safeHtml(md(prose))}</div>
+          <div style="padding:0 16px 16px"><button class="btn-secondary" onclick="retryLernenTopic()">🔄 Erneut versuchen</button></div>`;
+        b.classList.remove('hidden');
+        return;
+      }
       throw new Error('Keine Erklärung erhalten');
     }
     lernenTopicData = data;
