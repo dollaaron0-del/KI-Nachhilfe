@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '248';
+const APP_VERSION = '249';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6357,7 +6357,6 @@ function openUnit(unit) {
   // Reset step 1
   document.getElementById('lernen-erkl-loading').style.display = 'none';
   document.getElementById('lernen-erkl-body').classList.add('hidden');
-  document.getElementById('lernen-elaborate')?.classList.add('hidden');
   document.getElementById('lernen-step1-footer').classList.add('hidden');
   document.getElementById('lernen-tab-aufgabe').disabled = true;
   document.getElementById('lernen-done-btn').classList.add('hidden');
@@ -6595,29 +6594,7 @@ function renderTopicContent(topic, data) {
   const mEls = body.querySelectorAll('.mermaid');
   if (mEls.length && window.mermaid) mermaid.run({ nodes: mEls }).catch(() => {});
 
-  // Elaborative Interrogation: Reflexionsfrage nach der Erklärung.
-  // Nur bei frisch gelernten Themen; bei Wiederholung (bereits gelernt) überspringen.
-  const elabEl = document.getElementById('lernen-elaborate');
-  const isFresh = !learnedKeySet().has(learnedKey(topic, lernenCurrentDiff));
-  if (elabEl && isFresh) {
-    const templates = [
-      `Erkläre "${topic}" in deinen eigenen Worten – als würdest du es jemandem ohne Vorkenntnisse erklären.`,
-      `Warum ist "${topic}" wichtig, und wo begegnet dir das Konzept in der Praxis?`,
-      `Was ist das Kernprinzip hinter "${topic}"? Was wäre das Erste, was du jemandem darüber sagen würdest?`,
-      `Wie hängt "${topic}" mit anderen Konzepten zusammen, die du kennst?`,
-    ];
-    const q = templates[Math.floor(Math.random() * templates.length)];
-    const elabQ = document.getElementById('elaborate-q');
-    const elabIn = document.getElementById('elaborate-input');
-    if (elabQ) elabQ.textContent = '🤔 ' + q;
-    if (elabIn) elabIn.value = '';
-    elabEl.classList.remove('hidden');
-    // Keep step1-footer hidden until elaboration is confirmed/skipped
-    document.getElementById('lernen-step1-footer').classList.add('hidden');
-  } else {
-    if (elabEl) elabEl.classList.add('hidden');
-    document.getElementById('lernen-step1-footer').classList.remove('hidden');
-  }
+  document.getElementById('lernen-step1-footer').classList.remove('hidden');
 
   // Die "Aufgabe"-Tab ist IMMER anwählbar: Fehlt eine Aufgabe (Modell ließ "aufgabe"
   // weg oder das Erklärungs-JSON wurde am Token-Limit abgeschnitten), wird sie beim
@@ -6626,10 +6603,8 @@ function renderTopicContent(topic, data) {
   if (data.aufgabe && data.aufgabe.trim()) {
     document.getElementById('lernen-task-bar').innerHTML = safeHtml(md(data.aufgabe));
     document.getElementById('lernen-regen-btn').classList.remove('hidden');
-  } else if (!isFresh) {
-    // Thema ohne Übungsaufgabe: bei Wiederholung sofort abhakbar. Beim ERSTEN Mal
-    // erst nach der Reflexionsfrage (finishElaboration) – "fertig" soll überall
-    // mindestens aktives Erinnern bedeuten, nicht bloßes Lesen (#3).
+  } else {
+    // Thema ohne Übungsaufgabe: direkt abhakbar.
     document.getElementById('lernen-done-btn').classList.remove('hidden');
   }
   const valuesEl = document.getElementById('lernen-task-values');
@@ -6757,7 +6732,6 @@ function reloadLernenExplanation() {
   document.getElementById('lernen-erkl-body').classList.add('hidden');
   document.getElementById('lernen-step1-footer').classList.add('hidden');
   document.getElementById('lernen-done-btn').classList.add('hidden');
-  document.getElementById('lernen-elaborate')?.classList.add('hidden');
   loadTopicContent(topic, true);
 }
 
@@ -7788,17 +7762,6 @@ if (window.visualViewport) {
     if (h > 40) wrap.style.height = h + 'px';
   }).catch(() => {});
 }());
-
-// ── Elaboration controls ──────────────────────────────────────────────────
-function finishElaboration() {
-  document.getElementById('lernen-elaborate')?.classList.add('hidden');
-  document.getElementById('lernen-step1-footer')?.classList.remove('hidden');
-  // Themen ohne Übungsaufgabe: "fertig" erst jetzt – nach der Reflexion – freigeben (#3).
-  if (!(lernenTopicData?.aufgabe && lernenTopicData.aufgabe.trim()))
-    document.getElementById('lernen-done-btn')?.classList.remove('hidden');
-}
-document.getElementById('elaborate-skip')?.addEventListener('click', finishElaboration);
-document.getElementById('elaborate-go')?.addEventListener('click', finishElaboration);
 
 // Lernen topic view controls
 document.getElementById('lernen-back-btn')?.addEventListener('click', closeLernenTopic);

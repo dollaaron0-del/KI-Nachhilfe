@@ -2236,22 +2236,6 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 }
 
 /* ── Elaborative Interrogation ──────────────────────────────────────── */
-.lernen-elaborate {
-  margin: 16px 16px 0; padding: 14px 16px; border-radius: 12px;
-  background: rgba(52,199,89,.07); border: 1.5px solid rgba(52,199,89,.3);
-}
-.elaborate-q {
-  font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 10px;
-  line-height: 1.5;
-}
-.elaborate-input {
-  width: 100%; border: 1.5px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; font-size: 14px; font-family: inherit; color: var(--text);
-  background: var(--surface); outline: none; resize: none; line-height: 1.5;
-  margin-bottom: 10px;
-}
-.elaborate-input:focus { border-color: var(--green); }
-.elaborate-row { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ══ DEMO / PRÄSENTATIONS-SHEET ══════════════════════════════════════════ */
 .demo-sheet { max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
