@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '245';
+const APP_VERSION = '246';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6433,28 +6433,35 @@ function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
   // Inhalt bleibt anspruchsvoll (Methode weiterhin NICHT vorgesagt), aber der
   // Aufgabentext ist nach einmaligem Lesen eindeutig verständlich.
   const klar = ` KLARE FORMULIERUNG (verbindlich, unabhängig vom Niveau): Die Herausforderung liegt im LÖSEN der Aufgabe, niemals im Entschlüsseln der Frage. Formuliere jeden (Teil-)Auftrag in klaren, vollständigen Sätzen mit einem konkreten, greifbaren Szenario und einer eindeutigen Handlungsaufforderung ("Berechne …", "Bestimme …", "Erläutere …", "Begründe …", "Vergleiche …"). Sage klar, WELCHE Form/Art von Ergebnis erwartet wird (Zahl mit Einheit, Begründung in Sätzen, Vergleich, Skizze) – das verrät NICHT die Methode. Vermeide verschachtelte Schachtelsätze, gestapelten Nominalstil und weggelassene Bezugswörter. Wenn ein Fachbegriff nötig ist, verwende ihn korrekt, aber baue die Aufgabe nicht künstlich kompliziert im Ausdruck. Prüfe vor der Ausgabe: Wüsste ein/e Studierende/r nach EINMALIGEM Lesen genau, WAS zu tun ist? Wenn nein, formuliere klarer.`;
-  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen. Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab. WENN ein späterer Teil (Interpretation, Diskussion, Begründung, ökonomische Einordnung, "Erläutere"/"Diskutiere") inhaltlich auf dem ZAHLENERGEBNIS eines früheren Rechen-Teils aufbaut, MUSS der Aufgabentext dieses Teils ausdrücklich den Bezug auf die selbst berechneten Werte verlangen – formuliere es unmissverständlich (z.B. "Interpretiere dein in Teil a) berechnetes Ergebnis …", "Begründe anhand deiner Werte aus a), warum …"). Es darf NICHT offen bleiben, ob eine allgemeine oder eine zahlengestützte Antwort erwartet wird; verlange den Zahlenbezug explizit.${klar}`;
+  // Aufgabenform folgt dem Thementyp, NICHT der Stufe: Viele Fächer (z.B. Marketing)
+  // sind überwiegend konzeptuell – die echten Klausuren fragen "Erläutern/Definieren/
+  // Vergleichen Sie …", nicht "Berechnen Sie". Das Modell neigte aber dazu, überall
+  // Rechnungen zu erzwingen (die per-Stufe-Vorgaben "Rechenbeispiel/Rechenschritt"
+  // wirkten wie Pflicht). Diese Regel gated Rechnen auf tatsächlich quantitative
+  // Themen und macht die Schreib-/Verständnisaufgabe zum gleichberechtigten Normalfall.
+  const modus = ` AUFGABENFORM RICHTET SICH NACH DEM THEMA (nicht nach der Stufe): Prüfe anhand der Unterlagen, ob das Thema tatsächlich quantitativ ist (Formeln, Kennzahlen, Rechengrößen – z.B. Deckungsbeitrag, Preiselastizität, Break-even, Zinsen, Statistik). NUR dann ist eine Rechenaufgabe angemessen. Für konzeptuelle/theoretische Themen (Definitionen, Modelle, Strategien, Zusammenhänge, Argumentation) stelle eine SCHREIB-/VERSTÄNDNISAUFGABE im Stil der echten Klausur ("Erläutern Sie …", "Definieren und veranschaulichen Sie …", "Vergleichen Sie …", "Diskutieren Sie …", "Begründen Sie …", "Nennen und erklären Sie …"). Erzwinge NIEMALS Zahlen oder Rechnungen, wo der Stoff keine hergibt – eine erfundene Rechnung ist ein Fehler. Richte dich danach, welche Aufgabenform die Unterlagen und Prüfungsaufgaben zu genau diesem Thema nahelegen.`;
+  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen (z.B. a) erklären/berechnen, b) anwenden, c) bewerten/diskutieren). Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab. NUR falls die Aufgabe überhaupt einen Rechen-Teil enthält UND ein späterer Teil (Interpretation, Diskussion, Begründung, ökonomische Einordnung) inhaltlich auf dessen ZAHLENERGEBNIS aufbaut, MUSS der Aufgabentext dieses Teils den Bezug auf die selbst berechneten Werte ausdrücklich verlangen (z.B. "Interpretiere dein in Teil a) berechnetes Ergebnis …") – es darf dann nicht offen bleiben, ob eine allgemeine oder zahlengestützte Antwort erwartet wird.${klar}`;
   switch (effLevel.diff) {
     case 'leicht':
       return `Niveau: GRUNDLAGEN (Stufe 2 von 5).
-ERKLÄRUNG: Erkläre das Konzept von Grund auf. Kein Fachwissen voraussetzen. Nutze alltagsnahe Analogien und sehr einfache Zahlen. "Was ist das?" = intuitive Definition mit Alltagsbeispiel. "Warum wichtig?" = praktischer Nutzen in einfachen Worten. "Beispiel" = konkretes Beispiel mit kleinen, runden Zahlen. Rechenbeispiel: falls vorhanden, nur ein einziger Schritt.
-AUFGABE: Eine sehr einfache Aufgabe, ein Rechenschritt, kleine Zahlen.`;
+ERKLÄRUNG: Erkläre das Konzept von Grund auf. Kein Fachwissen voraussetzen. Nutze alltagsnahe Analogien. "Was ist das?" = intuitive Definition mit Alltagsbeispiel. "Warum wichtig?" = praktischer Nutzen in einfachen Worten. "Beispiel" = konkretes Beispiel. Rechenbeispiel: NUR wenn das Thema quantitativ ist, dann ein einziger einfacher Schritt mit kleinen Zahlen; sonst leer lassen.
+AUFGABE: Eine sehr einfache Aufgabe. Bei quantitativen Themen ein Rechenschritt mit kleinen Zahlen, sonst eine kurze Verständnis-/Definitionsfrage.${modus}`;
     case 'mittel':
       return `Niveau: LERNENDER (Stufe 3 von 5).
-ERKLÄRUNG: Erkläre das Konzept klar mit korrekten Fachbegriffen. "Was ist das?" = präzise Definition + Fachbegriff erläutern. "Warum wichtig?" = Relevanz im Fachkontext, nicht nur Alltag. "Beispiel" = realistisches Szenario mit mehreren Variablen. Rechenbeispiel: 2-3 Rechenschritte mit Zwischenergebnissen.
-AUFGABE: Mittelschwere Aufgabe mit 2-3 Rechenschritten, realistisches Szenario.`;
+ERKLÄRUNG: Erkläre das Konzept klar mit korrekten Fachbegriffen. "Was ist das?" = präzise Definition + Fachbegriff erläutern. "Warum wichtig?" = Relevanz im Fachkontext, nicht nur Alltag. "Beispiel" = realistisches Szenario. Rechenbeispiel: NUR bei quantitativen Themen, dann 2-3 Rechenschritte mit Zwischenergebnissen; sonst leer lassen.
+AUFGABE: Mittelschwere Aufgabe mit realistischem Szenario. Bei quantitativen Themen 2-3 Rechenschritte, bei konzeptuellen Themen eine Erläuterungs-/Anwendungsfrage.${modus}`;
     case 'schwer':
       return `Niveau: FORTGESCHRITTEN (Stufe 4 von 5).
-ERKLÄRUNG: Gehe in die Tiefe. "Was ist das?" = vollständige fachliche Definition inkl. Randfälle und Einschränkungen. "Warum wichtig?" = Verbindung zu anderen Konzepten, theoretischer Hintergrund. "Beispiel" = komplexes Praxisbeispiel mit mehreren Einflussgrößen. Rechenbeispiel: mehrstufig, zeige alle Zwischenschritte und erkläre WARUM jeder Schritt nötig ist.
-AUFGABE: Eine zusammengesetzte, klausurnahe Aufgabe.${integrate}${examSnippet}`;
+ERKLÄRUNG: Gehe in die Tiefe. "Was ist das?" = vollständige fachliche Definition inkl. Randfälle und Einschränkungen. "Warum wichtig?" = Verbindung zu anderen Konzepten, theoretischer Hintergrund. "Beispiel" = komplexes Praxisbeispiel mit mehreren Einflussgrößen. Rechenbeispiel: NUR bei quantitativen Themen, dann mehrstufig – zeige alle Zwischenschritte und erkläre WARUM jeder Schritt nötig ist; sonst leer lassen.
+AUFGABE: Eine zusammengesetzte, klausurnahe Aufgabe.${integrate}${modus}${examSnippet}`;
     case 'pruefungsnah':
       return `Niveau: EXPERTE (Stufe 5 von 5).
-ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: vollständig ausformuliert mit Formelangaben, Einheiten, Interpretation des Ergebnisses.
-AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil. Präzise Fachbegriffe wie in einer Prüfung – aber klar strukturiert und unmissverständlich, NICHT künstlich verschachtelt.${integrate}${examSnippet}`;
+ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: NUR bei quantitativen Themen, dann vollständig ausformuliert mit Formelangaben, Einheiten und Interpretation des Ergebnisses; sonst leer lassen.
+AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil. Präzise Fachbegriffe wie in einer Prüfung – aber klar strukturiert und unmissverständlich, NICHT künstlich verschachtelt.${integrate}${modus}${examSnippet}`;
     default:
       return `Niveau: EINSTEIGER (Stufe 1 von 5).
-ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn unbedingt nötig, dann maximal ein Schritt.
-AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.`;
+ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn das Thema quantitativ ist und es unbedingt nötig ist, dann maximal ein Schritt.
+AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.${modus}`;
   }
 }
 
