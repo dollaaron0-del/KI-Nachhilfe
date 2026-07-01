@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '249';
+const APP_VERSION = '250';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6517,7 +6517,7 @@ function buildGraphikBlock(query) {
   return `\n- GRAFIK (nur wenn das Thema ein Standard-Koordinatenmodell besitzt, z.B. Funktionsgraph, Kräfte-/Phasendiagramm): Zeichne EIN kompaktes Inline-SVG (viewBox '0 0 320 260'). REGELN für exakte Ausrichtung – strikt befolgen: (1) Zeichne Kurven als GERADE <line>, nicht als Bézier – nur so ist der Schnittpunkt berechenbar. (2) Bestimme den Schnittpunkt der beiden Geraden ALGEBRAISCH und setze den Punkt, die gestrichelten Projektionslinien UND die Achsen-Ticks (z.B. i*, Y*) auf GENAU diese Koordinaten – kein Augenmaß. (3) Achsen bei x=45 (senkrecht) und y=215 (waagerecht); ALLE Beschriftungen müssen innerhalb x∈[45,305] und y∈[25,215] bleiben; Labels nahe dem rechten Rand mit text-anchor='end'; setze KEIN Textlabel auf eine Linie. (4) Ausschließlich EINFACHE Anführungszeichen im SVG (viewBox='…'), niemals doppelte. (5) Wenn das Modell eine Verschiebung kennt: zweite, gestrichelte Kurve + kleiner Pfeil + neues Gleichgewicht.${koppel}`;
 }
 
-function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
+function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '', isSolo = false) {
   const examSnippet = examCtx && examCtx.trim()
     ? `\n\nKLAUSUR-REFERENZ: Orientiere dich an Aufgabentyp, Stil und Komplexität folgender Prüfungsunterlagen. Mimiere deren Formulierungen, Notation und Schwierigkeitsgrad:\n${examCtx.slice(0, 8000)}`
     : '';
@@ -6542,28 +6542,36 @@ function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
   // wirkten wie Pflicht). Diese Regel gated Rechnen auf tatsächlich quantitative
   // Themen und macht die Schreib-/Verständnisaufgabe zum gleichberechtigten Normalfall.
   const modus = ` AUFGABENFORM RICHTET SICH NACH DEM THEMA (nicht nach der Stufe): Prüfe anhand der Unterlagen, ob das Thema tatsächlich quantitativ ist (Formeln, Kennzahlen, Rechengrößen – z.B. Deckungsbeitrag, Preiselastizität, Break-even, Zinsen, Statistik). NUR dann ist eine Rechenaufgabe angemessen. Für konzeptuelle/theoretische Themen (Definitionen, Modelle, Strategien, Zusammenhänge, Argumentation) stelle eine SCHREIB-/VERSTÄNDNISAUFGABE im Stil der echten Klausur ("Erläutern Sie …", "Definieren und veranschaulichen Sie …", "Vergleichen Sie …", "Diskutieren Sie …", "Begründen Sie …", "Nennen und erklären Sie …"). Erzwinge NIEMALS Zahlen oder Rechnungen, wo der Stoff keine hergibt – eine erfundene Rechnung ist ein Fehler. Richte dich danach, welche Aufgabenform die Unterlagen und Prüfungsaufgaben zu genau diesem Thema nahelegen.`;
+  // Geschwister-Abgrenzung (nur für Einzel-Themen, NICHT für zusammengesetzte
+  // Einheiten – dort SIND die Themen ja der Gegenstand). Ohne dieses Signal holten
+  // zwei inhaltlich angrenzende Nachbarthemen dieselbe KB-Sektion und erzeugten
+  // identische Erklärung + Aufgabe (z.B. "Fünf-Kräfte Modell Porter" tauchte auch
+  // bei "Wettbewerbsanalyse Dimensionen" auf). Greift auf ALLEN Stufen.
+  const abgrenzung = (isSolo && siblings.length)
+    ? ` THEMEN-ABGRENZUNG (verbindlich): Dieses Thema ist Teil eines Kapitels mit weiteren, EIGENSTÄNDIGEN Nachbarthemen: ${siblings.slice(0, 5).join(', ')}. Behandle AUSSCHLIESSLICH den eigenen Kern DIESES Themas – breite den Stoff der Nachbarthemen weder in der Erklärung noch in der Aufgabe aus. Trägt ein Konzept den Namen eines Nachbarthemas (z.B. gibt es ein eigenes Nachbarthema "Fünf-Kräfte Modell Porter"), gehört seine ausführliche Behandlung DORTHIN – hier höchstens kurz nennen und klar abgrenzen. Zwei Nachbarthemen desselben Kapitels dürfen NIEMALS dieselbe Erklärung oder dieselbe Aufgabe ergeben.`
+    : '';
   const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen (z.B. a) erklären/berechnen, b) anwenden, c) bewerten/diskutieren). Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab. NUR falls die Aufgabe überhaupt einen Rechen-Teil enthält UND ein späterer Teil (Interpretation, Diskussion, Begründung, ökonomische Einordnung) inhaltlich auf dessen ZAHLENERGEBNIS aufbaut, MUSS der Aufgabentext dieses Teils den Bezug auf die selbst berechneten Werte ausdrücklich verlangen (z.B. "Interpretiere dein in Teil a) berechnetes Ergebnis …") – es darf dann nicht offen bleiben, ob eine allgemeine oder zahlengestützte Antwort erwartet wird.${klar}`;
   switch (effLevel.diff) {
     case 'leicht':
       return `Niveau: GRUNDLAGEN (Stufe 2 von 5).
 ERKLÄRUNG: Erkläre das Konzept von Grund auf. Kein Fachwissen voraussetzen. Nutze alltagsnahe Analogien. "Was ist das?" = intuitive Definition mit Alltagsbeispiel. "Warum wichtig?" = praktischer Nutzen in einfachen Worten. "Beispiel" = konkretes Beispiel. Rechenbeispiel: NUR wenn das Thema quantitativ ist, dann ein einziger einfacher Schritt mit kleinen Zahlen; sonst leer lassen.
-AUFGABE: Eine sehr einfache Aufgabe. Bei quantitativen Themen ein Rechenschritt mit kleinen Zahlen, sonst eine kurze Verständnis-/Definitionsfrage.${modus}`;
+AUFGABE: Eine sehr einfache Aufgabe. Bei quantitativen Themen ein Rechenschritt mit kleinen Zahlen, sonst eine kurze Verständnis-/Definitionsfrage.${modus}${abgrenzung}`;
     case 'mittel':
       return `Niveau: LERNENDER (Stufe 3 von 5).
 ERKLÄRUNG: Erkläre das Konzept klar mit korrekten Fachbegriffen. "Was ist das?" = präzise Definition + Fachbegriff erläutern. "Warum wichtig?" = Relevanz im Fachkontext, nicht nur Alltag. "Beispiel" = realistisches Szenario. Rechenbeispiel: NUR bei quantitativen Themen, dann 2-3 Rechenschritte mit Zwischenergebnissen; sonst leer lassen.
-AUFGABE: Mittelschwere Aufgabe mit realistischem Szenario. Bei quantitativen Themen 2-3 Rechenschritte, bei konzeptuellen Themen eine Erläuterungs-/Anwendungsfrage.${modus}`;
+AUFGABE: Mittelschwere Aufgabe mit realistischem Szenario. Bei quantitativen Themen 2-3 Rechenschritte, bei konzeptuellen Themen eine Erläuterungs-/Anwendungsfrage.${modus}${abgrenzung}`;
     case 'schwer':
       return `Niveau: FORTGESCHRITTEN (Stufe 4 von 5).
 ERKLÄRUNG: Gehe in die Tiefe. "Was ist das?" = vollständige fachliche Definition inkl. Randfälle und Einschränkungen. "Warum wichtig?" = Verbindung zu anderen Konzepten, theoretischer Hintergrund. "Beispiel" = komplexes Praxisbeispiel mit mehreren Einflussgrößen. Rechenbeispiel: NUR bei quantitativen Themen, dann mehrstufig – zeige alle Zwischenschritte und erkläre WARUM jeder Schritt nötig ist; sonst leer lassen.
-AUFGABE: Eine zusammengesetzte, klausurnahe Aufgabe.${integrate}${modus}${examSnippet}`;
+AUFGABE: Eine zusammengesetzte, klausurnahe Aufgabe.${integrate}${modus}${abgrenzung}${examSnippet}`;
     case 'pruefungsnah':
       return `Niveau: EXPERTE (Stufe 5 von 5).
 ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: NUR bei quantitativen Themen, dann vollständig ausformuliert mit Formelangaben, Einheiten und Interpretation des Ergebnisses; sonst leer lassen.
-AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil. Präzise Fachbegriffe wie in einer Prüfung – aber klar strukturiert und unmissverständlich, NICHT künstlich verschachtelt.${integrate}${modus}${examSnippet}`;
+AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil. Präzise Fachbegriffe wie in einer Prüfung – aber klar strukturiert und unmissverständlich, NICHT künstlich verschachtelt.${integrate}${modus}${abgrenzung}${examSnippet}`;
     default:
       return `Niveau: EINSTEIGER (Stufe 1 von 5).
 ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn das Thema quantitativ ist und es unbedingt nötig ist, dann maximal ein Schritt.
-AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.${modus}`;
+AUFGABE: Sehr einfache Aufgabe, intuitiv lösbar.${modus}${abgrenzung}`;
   }
 }
 
@@ -6637,7 +6645,12 @@ async function loadTopicContent(topic, forceFresh = false) {
   // Satz (Cluster/Kapitel). Composite → die Member sind der Integrations-Satz.
   const unit = curUnit();
   const isComposite = unit.kind !== 'topic';
-  const sibs = isComposite ? unit.themen : (useExam ? chapterSiblings(topic) : []);
+  // Geschwister IMMER mitgeben (nicht nur im Klausur-Pfad): sonst weiß das Modell auf
+  // der Lern-Stufe nicht, dass ein benachbartes Thema eigenständig ist, und zwei
+  // inhaltlich angrenzende Themen (z.B. "Fünf-Kräfte Modell Porter" und
+  // "Wettbewerbsanalyse Dimensionen") holen dieselbe KB-Sektion → identische
+  // Erklärung + Aufgabe. Die Abgrenzungs-Klausel (getDiffInstr) zieht die Grenze.
+  const sibs = isComposite ? unit.themen : chapterSiblings(topic);
   const lernziel = unit.lernziel || chapterOf(unit.themen[0])?.lernziel || chapterOf(topic)?.lernziel || '';
   const subjectClause = isComposite
     ? `die folgenden zusammengehörenden Themen GEMEINSAM als EINE Lerneinheit: ${unit.themen.join(', ')}`
@@ -6645,7 +6658,7 @@ async function loadTopicContent(topic, forceFresh = false) {
   const compositeNote = isComposite
     ? `\n- Dies ist EINE zusammengesetzte Einheit: gib eine kompakte gemeinsame Einordnung (nicht jedes Thema einzeln durchdeklinieren) und in "aufgabe" GENAU EINE integrierte, mehrteilige Aufgabe, die die Themen verbindet.\n- Baut ein Schreib-/Interpretationsteil auf dem Zahlenergebnis eines früheren Rechen-Teils auf, verlange im Aufgabentext ausdrücklich den Bezug auf die selbst berechneten Werte (z.B. "Interpretiere dein Ergebnis aus Teil a) …") – nicht offen lassen, ob allgemein oder zahlengestützt geantwortet werden soll.`
     : '';
-  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
+  const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel, !isComposite);
   const kbQ = isComposite ? unit.themen.join(', ') : topic;
   const graphik = buildGraphikBlock(kbQ);
   const scope = lernenScope();
@@ -6748,10 +6761,10 @@ async function regenLernenTask(opts = {}) {
     const useExam = effLevel.diff === 'schwer' || effLevel.diff === 'pruefungsnah';
     const unit = curUnit();
     const isComposite = unit.kind !== 'topic';
-    const sibs = isComposite ? unit.themen : (useExam ? chapterSiblings(topic) : []);
+    const sibs = isComposite ? unit.themen : chapterSiblings(topic);
     const lernziel = unit.lernziel || chapterOf(unit.themen[0])?.lernziel || chapterOf(topic)?.lernziel || '';
     const gegenstand = isComposite ? `zur Einheit "${topic}" (Themen: ${unit.themen.join(', ')})` : `zum Thema "${topic}"`;
-    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
+    const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel, !isComposite);
     const kbQ = isComposite ? unit.themen.join(', ') : topic;
     const scope = lernenScope();
     await hydrateTaskHist(scope);   // Avoid-Liste der zuletzt gestellten Aufgaben laden
