@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '247';
+const APP_VERSION = '248';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6345,6 +6345,8 @@ function openUnit(unit) {
   if (valuesEl) { valuesEl.innerHTML = ''; valuesEl.classList.add('hidden'); }
   const resultBar = document.getElementById('lernen-result-bar');
   if (resultBar) { resultBar.innerHTML = ''; resultBar.className = 'lernen-result-bar hidden'; }
+  const taReset = document.getElementById('lernen-text-answer');
+  if (taReset) taReset.value = '';   // Antworttext des vorherigen Themas nicht mitschleppen
   lernenAnswerMode = 'canvas';
   document.getElementById('lernen-draw-tools').style.display = 'contents';
   document.getElementById('lernen-canvas-wrap').classList.remove('hidden');
