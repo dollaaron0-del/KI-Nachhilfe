@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '246';
+const APP_VERSION = '247';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6415,6 +6415,107 @@ async function loadExamDocContext(subjId) {
   return '';
 }
 
+// ── Kanonische Diagramm-Vorlagen (v247) ──────────────────────────────────────
+// Das Modell zeichnete Koordinaten-Diagramme (IS-LM etc.) freihändig und traf
+// Schnittpunkt, Achsen-Ticks und Label-Ränder nicht konsistent (Punkt neben dem
+// echten Kurvenschnitt, Schrift über Linien / außerhalb der Grafik, keine
+// Verschiebung erklärt). Für die klassischen Standard-Modelle geben wir daher ein
+// GEPRÜFTES, exakt ausgerichtetes SVG-Gerüst vor (Schnittpunkt algebraisch
+// bestimmt, gestrichelte Projektionen + Achsen-Ticks darauf gesetzt, Verschiebung
+// samt neuem Gleichgewicht vordefiniert). Das Modell tauscht nur Beschriftungen,
+// erfindet keine Koordinaten mehr. viewBox 0 0 320 260, Plot-Box x∈[45,305] y∈[25,215].
+const _DIAG_AX = `
+  <line x1='45' y1='215' x2='305' y2='215' stroke='#333' stroke-width='1.5'/>
+  <line x1='45' y1='215' x2='45' y2='25' stroke='#333' stroke-width='1.5'/>`;
+const DIAGRAM_SCAFFOLDS = [
+  { name: 'IS-LM', keys: ['is-lm','is/lm','islm','is lm','is–lm','gütermarkt','geldmarkt'],
+    hint: 'IS fällt, LM steigt; Punkt A = simultanes Gleichgewicht (Y*, i*). Die gestrichelte IS\' zeigt eine Rechtsverschiebung (z.B. expansive Fiskalpolitik, G steigt) mit neuem Gleichgewicht B.',
+    svg: `<svg viewBox='0 0 320 260' xmlns='http://www.w3.org/2000/svg'>${_DIAG_AX}
+  <text x='302' y='234' font-size='11' text-anchor='end' fill='#333'>Y</text>
+  <text x='33' y='34' font-size='11' fill='#333'>i</text>
+  <line x1='70' y1='190' x2='270' y2='60' stroke='#1f77b4' stroke-width='2.5'/>
+  <text x='274' y='62' font-size='11' fill='#1f77b4' font-weight='bold'>LM</text>
+  <line x1='70' y1='60' x2='270' y2='190' stroke='#d62728' stroke-width='2.5'/>
+  <text x='274' y='192' font-size='11' fill='#d62728' font-weight='bold'>IS</text>
+  <line x1='110' y1='60' x2='300' y2='184' stroke='#d62728' stroke-width='1.8' stroke-dasharray='5,3'/>
+  <text x='302' y='176' font-size='10' fill='#d62728' text-anchor='end'>IS'</text>
+  <line x1='170' y1='125' x2='170' y2='215' stroke='#888' stroke-width='1' stroke-dasharray='4,3'/>
+  <line x1='45' y1='125' x2='170' y2='125' stroke='#888' stroke-width='1' stroke-dasharray='4,3'/>
+  <circle cx='170' cy='125' r='3.5' fill='#000'/>
+  <text x='157' y='120' font-size='11' font-weight='bold'>A</text>
+  <circle cx='190' cy='112' r='3.5' fill='#000'/>
+  <text x='196' y='109' font-size='11' font-weight='bold'>B</text>
+  <line x1='174' y1='122' x2='186' y2='114' stroke='#000' stroke-width='1.2'/>
+  <polygon points='187,113 181,114 184,119' fill='#000'/>
+  <text x='40' y='129' font-size='10' text-anchor='end'>i*</text>
+  <text x='170' y='229' font-size='10' text-anchor='middle'>Y*</text>
+</svg>` },
+  { name: 'Angebot/Nachfrage', keys: ['angebot','nachfrage','marktgleichgewicht','marktdiagramm','angebot und nachfrage','angebots-','preisbildung'],
+    hint: 'A = Angebot (steigend), N = Nachfrage (fallend); Punkt 1 = Marktgleichgewicht (P*, Q*). Die gestrichelte N\' zeigt eine Nachfrage-Rechtsverschiebung mit neuem Gleichgewicht 2 (P und Q steigen).',
+    svg: `<svg viewBox='0 0 320 260' xmlns='http://www.w3.org/2000/svg'>${_DIAG_AX}
+  <text x='302' y='234' font-size='11' text-anchor='end' fill='#333'>Menge</text>
+  <text x='52' y='36' font-size='11' fill='#333'>Preis</text>
+  <line x1='70' y1='190' x2='270' y2='60' stroke='#1f77b4' stroke-width='2.5'/>
+  <text x='274' y='62' font-size='11' fill='#1f77b4' font-weight='bold'>A</text>
+  <line x1='70' y1='60' x2='270' y2='190' stroke='#d62728' stroke-width='2.5'/>
+  <text x='274' y='192' font-size='11' fill='#d62728' font-weight='bold'>N</text>
+  <line x1='110' y1='60' x2='300' y2='184' stroke='#d62728' stroke-width='1.8' stroke-dasharray='5,3'/>
+  <text x='302' y='176' font-size='10' fill='#d62728' text-anchor='end'>N'</text>
+  <line x1='170' y1='125' x2='170' y2='215' stroke='#888' stroke-width='1' stroke-dasharray='4,3'/>
+  <line x1='45' y1='125' x2='170' y2='125' stroke='#888' stroke-width='1' stroke-dasharray='4,3'/>
+  <circle cx='170' cy='125' r='3.5' fill='#000'/>
+  <text x='155' y='120' font-size='11' font-weight='bold'>1</text>
+  <circle cx='190' cy='112' r='3.5' fill='#000'/>
+  <text x='196' y='109' font-size='11' font-weight='bold'>2</text>
+  <text x='40' y='129' font-size='10' text-anchor='end'>P*</text>
+  <text x='170' y='229' font-size='10' text-anchor='middle'>Q*</text>
+</svg>` },
+  { name: 'Phillips-Kurve', keys: ['phillips'],
+    hint: 'PC = kurzfristige Phillips-Kurve (fallend, Trade-off zwischen Inflation und Arbeitslosigkeit), LPC = langfristige Phillips-Kurve (senkrecht bei der natürlichen Arbeitslosenquote u_n). Punkt A liegt auf beiden.',
+    svg: `<svg viewBox='0 0 320 260' xmlns='http://www.w3.org/2000/svg'>${_DIAG_AX}
+  <text x='302' y='234' font-size='11' text-anchor='end' fill='#333'>u</text>
+  <text x='24' y='34' font-size='11' fill='#333'>&#960;</text>
+  <line x1='170' y1='40' x2='170' y2='215' stroke='#2ca02c' stroke-width='2' stroke-dasharray='6,3'/>
+  <text x='176' y='48' font-size='10' fill='#2ca02c'>LPC</text>
+  <line x1='70' y1='70' x2='270' y2='195' stroke='#d62728' stroke-width='2.5'/>
+  <text x='256' y='188' font-size='11' fill='#d62728' font-weight='bold'>PC</text>
+  <circle cx='170' cy='132.5' r='3.5' fill='#000'/>
+  <text x='178' y='128' font-size='10'>A</text>
+  <text x='170' y='229' font-size='10' text-anchor='middle'>u&#8345;</text>
+</svg>` },
+  { name: 'Indifferenzkurve/Budgetgerade', keys: ['indifferenz','budgetgerade','haushaltsoptimum','nutzenmaximierung','haushaltstheorie','budgetrestriktion'],
+    hint: 'IK = Indifferenzkurve (fallend, konvex zum Ursprung), Budget = Budgetgerade. Das Haushaltsoptimum "opt" liegt dort, wo die Budgetgerade die höchste erreichbare Indifferenzkurve TANGIERT (nicht schneidet).',
+    svg: `<svg viewBox='0 0 320 260' xmlns='http://www.w3.org/2000/svg'>${_DIAG_AX}
+  <text x='302' y='234' font-size='11' text-anchor='end' fill='#333'>Gut X</text>
+  <text x='50' y='36' font-size='11' fill='#333'>Gut Y</text>
+  <line x1='60' y1='105' x2='194' y2='205' stroke='#1f77b4' stroke-width='2.5'/>
+  <text x='150' y='196' font-size='10' fill='#1f77b4' text-anchor='end'>Budget</text>
+  <path d='M 70 80 Q 100 175 240 190' fill='none' stroke='#d62728' stroke-width='2.5'/>
+  <text x='244' y='190' font-size='10' fill='#d62728'>IK</text>
+  <line x1='119' y1='149' x2='119' y2='215' stroke='#888' stroke-width='1' stroke-dasharray='4,3'/>
+  <line x1='45' y1='149' x2='119' y2='149' stroke='#888' stroke-width='1' stroke-dasharray='4,3'/>
+  <circle cx='119' cy='149' r='3.5' fill='#000'/>
+  <text x='125' y='145' font-size='10' font-weight='bold'>opt</text>
+  <text x='119' y='229' font-size='10' text-anchor='middle'>X*</text>
+  <text x='40' y='153' font-size='10' text-anchor='end'>Y*</text>
+</svg>` },
+];
+function pickDiagramScaffold(query) {
+  const q = String(query || '').toLowerCase();
+  return DIAGRAM_SCAFFOLDS.find(d => d.keys.some(k => q.includes(k))) || null;
+}
+// Grafik-Anweisung für den Erklärungs-Prompt: entweder ein geprüftes Vorlage-
+// Gerüst (Standard-Modell erkannt) ODER strenge Koordinaten-Regeln als Fallback.
+// Immer inkl. Text↔Grafik-Kopplung + Pflicht zur Verschiebungs-Erklärung.
+function buildGraphikBlock(query) {
+  const koppel = `\n- TEXT ↔ GRAFIK (verbindlich, wenn eine Grafik vorhanden ist): Der Begleittext MUSS das Diagramm ABLESEN und DEUTEN, nicht nur erwähnen – benenne den markierten Punkt und was er bedeutet ("Punkt A markiert das Gleichgewicht (Y*, i*)"). Bei Modellen mit Verschiebung MUSST du erklären, WAS die Kurve verschiebt UND die Bewegung zum NEUEN Gleichgewicht in Worten nachzeichnen ("steigt die Staatsnachfrage G, verschiebt sich die IS-Kurve nach rechts zu IS'; das Gleichgewicht wandert von A nach B – Einkommen Y und Zins i steigen"). Der Text trägt die Deutung/das Warum, die Grafik die räumlichen Beziehungen – nicht doppelt beschreiben.`;
+  const scaf = pickDiagramScaffold(query);
+  if (scaf) {
+    return `\n- PFLICHT-GRAFIK (${scaf.name}): Übernimm GENAU dieses geprüfte, bereits exakt ausgerichtete SVG-Gerüst UNVERÄNDERT in den Koordinaten (Schnittpunkt, Achsen-Ticks und Verschiebung passen millimetergenau). Ändere NUR Farben/Beschriftungstexte, falls die Vorlesungsnotation abweicht – verschiebe NIEMALS Koordinaten und erfinde KEINE eigenen. Platziere das SVG FRÜH im Feld "was". ${scaf.hint}\nSVG-GERÜST:\n${scaf.svg}${koppel}`;
+  }
+  return `\n- GRAFIK (nur wenn das Thema ein Standard-Koordinatenmodell besitzt, z.B. Funktionsgraph, Kräfte-/Phasendiagramm): Zeichne EIN kompaktes Inline-SVG (viewBox '0 0 320 260'). REGELN für exakte Ausrichtung – strikt befolgen: (1) Zeichne Kurven als GERADE <line>, nicht als Bézier – nur so ist der Schnittpunkt berechenbar. (2) Bestimme den Schnittpunkt der beiden Geraden ALGEBRAISCH und setze den Punkt, die gestrichelten Projektionslinien UND die Achsen-Ticks (z.B. i*, Y*) auf GENAU diese Koordinaten – kein Augenmaß. (3) Achsen bei x=45 (senkrecht) und y=215 (waagerecht); ALLE Beschriftungen müssen innerhalb x∈[45,305] und y∈[25,215] bleiben; Labels nahe dem rechten Rand mit text-anchor='end'; setze KEIN Textlabel auf eine Linie. (4) Ausschließlich EINFACHE Anführungszeichen im SVG (viewBox='…'), niemals doppelte. (5) Wenn das Modell eine Verschiebung kennt: zweite, gestrichelte Kurve + kleiner Pfeil + neues Gleichgewicht.${koppel}`;
+}
+
 function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
   const examSnippet = examCtx && examCtx.trim()
     ? `\n\nKLAUSUR-REFERENZ: Orientiere dich an Aufgabentyp, Stil und Komplexität folgender Prüfungsunterlagen. Mimiere deren Formulierungen, Notation und Schwierigkeitsgrad:\n${examCtx.slice(0, 8000)}`
@@ -6569,12 +6670,13 @@ async function loadTopicContent(topic, forceFresh = false) {
     : '';
   const diffInstr = getDiffInstr(effLevel, useExam ? examDocContext : '', sibs, lernziel);
   const kbQ = isComposite ? unit.themen.join(', ') : topic;
+  const graphik = buildGraphikBlock(kbQ);
   const scope = lernenScope();
   await hydrateTaskHist(scope);   // Avoid-Liste der zuletzt gestellten Aufgaben laden
   try {
     const raw = await claudeLocalKb(
       [{ role: 'user', content: `Behandle ${subjectClause} auf dem vorgegebenen Niveau.` }],
-      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!${taskAvoidBlock(scope)}\n- ANSCHAULICHKEIT: Gestalte die Erklärung lebendig und einprägsam statt trocken. Nutze – aber NUR wo es das Verständnis wirklich fördert – passendes Anschauungsmaterial direkt in den Feldern "was", "vertiefung", "beispiel" oder "rechnung". Werkzeugkasten:\\n  • Bildhafte Analogien, Vergleiche und Eselsbrücken im Text (kurz und treffend).\\n  • Markdown-Vergleichstabellen (| Spalte | Spalte |) für Gegenüberstellungen, Vor-/Nachteile, Klassifikationen, Abgrenzungen.\\n  • Mermaid-Diagramme in \`\`\`mermaid … \`\`\`-Blöcken für Abläufe, Strukturen und Zusammenhänge: flowchart TD (Prozesse/Entscheidungen), mindmap (Konzept-Übersicht), sequenceDiagram (Interaktionen). Max. 8 Knoten, Labels KURZ und OHNE doppelte Anführungszeichen.\\n  • Inline-SVG für quantitative Skizzen/Koordinatengraphen (z.B. IS-LM, Angebot/Nachfrage, Funktionsgraphen, Phasen-/Kräftediagramme) – mit beschrifteten Achsen, benannten Kurven und (falls relevant) Verschiebungspfeilen samt neuem Gleichgewicht; kompakt (viewBox ~300×260, dünne Striche, lesbare Schrift). Auch im Rechenbeispiel ("rechnung") willkommen, wo eine Skizze den Rechenweg trägt: Zahlenstrahl, beschriftete Flächen-/Geometrieskizze, markiertes Gleichgewicht oder ein kurzer Funktionsgraph zum berechneten Wert.\\n  ABSOLUT WICHTIG für SVG UND Mermaid: ausschließlich EINFACHE Anführungszeichen verwenden (z.B. <svg viewBox='0 0 300 260'>), NIEMALS doppelte – doppelte zerstören das JSON. Lieber EIN treffendes Anschauungselement als mehrere überladene.\\n  PFLICHT-Grafik: Wenn das Thema ein klassisches grafisches Modell oder einen Koordinatengraphen besitzt (z.B. IS-LM, Angebot/Nachfrage, Marktgleichgewicht, Funktionsgraphen, Phasen-/Kräftediagramme, Indifferenzkurven), MUSST du das passende Inline-SVG einbauen und es NICHT weglassen. Platziere es möglichst FRÜH – direkt im Feld "was" – und halte es kompakt, damit es auch bei langen Erklärungen vollständig erhalten bleibt. Wenn ein Diagramm vorhanden ist, NUTZE es: der Begleittext soll sich darauf BEZIEHEN ("wie das Diagramm zeigt, …", "der Schnittpunkt A markiert …") statt in Worten nachzuerzählen, was das Bild schon zeigt. Lass das Diagramm die räumlichen/quantitativen Beziehungen tragen und beschränke den Text auf Deutung, Konsequenzen und das Warum – das spart Wiederholung und macht die Erklärung klarer, nicht kürzer um jeden Preis. Nur rein begriffliche/textuelle Themen (ohne Standard-Diagramm) dürfen ganz ohne Grafik auskommen.\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
+      `Behandle ${subjectClause} AUSSCHLIESSLICH auf Basis der bereitgestellten Unterlagen.\n\n${diffInstr}\n\nWICHTIG:${compositeNote}\n- Das Niveau beeinflusst ALLE Felder – Tiefe, Sprache, Komplexität.\n- Für konzeptuelle/theoretische Themen (ohne viel Mathematik): schreibe ausführliche, lehrreiche Texte. Kein künstliches Kürzen – so lang wie nötig für echtes Verständnis.\n- "vertiefung": Nutze dieses Feld für Hintergründe, Zusammenhänge mit anderen Konzepten, häufige Missverständnisse, historische Einordnung – alles was hilft das Thema wirklich zu durchdringen. Leer lassen wenn kein Mehrwert.\n- "rechnung": Nur befüllen wenn das Thema tatsächlich Rechenoperationen beinhaltet. Sonst leer lassen.\n- "werte": Nur bei Rechenaufgaben – Array mit den wichtigsten Zahlenwerten aus der Aufgabe (z.B. ["500 € Startkapital","8 % Zinssatz p.a."]). Bei konzeptuellen Aufgaben ohne Zahlenwerte: leeres Array [].\n- "aufgabe": Übungsaufgabe passend zum Niveau. Bei mehreren Teilfragen jede Frage auf einer neuen Zeile (trenne mit \\n\\n). NIEMALS Lösungen, Musterlösungen, Hinweise auf die Antworten oder Lösungswege im Aufgabentext!${taskAvoidBlock(scope)}\n- ANSCHAULICHKEIT: Gestalte die Erklärung lebendig und einprägsam statt trocken. Nutze – aber NUR wo es das Verständnis wirklich fördert – passendes Anschauungsmaterial direkt in den Feldern "was", "vertiefung", "beispiel" oder "rechnung". Werkzeugkasten:\\n  • Bildhafte Analogien, Vergleiche und Eselsbrücken im Text (kurz und treffend).\\n  • Markdown-Vergleichstabellen (| Spalte | Spalte |) für Gegenüberstellungen, Vor-/Nachteile, Klassifikationen, Abgrenzungen.\\n  • Mermaid-Diagramme in \`\`\`mermaid … \`\`\`-Blöcken für Abläufe, Strukturen und Zusammenhänge: flowchart TD (Prozesse/Entscheidungen), mindmap (Konzept-Übersicht), sequenceDiagram (Interaktionen). Max. 8 Knoten, Labels KURZ und OHNE doppelte Anführungszeichen.\\n  ${graphik}\n\nAntworte NUR als JSON-Objekt (kein Text davor/danach, keine Zeilenumbrüche im JSON außer \\n in Texten):\n{"was":"Vollständige Erklärung des Konzepts – so ausführlich wie nötig","warum":"Bedeutung und Relevanz – ausführlich begründet","vertiefung":"Vertiefung: Hintergründe, Zusammenhänge, Besonderheiten (leer lassen wenn nicht hilfreich)","beispiel":"Konkretes Praxisbeispiel passend zum Niveau","rechnung":"Schritt-für-Schritt Rechenbeispiel (nutze \\n zwischen Schritten). Leer lassen wenn kein Rechnen nötig.","aufgabe":"Aufgabentext ohne Lösungen. Jede Teilfrage auf eigener Zeile.","werte":[]}`,
       // Budget großzügig: eine ausführliche Erklärung MIT Inline-SVG (Diagramme
       // sind token-schwer) sprengte 6144/8192 → JSON-Abbruch mitten im SVG →
       // salvageTruncatedJson verwarf die Grafik. Haiku 4.5 kann bis 64k ausgeben;
