@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '244';
+const APP_VERSION = '245';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -6426,7 +6426,14 @@ function getDiffInstr(effLevel, examCtx, siblings = [], lernziel = '') {
     ? ` Verknüpfe es dabei mit verwandten Themen desselben Kapitels: ${siblings.slice(0, 4).join(', ')}.`
     : '';
   const zielTxt = lernziel ? ` Messlatte ist das Kapitel-Lernziel: "${lernziel}".` : '';
-  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen. Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab. WENN ein späterer Teil (Interpretation, Diskussion, Begründung, ökonomische Einordnung, "Erläutere"/"Diskutiere") inhaltlich auf dem ZAHLENERGEBNIS eines früheren Rechen-Teils aufbaut, MUSS der Aufgabentext dieses Teils ausdrücklich den Bezug auf die selbst berechneten Werte verlangen – formuliere es unmissverständlich (z.B. "Interpretiere dein in Teil a) berechnetes Ergebnis …", "Begründe anhand deiner Werte aus a), warum …"). Es darf NICHT offen bleiben, ob eine allgemeine oder eine zahlengestützte Antwort erwartet wird; verlange den Zahlenbezug explizit.`;
+  // Klarheit ≠ Leichtigkeit: Die Schwierigkeit steckt im Denken, NICHT in
+  // verklausulierter Sprache. Auf hoher Stufe formulierte das Modell bisher dicht,
+  // nominalisiert und mit weggelassenen Bezügen ("Wörter aneinandergereiht") – die
+  // Aufgabe versteckte, was sie verlangt. Diese Regel trennt beide Achsen: der
+  // Inhalt bleibt anspruchsvoll (Methode weiterhin NICHT vorgesagt), aber der
+  // Aufgabentext ist nach einmaligem Lesen eindeutig verständlich.
+  const klar = ` KLARE FORMULIERUNG (verbindlich, unabhängig vom Niveau): Die Herausforderung liegt im LÖSEN der Aufgabe, niemals im Entschlüsseln der Frage. Formuliere jeden (Teil-)Auftrag in klaren, vollständigen Sätzen mit einem konkreten, greifbaren Szenario und einer eindeutigen Handlungsaufforderung ("Berechne …", "Bestimme …", "Erläutere …", "Begründe …", "Vergleiche …"). Sage klar, WELCHE Form/Art von Ergebnis erwartet wird (Zahl mit Einheit, Begründung in Sätzen, Vergleich, Skizze) – das verrät NICHT die Methode. Vermeide verschachtelte Schachtelsätze, gestapelten Nominalstil und weggelassene Bezugswörter. Wenn ein Fachbegriff nötig ist, verwende ihn korrekt, aber baue die Aufgabe nicht künstlich kompliziert im Ausdruck. Prüfe vor der Ausgabe: Wüsste ein/e Studierende/r nach EINMALIGEM Lesen genau, WAS zu tun ist? Wenn nein, formuliere klarer.`;
+  const integrate = `${sibTxt}${zielTxt} Baue eine MEHRTEILIGE Aufgabe (Teil a, b, c …), deren Teile aufeinander aufbauen. Der Studierende muss SELBST erkennen, welche Methode/welches Konzept je Teil greift – nenne das NICHT vorab. WENN ein späterer Teil (Interpretation, Diskussion, Begründung, ökonomische Einordnung, "Erläutere"/"Diskutiere") inhaltlich auf dem ZAHLENERGEBNIS eines früheren Rechen-Teils aufbaut, MUSS der Aufgabentext dieses Teils ausdrücklich den Bezug auf die selbst berechneten Werte verlangen – formuliere es unmissverständlich (z.B. "Interpretiere dein in Teil a) berechnetes Ergebnis …", "Begründe anhand deiner Werte aus a), warum …"). Es darf NICHT offen bleiben, ob eine allgemeine oder eine zahlengestützte Antwort erwartet wird; verlange den Zahlenbezug explizit.${klar}`;
   switch (effLevel.diff) {
     case 'leicht':
       return `Niveau: GRUNDLAGEN (Stufe 2 von 5).
@@ -6443,7 +6450,7 @@ AUFGABE: Eine zusammengesetzte, klausurnahe Aufgabe.${integrate}${examSnippet}`;
     case 'pruefungsnah':
       return `Niveau: EXPERTE (Stufe 5 von 5).
 ERKLÄRUNG: Prüfungsqualität. "Was ist das?" = exakte wissenschaftliche Definition wie in einem Lehrbuch. "Warum wichtig?" = theoretische Fundierung, Herleitung, Abgrenzung zu ähnlichen Konzepten. "Beispiel" = Fallstudie oder Prüfungsbeispiel mit vollständigem Lösungsweg. Rechenbeispiel: vollständig ausformuliert mit Formelangaben, Einheiten, Interpretation des Ergebnisses.
-AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil und Prüfungssprache.${integrate}${examSnippet}`;
+AUFGABE: Eine vollständige Klausuraufgabe im Prüfungsformat mit Punkteangabe je Teil. Präzise Fachbegriffe wie in einer Prüfung – aber klar strukturiert und unmissverständlich, NICHT künstlich verschachtelt.${integrate}${examSnippet}`;
     default:
       return `Niveau: EINSTEIGER (Stufe 1 von 5).
 ERKLÄRUNG: Erkläre als ob der Student das Thema noch nie gehört hat. Kein Vorwissen annehmen. Kurz, klar, mit einfachsten Worten. Rechenbeispiel nur wenn unbedingt nötig, dann maximal ein Schritt.
