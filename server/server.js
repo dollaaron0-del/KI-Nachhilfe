@@ -800,7 +800,10 @@ async function setKbStatus(subjectId, status) {
 }
 
 // Themen-Landkarte je Fach aus den chunks neu aufbauen.
-async function rebuildSubjectKb(subjectId) {
+// forceStatus: überschreibt das aus der Chunk-Zahl abgeleitete Ergebnis (z.B.
+// 'pending' bei Budget-Abbruch) – so wird der Status atomar im selben Write gesetzt
+// und es entsteht kein kurzes 'ready'-Sichtbarkeitsfenster vor einer Korrektur.
+async function rebuildSubjectKb(subjectId, forceStatus) {
   const { rows } = await pool.query(
     'SELECT topic, heading FROM doc_chunks WHERE subject_id=$1 ORDER BY topic, id', [subjectId]
   );
@@ -810,7 +813,7 @@ async function rebuildSubjectKb(subjectId) {
     .map(([t, hs]) => `• ${t}: ${[...new Set(hs.filter(Boolean))].slice(0, 8).join('; ')}`)
     .join('\n');
   // 0 chunks (z.B. wegen Budget-Stopp) NICHT als 'ready' ausweisen → 'pending'.
-  const status = rows.length ? 'ready' : 'pending';
+  const status = forceStatus || (rows.length ? 'ready' : 'pending');
   await pool.query(
     `INSERT INTO subject_kb (subject_id, overview, status, updated_at)
      VALUES ($1,$2,$3,now())
@@ -852,10 +855,8 @@ async function indexDocument(subjectId, documentId, opts = {}) {
          Math.round((c.content || '').length / 4), emb ? JSON.stringify(emb) : null]
       );
     }
-    if (!opts.skipFinalize) {
-      await rebuildSubjectKb(subjectId);
-      if (budgetHit) await setKbStatus(subjectId, 'pending');   // Doku nur teil-indexiert
-    }
+    // budgetHit → 'pending' atomar im rebuild setzen (Doku nur teil-indexiert).
+    if (!opts.skipFinalize) await rebuildSubjectKb(subjectId, budgetHit ? 'pending' : undefined);
     return budgetHit ? 'budget' : 'ok';
   } catch (e) {
     console.error('indexDocument failed:', e.message);
@@ -1118,10 +1119,10 @@ app.post('/api/subjects/:id/kb/reindex', async (req, res) => {
           const st = await indexDocument(sid, d.id, { skipFinalize: true });
           if (st === 'budget') { budgetHit = true; break; }   // Rest bliebe un-indexiert → abbrechen
         }
-        await rebuildSubjectKb(sid);   // Overview bauen + Status
-        // Budget-Abbruch mitten im Batch → KB ist unvollständig, NICHT als 'ready'
-        // ausweisen (der Client nutzt bei 'pending' den vollständigen Inline-Pfad).
-        if (budgetHit) await setKbStatus(sid, 'pending');
+        // Overview bauen + Status. Budget-Abbruch mitten im Batch → KB ist
+        // unvollständig, NICHT als 'ready' ausweisen (der Client nutzt bei
+        // 'pending' den vollständigen Inline-Pfad) – atomar im rebuild gesetzt.
+        await rebuildSubjectKb(sid, budgetHit ? 'pending' : undefined);
       } catch (e) { console.error('KB reindex failed:', e.message); await setKbStatus(sid, 'error'); }
     })();
   } catch (e) { res.status(500).json({ error: e.message }); }
