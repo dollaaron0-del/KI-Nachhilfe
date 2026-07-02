@@ -696,6 +696,39 @@ function safeJsonExtract(text) {
   try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
 }
 
+// Bergung aus abgeschnittenem JSON: extrahiert die vollständigen Objekte aus dem
+// "chunks"-Array einzeln, selbst wenn die Ausgabe mitten im Array abgeschnitten
+// wurde (stop_reason=max_tokens). Ein unvollständiges letztes Objekt wird nie
+// geschlossen → fällt automatisch weg, der Rest bleibt erhalten. String-/Escape-
+// bewusst, damit '{' oder '}' innerhalb von Werten nicht die Klammerzählung stört.
+function salvageChunks(text) {
+  if (!text) return [];
+  const key = text.indexOf('"chunks"');
+  if (key < 0) return [];   // ohne "chunks"-Key kein verlässlicher Array-Anker → nichts bergen
+  const start = text.indexOf('[', key);
+  if (start < 0) return [];
+  const out = [];
+  let depth = 0, objStart = -1, inStr = false, esc = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') { if (depth === 0) objStart = i; depth++; }
+    else if (ch === '}') {
+      if (--depth === 0 && objStart >= 0) {
+        try { out.push(JSON.parse(text.slice(objStart, i + 1))); } catch { /* unbergbar */ }
+        objStart = -1;
+      }
+    } else if (ch === ']' && depth === 0) break;   // Array regulär beendet
+  }
+  return out;
+}
+
 const KB_EXTRACT_SYS = `Du strukturierst die Lernunterlagen eines Studenten in eine kompakte, durchsuchbare Wissensbasis.
 Gib AUSSCHLIESSLICH ein JSON-Objekt zurück – kein Text davor oder danach:
 {
@@ -714,6 +747,8 @@ REGELN: Nur Inhalte aus dem Auszug, KEIN Allgemeinwissen, nichts hinzudichten. F
 Zerlege nach inhaltlichen Einheiten (nicht nach Seiten). Jeder chunk muss FÜR SICH verständlich sein (max ~250 Wörter). Antworte auf Deutsch.`;
 
 // Ein Dokument per Sonnet in chunks zerlegen (große Dokumente in Fenstern).
+// Rückgabe: { chunks, truncated, budgetHit } – truncated = Anzahl geborgener
+// (abgeschnittener) Fenster, budgetHit = Abbruch wegen Tagesbudget.
 async function structureDocument(content, filename) {
   const WINDOW = 24000, MAX_WINDOWS = 8;   // Kostendeckel für sehr große Dokumente
   const windows = [];
@@ -721,19 +756,39 @@ async function structureDocument(content, filename) {
     windows.push(content.slice(i, i + WINDOW));
   }
   const chunks = [];
-  for (const w of windows) {
+  let truncated = 0, budgetHit = false;
+  for (let wi = 0; wi < windows.length; wi++) {
+    // Budget ZWISCHEN den Fenstern prüfen, damit ein einzelnes Riesen-Dokument
+    // das Tagesbudget nicht in einem Rutsch (bis zu 8 Sonnet-Calls) überschreitet.
+    if (wi > 0) {
+      const { cost } = await checkDailyLimit();
+      if (cost >= await getDailyLimit()) { budgetHit = true; break; }
+    }
     const r = await callClaude({
-      model: 'claude-sonnet-4-6', max_tokens: 4096,
+      // max_tokens großzügig: ein 24k-Fenster erzeugt oft > 4096 Tokens JSON →
+      // sonst mittendrin abgeschnitten → 0 Chunks trotz voller Sonnet-Kosten.
+      model: 'claude-sonnet-4-6', max_tokens: 8192,
       system: KB_EXTRACT_SYS,
-      messages: [{ role: 'user', content: `Dateiname: ${filename}\n\nAUSZUG:\n${w}` }],
-    }, 2, { timeout: 90000 });   // harter 90s-Timeout: hängt ein Doku, wird es übersprungen statt alles zu blockieren
+      messages: [{ role: 'user', content: `Dateiname: ${filename}\n\nAUSZUG:\n${windows[wi]}` }],
+    }, 2, { timeout: 120000 });   // harter Timeout: hängt ein Doku, wird es übersprungen statt alles zu blockieren
     // Kosten global + unter Feature 'kb_index' erfassen (userId=null → zählt nicht
     // gegen das interaktive 1€-Tageslimit des Nutzers, ist aber im Gesamtbudget sichtbar).
-    recordUsage(new Date().toISOString().slice(0, 10), 'claude-sonnet-4-6', r.usage || {}, null, 'kb_index').catch(() => {});
-    const j = safeJsonExtract(r.content?.[0]?.text);
-    if (j && Array.isArray(j.chunks)) chunks.push(...j.chunks);
+    // await, damit die Kosten dieses Fensters im Budget-Check des nächsten Fensters (oben) sichtbar sind.
+    await recordUsage(new Date().toISOString().slice(0, 10), 'claude-sonnet-4-6', r.usage || {}, null, 'kb_index').catch(() => {});
+    const text = r.content?.[0]?.text || '';
+    let parsed = safeJsonExtract(text)?.chunks;
+    // Abgeschnitten (max_tokens) oder unparsebar → vollständige Objekte einzeln bergen.
+    if (!Array.isArray(parsed) || r.stop_reason === 'max_tokens') {
+      const salvaged = salvageChunks(text);
+      if (salvaged.length > (Array.isArray(parsed) ? parsed.length : 0)) {
+        parsed = salvaged;
+        if (r.stop_reason === 'max_tokens') truncated++;
+      }
+    }
+    if (Array.isArray(parsed)) chunks.push(...parsed);
   }
-  return chunks;
+  if (truncated) console.warn(`structureDocument: ${filename} – ${truncated} Fenster abgeschnitten, per Salvage geborgen`);
+  return { chunks, truncated, budgetHit };
 }
 
 async function setKbStatus(subjectId, status) {
@@ -768,11 +823,13 @@ async function rebuildSubjectKb(subjectId) {
 // Ein Dokument indexieren: strukturieren → embedden → speichern. Re-Index-sicher.
 // opts.skipFinalize: im Batch (Reindex ganzer Fächer) den Status NICHT pro Doku auf
 // 'ready' setzen – das macht der Aufrufer einmal am Ende.
+// Rückgabe: 'ok' | 'budget' | 'error' – der Batch-Reindex bricht bei 'budget'
+// ab und markiert die KB als unvollständig statt fälschlich 'ready'.
 async function indexDocument(subjectId, documentId, opts = {}) {
   try {
     // Budget-Schutz: bei erschöpftem Tagesbudget nicht teuer indexieren – später per Reindex.
     const { cost } = await checkDailyLimit();
-    if (cost >= await getDailyLimit()) { if (!opts.skipFinalize) await setKbStatus(subjectId, 'pending'); return; }
+    if (cost >= await getDailyLimit()) { if (!opts.skipFinalize) await setKbStatus(subjectId, 'pending'); return 'budget'; }
 
     if (!opts.skipFinalize) await setKbStatus(subjectId, 'indexing');
     const { rows } = await pool.query(
@@ -780,10 +837,10 @@ async function indexDocument(subjectId, documentId, opts = {}) {
     );
     if (!rows.length || !rows[0].content || rows[0].content.length < 20) {
       if (!opts.skipFinalize) await rebuildSubjectKb(subjectId);
-      return;
+      return 'ok';
     }
 
-    const chunks = await structureDocument(rows[0].content, rows[0].filename);
+    const { chunks, budgetHit } = await structureDocument(rows[0].content, rows[0].filename);
     await pool.query('DELETE FROM doc_chunks WHERE document_id=$1', [documentId]);  // alte Version weg
     for (const c of chunks) {
       const emb = await embedText(`${c.topic || ''} ${c.heading || ''} ${c.content || ''}`);
@@ -795,10 +852,15 @@ async function indexDocument(subjectId, documentId, opts = {}) {
          Math.round((c.content || '').length / 4), emb ? JSON.stringify(emb) : null]
       );
     }
-    if (!opts.skipFinalize) await rebuildSubjectKb(subjectId);
+    if (!opts.skipFinalize) {
+      await rebuildSubjectKb(subjectId);
+      if (budgetHit) await setKbStatus(subjectId, 'pending');   // Doku nur teil-indexiert
+    }
+    return budgetHit ? 'budget' : 'ok';
   } catch (e) {
     console.error('indexDocument failed:', e.message);
     if (!opts.skipFinalize) await setKbStatus(subjectId, 'error');
+    return 'error';
   }
 }
 
@@ -1051,8 +1113,15 @@ app.post('/api/subjects/:id/kb/reindex', async (req, res) => {
       try {
         await pool.query('DELETE FROM doc_chunks WHERE subject_id=$1', [sid]).catch(() => {});
         await setKbStatus(sid, 'indexing');
-        for (const d of docs) await indexDocument(sid, d.id, { skipFinalize: true });
-        await rebuildSubjectKb(sid);   // Status einmal am Ende auf 'ready'
+        let budgetHit = false;
+        for (const d of docs) {
+          const st = await indexDocument(sid, d.id, { skipFinalize: true });
+          if (st === 'budget') { budgetHit = true; break; }   // Rest bliebe un-indexiert → abbrechen
+        }
+        await rebuildSubjectKb(sid);   // Overview bauen + Status
+        // Budget-Abbruch mitten im Batch → KB ist unvollständig, NICHT als 'ready'
+        // ausweisen (der Client nutzt bei 'pending' den vollständigen Inline-Pfad).
+        if (budgetHit) await setKbStatus(sid, 'pending');
       } catch (e) { console.error('KB reindex failed:', e.message); await setKbStatus(sid, 'error'); }
     })();
   } catch (e) { res.status(500).json({ error: e.message }); }

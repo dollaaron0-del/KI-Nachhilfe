@@ -4,7 +4,7 @@
 // #app-version-Label geschrieben → zeigt, welcher app.js wirklich geladen ist
 // (statt eines fest verdrahteten, veraltenden Texts in index.html). Bei jedem
 // Asset-Bump hier UND in index.html (?v=) UND in sw.js erhöhen.
-const APP_VERSION = '250';
+const APP_VERSION = '251';
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('app-version');
   if (!el) return;
@@ -691,6 +691,17 @@ async function claudeVision(base64, textPrompt, systemBlocks, maxTokens = 1500) 
 const PDF_OCR_MIN_CHARS   = 20;
 const PDF_OCR_TARGET_EDGE = 2000;
 const PDF_OCR_MAX_SCALE   = 3;
+// Grafik-Slide-Erkennung: Vorlesungsfolien tragen oft eine Fußzeile (Name/©/
+// Seitenzahl) auf JEDER Seite. Ein Schaubild (z. B. SMART-Pyramide, BCG-Matrix)
+// liegt dann als seitenfüllendes Bild vor, während die Textebene nur die
+// Fußzeile liefert → die <20-Zeichen-Regel greift nicht und der Bildinhalt geht
+// verloren. Deshalb: Seiten mit einem großen Bild (≥ PDF_OCR_IMG_COVERAGE der
+// Seitenfläche) UND spärlicher Textebene (< PDF_OCR_SPARSE_CHARS, i. d. R. nur
+// Fußzeile/Titel) ebenfalls per OCR lesen. PDF_OCR_MAX_IMG_PAGES deckelt die
+// Kosten pro Dokument (jede OCR-Seite ist ein Vision-Call).
+const PDF_OCR_SPARSE_CHARS  = 200;
+const PDF_OCR_IMG_COVERAGE  = 0.45;
+const PDF_OCR_MAX_IMG_PAGES = 40;
 const PDF_OCR_SYS = 'Du bist eine präzise OCR-Engine für deutschsprachige Studien- und Schulunterlagen. Du gibst den Text einer Dokumentseite exakt und vollständig wieder.';
 const PDF_OCR_PROMPT = `Transkribiere den GESAMTEN Inhalt dieser Dokumentseite als reinen Text – exakt so, wie er dasteht. Gib NUR den Inhalt zurück: keine Einleitung, keine Kommentare, keine Code-Fences. Behalte Überschriften, Absätze, Aufzählungen und Tabellenzeilen in sinnvoller Lesereihenfolge bei. Formeln in Klartext bzw. LaTeX. Rein bildliche Abbildungen (Fotos, Grafiken ohne Text) NICHT beschreiben. Ist die Seite leer, antworte mit gar nichts.`;
 
@@ -712,19 +723,72 @@ async function ocrPdfPage(page) {
   return (txt || '').trim();
 }
 
+// Bild-Operatoren, deren gezeichnete Fläche wir gegen die Seitenfläche messen.
+const PDF_IMAGE_OPS = new Set([
+  pdfjsLib.OPS.paintImageXObject,
+  pdfjsLib.OPS.paintInlineImageXObject,
+  pdfjsLib.OPS.paintImageMaskXObject,
+  pdfjsLib.OPS.paintImageXObjectRepeat,
+].filter(v => v != null));
+
+// Größter Anteil der Seitenfläche, den ein einzelnes Bild bedeckt (0…1). Wir
+// verfolgen dazu die aktuelle Transformationsmatrix (CTM) durch die Operator-
+// liste; Bilder werden im Einheitsquadrat [0,1]² gezeichnet, ihre Kantenlänge in
+// Nutzereinheiten ist also die Skalierung der CTM.
+async function pageImageCoverage(page) {
+  let opList;
+  try { opList = await page.getOperatorList(); } catch { return 0; }
+  const OPS = pdfjsLib.OPS;
+  const vp = page.getViewport({ scale: 1 });
+  const pageArea = vp.width * vp.height;
+  if (!pageArea) return 0;
+  const mul = (a, b) => [
+    a[0] * b[0] + a[2] * b[1],       a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3],       a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5],
+  ];
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const stack = [];
+  let maxFrac = 0;
+  for (let i = 0; i < opList.fnArray.length; i++) {
+    const fn = opList.fnArray[i];
+    if (fn === OPS.save) stack.push(ctm.slice());
+    else if (fn === OPS.restore) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === OPS.transform) ctm = mul(ctm, opList.argsArray[i]);
+    else if (PDF_IMAGE_OPS.has(fn)) {
+      const w = Math.hypot(ctm[0], ctm[1]);
+      const h = Math.hypot(ctm[2], ctm[3]);
+      const frac = (w * h) / pageArea;
+      if (frac > maxFrac) maxFrac = frac;
+    }
+  }
+  return maxFrac;
+}
+
 async function extractPDF(file, onProgress) {
   const ab  = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
   let text  = `\n\n=== ${file.name} ===\n`;
-  let ocrPages = 0;
+  let ocrPages    = 0;   // Seiten, deren Text durch OCR ersetzt wurde
+  let imgOcrTries = 0;   // Grafik-Slide-OCR-Versuche (kostengedeckelt)
   for (let i = 1; i <= pdf.numPages; i++) {
     const page    = await pdf.getPage(i);
     const content = await page.getTextContent();
     let pageText  = content.items.map(it => it.str).join(' ').trim();
+    const nonWs   = pageText.replace(/\s/g, '').length;
     // Bild-/Scan-Seite: kaum extrahierbarer Text → Seite per Vision-OCR lesen.
-    if (pageText.replace(/\s/g, '').length < PDF_OCR_MIN_CHARS) {
+    let needOcr = nonWs < PDF_OCR_MIN_CHARS;
+    // Grafik-Slide mit nur Fußzeilen-Text: großes Bild + spärliche Textebene →
+    // der Bildinhalt (Schaubilder) ginge sonst verloren. Kosten gedeckelt.
+    if (!needOcr && nonWs < PDF_OCR_SPARSE_CHARS && imgOcrTries < PDF_OCR_MAX_IMG_PAGES) {
+      const cov = await pageImageCoverage(page).catch(() => 0);
+      if (cov >= PDF_OCR_IMG_COVERAGE) { needOcr = true; imgOcrTries++; }
+    }
+    if (needOcr) {
       if (onProgress) onProgress(i - 1, pdf.numPages, 'ocr');
       const ocr = await ocrPdfPage(page).catch(() => '');
+      // OCR liest die ganze Seite inkl. Fußzeile → längeres Ergebnis übernehmen,
+      // damit der Grafik-Inhalt hinzukommt statt den Fußzeilentext zu ersetzen.
       if (ocr.length > pageText.length) { pageText = ocr; ocrPages++; }
     }
     text += pageText + '\n';
